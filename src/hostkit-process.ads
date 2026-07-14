@@ -49,6 +49,15 @@ package Hostkit.Process is
       Exit_Status : out Integer)
       return Boolean;
 
+   --  Ask a process we are not waiting on to stop -- one whose id we were given, rather
+   --  than one we are inside Run_Captured for. A user cancelling a build needs this.
+   --
+   --  POSIX sends SIGTERM. Windows has no signal to send: it opens the process and
+   --  terminates it, which is the only way to say it there.
+   --
+   --  @return True when the request reached the process.
+   function Request_Stop (Process_Id : Integer) return Boolean;
+
    --  Which process-control body is compiled in. Hostkit is the one thing that knows,
    --  because it is the one thing with a body per host.
    function Native_Backend_Label return String;

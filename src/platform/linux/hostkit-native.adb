@@ -273,6 +273,18 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   function Request_Stop (Process_Id : Integer) return Boolean is
+      Sigterm : constant Interfaces.C.int := 15;
+
+      function Kill (Pid : Interfaces.C.int; Signal : Interfaces.C.int) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "kill";
+   begin
+      return Kill (Interfaces.C.int (Process_Id), Sigterm) = 0;
+   exception
+      when others =>
+         return False;
+   end Request_Stop;
+
    function Native_Backend_Label return String is
    begin
       return "POSIX/fork-exec-waitpid-kill";

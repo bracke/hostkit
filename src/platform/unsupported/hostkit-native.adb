@@ -45,6 +45,12 @@ package body Hostkit.Native is
       return Nothing;
    end Run_Captured;
 
+   function Request_Stop (Process_Id : Integer) return Boolean is
+      pragma Unreferenced (Process_Id);
+   begin
+      return False;
+   end Request_Stop;
+
    function Native_Backend_Label return String is
    begin
       return "none";

@@ -179,6 +179,18 @@ package body Hostkit.Process is
          return Nothing;
    end Run_Captured;
 
+   function Request_Stop (Process_Id : Integer) return Boolean is
+   begin
+      if Process_Id <= 0 then
+         return False;
+      end if;
+
+      return Hostkit.Native.Request_Stop (Process_Id);
+   exception
+      when others =>
+         return False;
+   end Request_Stop;
+
    function Native_Backend_Label return String is
    begin
       return Hostkit.Native.Native_Backend_Label;

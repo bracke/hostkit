@@ -405,6 +405,37 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   --  Windows has no signal to send. Open the process and end it: that is the whole of
+   --  what "ask it to stop" can mean here.
+   function Request_Stop (Process_Id : Integer) return Boolean is
+      Process_Terminate : constant C_DWord := 16#0001#;
+
+      function Open_Process
+        (Access_Way : C_DWord;
+         Inherit    : Interfaces.C.int;
+         Process_Id : C_DWord)
+         return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "OpenProcess";
+
+      Handle  : System.Address;
+      Stopped : Interfaces.C.int;
+      Ignored : Interfaces.C.int;
+   begin
+      Handle := Open_Process (Process_Terminate, 0, C_DWord (Process_Id));
+
+      if Handle = System.Null_Address then
+         return False;
+      end if;
+
+      Stopped := Terminate_Process (Handle, 1);
+      Ignored := Close_Handle (Handle);
+
+      return Stopped /= 0;
+   exception
+      when others =>
+         return False;
+   end Request_Stop;
+
    function Native_Backend_Label return String is
    begin
       return "Windows/CreateProcess-TerminateProcess";

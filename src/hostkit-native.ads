@@ -43,6 +43,9 @@ private package Hostkit.Native is
       Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome;
 
+   --  Ask a process, by id, to stop. See Hostkit.Process.Request_Stop.
+   function Request_Stop (Process_Id : Integer) return Boolean;
+
    --  Which body this is.
    function Native_Backend_Label return String;
 
