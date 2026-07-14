@@ -11,6 +11,7 @@ package body Hostkit.Native is
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
    use type Hostkit.Process.Cancel_Check;
+   use type Hostkit.Process.Poll_Hook;
 
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
@@ -231,7 +232,8 @@ package body Hostkit.Native is
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
-      Cancelled         : Hostkit.Process.Cancel_Check)
+      Cancelled         : Hostkit.Process.Cancel_Check;
+      Poll              : Hostkit.Process.Poll_Hook)
       return Hostkit.Process.Process_Outcome
    is
       --  CreateProcessW takes a command line, not a vector, so the arguments have to be
@@ -376,6 +378,10 @@ package body Hostkit.Native is
             Killed := True;
             --  Nothing to ask with here. TerminateProcess is the request and the answer.
             Ignored := Terminate_Process (Information.Process, 1);
+         end if;
+
+         if Poll /= null then
+            Poll.all;
          end if;
       end loop;
 

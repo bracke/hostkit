@@ -60,6 +60,11 @@ package Hostkit.Process is
    --  timeout does. Null means nothing can cancel it.
    type Cancel_Check is access function return Boolean;
 
+   --  Called periodically while waiting, so a caller can do something with the output as
+   --  it arrives rather than only once the program has finished. A build that streams its
+   --  progress needs this; without it the output appears all at once, at the end.
+   type Poll_Hook is access procedure;
+
    --  Run a program to completion, with its output captured to files, under a deadline.
    --
    --  This is what a tool runner needs and Run does not give it: somewhere for the
@@ -86,7 +91,8 @@ package Hostkit.Process is
       Stdout_Path       : String := "";
       Stderr_Path       : String := "";
       Timeout_Ms        : Natural := 0;
-      Cancelled         : Cancel_Check := null)
+      Cancelled         : Cancel_Check := null;
+      Poll              : Poll_Hook := null)
       return Process_Outcome;
 
    --  Start whatever the host thinks this path is: a document in its default

@@ -12,6 +12,7 @@ package body Hostkit.Native is
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
    use type Hostkit.Process.Cancel_Check;
+   use type Hostkit.Process.Poll_Hook;
    use type Interfaces.C.int;
    use type GNAT.OS_Lib.Process_Id;
    use type GNAT.OS_Lib.String_Access;
@@ -73,7 +74,8 @@ package body Hostkit.Native is
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
-      Cancelled         : Hostkit.Process.Cancel_Check)
+      Cancelled         : Hostkit.Process.Cancel_Check;
+      Poll              : Hostkit.Process.Poll_Hook)
       return Hostkit.Process.Process_Outcome
    is
       use type Interfaces.C.Strings.chars_ptr;
@@ -252,6 +254,10 @@ package body Hostkit.Native is
             if Waitpid (Child, Status'Address, WNOHANG) /= Child then
                Ignored := Kill (Child, Sigkill);
             end if;
+         end if;
+
+         if Poll /= null then
+            Poll.all;
          end if;
 
          delay 0.005;

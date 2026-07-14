@@ -22,7 +22,7 @@ RV NO_DYNAMIC_SIZED_OBJECTS
 RV NO_IMPLEMENTATION_PRAGMAS
 RV NO_ELABORATION_CODE
 
-U hostkit.native%b	hostkit-native.adb	869b8639 OO PK
+U hostkit.native%b	hostkit-native.adb	138986bc OO PK
 W ada%s			ada.ads			ada.ali
 W ada.calendar%s	a-calend.adb		a-calend.ali
 W ada.strings%s		a-string.ads		a-string.ali
@@ -36,7 +36,7 @@ W interfaces.c%s	i-c.adb			i-c.ali
 W interfaces.c.strings%s  i-cstrin.adb		i-cstrin.ali
 W system%s		system.ads		system.ali
 
-U hostkit.native%s	hostkit-native.ads	2c3839b3 EE OO PK
+U hostkit.native%s	hostkit-native.ads	ba3d5868 EE OO PK
 W hostkit%s		hostkit.ads		hostkit.ali
 W hostkit.process%s	hostkit-process.adb	hostkit-process.ali
 
@@ -61,9 +61,9 @@ D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
 D gnat.ads		20250808065140 b5988c27 gnat%s
 D g-os_lib.ads		20250808065140 0db74523 gnat.os_lib%s
 D hostkit.ads		20260714164643 92b5a8d1 hostkit%s
-D hostkit-native.ads	20260714200750 8d744cd6 hostkit.native%s
-D hostkit-native.adb	20260714200853 a14dff6f hostkit.native%b
-D hostkit-process.ads	20260714200737 33f9ddb4 hostkit.process%s
+D hostkit-native.ads	20260714201240 35466f31 hostkit.native%s
+D hostkit-native.adb	20260714201240 8c6ddc0d hostkit.native%b
+D hostkit-process.ads	20260714201240 1dce9f88 hostkit.process%s
 D interfac.ads		20250808065140 9111f9c1 interfaces%s
 D i-c.ads		20250808065140 e94c966a interfaces.c%s
 D i-cstrin.ads		20250808065140 5409c1a4 interfaces.c.strings%s
@@ -79,22 +79,22 @@ G c Z s b [reap_finished_children hostkit__native 12 14 none]
 G c Z s b [supports_raw_command_line hostkit__native 22 13 none]
 G c Z s b [run_command_line hostkit__native 26 13 none]
 G c Z s b [run_captured hostkit__native 34 13 none]
-G c Z s b [open_native hostkit__native 45 13 none]
-G c Z b b [waitpid hostkit__native 24 13 none]
+G c Z s b [open_native hostkit__native 46 13 none]
+G c Z b b [waitpid hostkit__native 25 13 none]
 X 1 ada.ads
-18K9*Ada 22e8 23|1r6 2r6 12r8 13r13 124r29 124r50 144r41
+18K9*Ada 22e8 23|1r6 2r6 12r8 13r13 126r29 126r50 146r41
 X 2 a-calend.ads
-36K13*Calendar 440e17 23|1w10 13r17 124r33 124r54 144r45
-42I9*Time<226I9> 23|13r26 124r42
-56V13*Clock{42I9} 23|124s63 144s54
-112V14*"-"{duration} 23|144s60
+36K13*Calendar 440e17 23|1w10 13r17 126r33 126r54 146r45
+42I9*Time<226I9> 23|13r26 126r42
+56V13*Clock{42I9} 23|126s63 146s54
+112V14*"-"{duration} 23|146s60
 226I9 Time_Rep<long_long_integer>
 X 5 a-contai.ads
 22I9*Count_Type<integer>
 X 7 a-convec.ads
-91R9*Vector<8|43R9> 22|36r42[21|27] 23|71r42[21|27]
-175V13*Length{5|22I9} 23|116s58[21|27]
-206V13*Element{15|105R9} 23|185s66[21|27]
+91R9*Vector<8|43R9> 22|36r42[21|27] 23|72r42[21|27]
+175V13*Length{5|22I9} 23|118s58[21|27]
+206V13*Element{15|105R9} 23|187s66[21|27]
 X 9 a-iteint.ads
 24h9 Forward_Iterator
 32h9 Reversible_Iterator<24R9[7|119]>
@@ -102,143 +102,146 @@ X 11 a-string.ads
 16K13*Strings 35e16 23|2r10 12r12
 X 15 a-strunb.ads
 91K21*Unbounded 1641e26 23|2w18 12r20
-135V13*To_String{string} 23|185s45
+135V13*To_String{string} 23|187s45
 X 19 gnat.ads
-40K9*GNAT 63e9 23|4r6 16r13 17r13 267r18 267r47 269r27 271r18 277r18 278r7
-. 280r20 289r13
+40K9*GNAT 63e9 23|4r6 17r13 18r13 273r18 273r47 275r27 277r18 283r18 284r7
+. 286r20 295r13
 X 20 g-os_lib.ads
-51K14*OS_Lib=51:36 23|4w11 16r18 17r18 267r23 267r52 269r32 271r23 277r23
-. 278r12 280r25 289r18
+51K14*OS_Lib=51:36 23|4w11 17r18 18r18 273r23 273r52 275r32 277r23 283r23
+. 284r12 286r25 295r18
 X 21 hostkit.ads
-23K9*Hostkit 32e12 22|3r6 5r17 41r27 42r14 47r5 23|11r14 14r13 76r27 77r14
-. 127r20 294r5
-27K12*String_Vectors[7|74] 22|36r27 23|71r27
+23K9*Hostkit 32e12 22|3r6 5r17 41r27 42r27 43r14 48r5 23|11r14 14r13 15r13
+. 77r27 78r27 79r14 129r20 300r5
+27K12*String_Vectors[7|74] 22|36r27 23|72r27
 X 22 hostkit-native.ads
-5K25*Native 21|23k9 22|47l13 47e19 23|11b22 294l13 294t19
-12U14*Reap_Finished_Children 23|31b14 41l8 41t30 284s7
-22V13*Supports_Raw_Command_Line{boolean} 23|45b13 48l8 48t33
-26V13*Run_Command_Line{boolean} 27>7 28>7 29<7 23|50b13 60l8 60t24
-27a7 Command{string} 23|51b7 56r28
-28b7 Wait{boolean} 23|52b7 56r37
-29i7 Exit_Status{integer} 23|53b7 58m7
-34V13*Run_Captured{24|53R9} 35>7 36>7 37>7 38>7 39>7 40>7 41>7 23|69b13 262l8
-. 262t20
-35a7 Program{string} 23|70b7 119r42 182r52
-36r7 Arguments{7|91R9[21|27]} 23|71b7 116r48 185r56
-37a7 Working_Directory{string} 23|72b7 207r13 210r51
-38a7 Stdout_Path{string} 23|73b7 199r13 200r23
-39a7 Stderr_Path{string} 23|74b7 203r13 204r23
-40i7 Timeout_Ms{natural} 23|75b7 150r17 151r51
-41p7 Cancelled{24|61P9} 23|76b7 146r13 146r40
-45V13*Open_Native{boolean} 45>26 23|264b13 292l8 292t19
-45a26 Path{string} 23|264b26 268r36
+5K25*Native 21|23k9 22|48l13 48e19 23|11b22 300l13 300t19
+12U14*Reap_Finished_Children 23|32b14 42l8 42t30 290s7
+22V13*Supports_Raw_Command_Line{boolean} 23|46b13 49l8 49t33
+26V13*Run_Command_Line{boolean} 27>7 28>7 29<7 23|51b13 61l8 61t24
+27a7 Command{string} 23|52b7 57r28
+28b7 Wait{boolean} 23|53b7 57r37
+29i7 Exit_Status{integer} 23|54b7 59m7
+34V13*Run_Captured{24|53R9} 35>7 36>7 37>7 38>7 39>7 40>7 41>7 42>7 23|70b13
+. 268l8 268t20
+35a7 Program{string} 23|71b7 121r42 184r52
+36r7 Arguments{7|91R9[21|27]} 23|72b7 118r48 187r56
+37a7 Working_Directory{string} 23|73b7 209r13 212r51
+38a7 Stdout_Path{string} 23|74b7 201r13 202r23
+39a7 Stderr_Path{string} 23|75b7 205r13 206r23
+40i7 Timeout_Ms{natural} 23|76b7 152r17 153r51
+41p7 Cancelled{24|61P9} 23|77b7 148r13 148r40
+42p7 Poll{24|66P9} 23|78b7 259r13 260r13
+46V13*Open_Native{boolean} 46>26 23|270b13 298l8 298t19
+46a26 Path{string} 23|270b26 274r36
 X 23 hostkit-native.adb
-19i4 WNOHANG{26|62I9} 35r57 232r55 252r48
-24V13 Waitpid{26|62I9} 25>7 26>7 27>7 35s23 232s23 252s16
-25i7 Pid{26|62I9}
-26m7 Status{28|67M9}
-27i7 Options{26|62I9}
-32i7 Collected{26|62I9} 35m10 36r20
-81I15 C_Int{26|62I9} 86r28 90r18 92r17 94r39 94r53 96r30 96r44 98r69 103r17
-. 105r28 105r44 105r58 107r43 110r27 111r27 112r27 113r27 114r27 121r20 122r28
-. 123r20 126r20 156r33 167r54 170r29 172r20 211r35
-83A12 C_Argv(27|65P9)<integer> 117r19
-86V16*Fork{81I15} 189s16
-88V16*C_Open{81I15} 89>10 90>10 91>10 171s12
-89p10 Path{27|65P9}
-90i10 Flags{81I15}
-91m10 Mode{26|71M9}
-94V16*Dup2{81I15} 94>22 94>30 177s24
-94i22 Old_Fd{81I15}
-94i30 New_Fd{81I15}
-96V16*C_Close{81I15} 96>25 178s24
-96i25 Fd{81I15}
-98V16*Chdir{81I15} 98>23 211s44
-98p23 Path{27|65P9}
-100V16*Execvp{81I15} 101>10 102>10 221s13
-101p10 File{27|65P9}
-102m10 Argv{28|67M9}
-105V16*Kill{81I15} 105>22 105>35 248s24 253s27
-105i22 Pid{81I15}
-105i35 Signal{81I15}
-107U17*Underscore_Exit 107>34 216s19 222s13 225s10
-107i34 Status{81I15}
-110i7 O_Wronly{81I15} 171r28
-111i7 O_Creat{81I15} 171r39
-112i7 O_Trunc{81I15} 171r49
-113i7 Sigterm{81I15} 248r37
-114i7 Sigkill{81I15} 253r40
-116i7 Count{natural} 117r32 183r25 187r13
-117a7 Argv{83A12} 131r23 132r16 133m43 133r43 182m7 184m10 187m7 221m32 221r32
-118p7 Program_C{27|65P9} 137r13 138m40 138r40 221r21
-121i7 Child{81I15} 189m7 191r10 196r10 232r32 234r25 248r30 252r25 252r60
-. 253r33
-122i7 Status{81I15} 232m39 232r39 235r46 252m32 252r32
-123i7 Collected{81I15} 232m10 234r13 240r13
-124i7 Started_At{2|42I9} 144r62
-125b7 Killed{boolean} 236r33 242r33 246r17 247m13
-126i7 Ignored{81I15} 248m13 253m16
-127r7 Result{24|53R9} 193r17 229m7 235m13 236m13 242m13 261r14
-129U17 Free_Argv 129b17 140l11 140t20 192s10 260s7
-131i14 Index{integer} 132r22 133r49
-143V16 Should_Stop{boolean} 143b16 152l11 152t22 246s33
-144o10 Elapsed{duration} 151r21
-156V16 Exit_Code{integer} 156b16 156>27 165l11 165t20 235s35
-156i27 Raw{81I15} 157r48
-157i10 Value{integer} 158r39 161r21
-158i10 Signal{integer} 160r13 164r23
-167U17 Redirect 167b17 167>27 167>42 180l11 180t19 200s13 204s13
-167a27 Path{string} 169r45
-167i42 Target_Fd{81I15} 177r38
-168p10 Path_C{27|65P9} 171r20 174m37 174r37
-170i10 Opened{81I15} 176r13 177r30 178r33
-172i10 Ignored{81I15} 177m13 178m13
-183i11 Index{integer} 184r16 185r75
-209p16 Dir_C{27|65P9} 211r51 213m43 213r43
-211i16 Changed{81I15} 215r19
-266a7 Opener{string} 267r80
-267p7 Located{31|64P12} 273r10 277r50 278m25 278r25 288r13 289m31 289r31
-268a7 Argument{string} 270m15 270r15
-269a7 Args{31|749A12} 277r63
-271i7 Started{31|759I9} 277m7 280r10
+20i4 WNOHANG{26|62I9} 36r57 234r55 254r48
+25V13 Waitpid{26|62I9} 26>7 27>7 28>7 36s23 234s23 254s16
+26i7 Pid{26|62I9}
+27m7 Status{28|67M9}
+28i7 Options{26|62I9}
+33i7 Collected{26|62I9} 36m10 37r20
+83I15 C_Int{26|62I9} 88r28 92r18 94r17 96r39 96r53 98r30 98r44 100r69 105r17
+. 107r28 107r44 107r58 109r43 112r27 113r27 114r27 115r27 116r27 123r20 124r28
+. 125r20 128r20 158r33 169r54 172r29 174r20 213r35
+85A12 C_Argv(27|65P9)<integer> 119r19
+88V16*Fork{83I15} 191s16
+90V16*C_Open{83I15} 91>10 92>10 93>10 173s12
+91p10 Path{27|65P9}
+92i10 Flags{83I15}
+93m10 Mode{26|71M9}
+96V16*Dup2{83I15} 96>22 96>30 179s24
+96i22 Old_Fd{83I15}
+96i30 New_Fd{83I15}
+98V16*C_Close{83I15} 98>25 180s24
+98i25 Fd{83I15}
+100V16*Chdir{83I15} 100>23 213s44
+100p23 Path{27|65P9}
+102V16*Execvp{83I15} 103>10 104>10 223s13
+103p10 File{27|65P9}
+104m10 Argv{28|67M9}
+107V16*Kill{83I15} 107>22 107>35 250s24 255s27
+107i22 Pid{83I15}
+107i35 Signal{83I15}
+109U17*Underscore_Exit 109>34 218s19 224s13 227s10
+109i34 Status{83I15}
+112i7 O_Wronly{83I15} 173r28
+113i7 O_Creat{83I15} 173r39
+114i7 O_Trunc{83I15} 173r49
+115i7 Sigterm{83I15} 250r37
+116i7 Sigkill{83I15} 255r40
+118i7 Count{natural} 119r32 185r25 189r13
+119a7 Argv{85A12} 133r23 134r16 135m43 135r43 184m7 186m10 189m7 223m32 223r32
+120p7 Program_C{27|65P9} 139r13 140m40 140r40 223r21
+123i7 Child{83I15} 191m7 193r10 198r10 234r32 236r25 250r30 254r25 254r60
+. 255r33
+124i7 Status{83I15} 234m39 234r39 237r46 254m32 254r32
+125i7 Collected{83I15} 234m10 236r13 242r13
+126i7 Started_At{2|42I9} 146r62
+127b7 Killed{boolean} 238r33 244r33 248r17 249m13
+128i7 Ignored{83I15} 250m13 255m16
+129r7 Result{24|53R9} 195r17 231m7 237m13 238m13 244m13 267r14
+131U17 Free_Argv 131b17 142l11 142t20 194s10 266s7
+133i14 Index{integer} 134r22 135r49
+145V16 Should_Stop{boolean} 145b16 154l11 154t22 248s33
+146o10 Elapsed{duration} 153r21
+158V16 Exit_Code{integer} 158b16 158>27 167l11 167t20 237s35
+158i27 Raw{83I15} 159r48
+159i10 Value{integer} 160r39 163r21
+160i10 Signal{integer} 162r13 166r23
+169U17 Redirect 169b17 169>27 169>42 182l11 182t19 202s13 206s13
+169a27 Path{string} 171r45
+169i42 Target_Fd{83I15} 179r38
+170p10 Path_C{27|65P9} 173r20 176m37 176r37
+172i10 Opened{83I15} 178r13 179r30 180r33
+174i10 Ignored{83I15} 179m13 180m13
+185i11 Index{integer} 186r16 187r75
+211p16 Dir_C{27|65P9} 213r51 215m43 215r43
+213i16 Changed{83I15} 217r19
+272a7 Opener{string} 273r80
+273p7 Located{31|64P12} 279r10 283r50 284m25 284r25 294r13 295m31 295r31
+274a7 Argument{string} 276m15 276r15
+275a7 Args{31|749A12} 283r63
+277i7 Started{31|759I9} 283m7 286r10
 X 24 hostkit-process.ads
-17K17*Process 22|3w14 41r35 42r22 23|14r21 76r35 77r22 127r28 24|102e20
-53R9*Process_Outcome 22|42r30 23|77r30 127r36 24|57e14
-54b7*Started{boolean} 23|229m14
-55b7*Timed_Out{boolean} 23|236m20 242m20
-56i7*Exit_Status{integer} 23|235m20
-61P9*Cancel_Check(boolean) 22|41r43 23|14r29 76r43
+17K17*Process 22|3w14 41r35 42r35 43r22 23|14r21 15r21 77r35 78r35 79r22
+. 129r28 24|108e20
+53R9*Process_Outcome 22|43r30 23|79r30 129r36 24|57e14
+54b7*Started{boolean} 23|231m14
+55b7*Timed_Out{boolean} 23|238m20 244m20
+56i7*Exit_Status{integer} 23|237m20
+61P9*Cancel_Check(boolean) 22|41r43 23|14r29 77r43
+66P9*Poll_Hook 22|42r43 23|15r29 78r43
 X 25 interfac.ads
-47K9*Interfaces 23|6r6 7r6 15r13 19r23 25r17 27r17 28r14 32r19 79r16 81r24
-. 83r58 89r18 91r18 98r30 101r17 118r19 119r9 132r32 133r16 137r26 138r13
-. 168r20 169r12 174r10 182r19 185r12 187r27 209r26 210r18 213r16 25|247e15
+47K9*Interfaces 23|6r6 7r6 16r13 20r23 26r17 28r17 29r14 33r19 81r16 83r24
+. 85r58 91r18 93r18 100r30 103r17 120r19 121r9 134r32 135r16 139r26 140r13
+. 170r20 171r12 176r10 184r19 187r12 189r27 211r26 212r18 215r16 25|247e15
 X 26 i-c.ads
-33K20*C 23|6r17 7w17 15r24 19r34 25r28 27r28 28r25 32r30 79r27 81r35 83r69
-. 89r29 91r29 98r41 101r28 118r30 119r20 132r43 133r27 137r37 138r24 168r31
-. 169r23 174r21 182r30 185r23 187r38 209r37 210r29 213r27 26|601e17
-62I9*int<integer> 23|15r26 19r36 25r30 27r30 28r27 32r32 81r37
-71M9*unsigned 23|91r31
+33K20*C 23|6r17 7w17 16r24 20r34 26r28 28r28 29r25 33r30 81r27 83r35 85r69
+. 91r29 93r29 100r41 103r28 120r30 121r20 134r43 135r27 139r37 140r24 170r31
+. 171r23 176r21 184r30 187r23 189r38 211r37 212r29 215r27 26|601e17
+62I9*int<integer> 23|16r26 20r36 26r30 28r30 29r27 33r32 83r37
+71M9*unsigned 23|93r31
 X 27 i-cstrin.ads
-48K22*Strings 23|6w19 79r29 83r71 89r31 98r43 101r30 118r32 119r22 132r45
-. 133r29 137r39 138r26 168r33 169r25 174r23 182r32 185r25 187r40 209r39 210r31
-. 213r29 27|171e25
-65P9*chars_ptr 23|79r37 83r79 89r39 98r51 101r38 118r40 168r41 209r47
-70p4*Null_Ptr{65P9} 23|132r53 137r47 187r48
-86V13*New_String{65P9} 23|119s30 169s33 182s40 185s33 210s39
-92U14*Free 23|133s37 138s34 174s31 213s37
+48K22*Strings 23|6w19 81r29 85r71 91r31 100r43 103r30 120r32 121r22 134r45
+. 135r29 139r39 140r26 170r33 171r25 176r23 184r32 187r25 189r40 211r39 212r31
+. 215r29 27|171e25
+65P9*chars_ptr 23|81r37 85r79 91r39 100r51 103r38 120r40 170r41 211r47
+70p4*Null_Ptr{65P9} 23|134r53 139r47 189r48
+86V13*New_String{65P9} 23|121s30 171s33 184s40 187s33 212s39
+92U14*Free 23|135s37 140s34 176s31 215s37
 X 28 system.ads
-37K9*System 23|9w6 26r17 35r36 102r17 28|155e11
-67M9*Address 23|26r24 102r24
-69m4*Null_Address{67M9} 23|35r43
+37K9*System 23|9w6 27r17 36r36 104r17 28|155e11
+67M9*Address 23|27r24 104r24
+69m4*Null_Address{67M9} 23|36r43
 X 31 s-os_lib.ads
-64P12*String_Access{33|43P9} 23|17r25 267r30
-69U14*Free=69:62 23|278s19 289s25
+64P12*String_Access{33|43P9} 23|18r25 273r30
+69U14*Free=69:62 23|284s19 295s25
 71A12*String_List{33|52A9}<integer>
-497V13*Locate_Exec_On_Path{64P12} 23|267s59
-749A12*Argument_List{71A12}<integer> 23|269r39
-759I9*Process_Id<integer> 23|16r25 271r30
-764i4*Invalid_Pid{759I9} 23|280r32
-805V13*Non_Blocking_Spawn{759I9} 23|277s30
+497V13*Locate_Exec_On_Path{64P12} 23|273s59
+749A12*Argument_List{71A12}<integer> 23|275r39
+759I9*Process_Id<integer> 23|17r25 277r30
+764i4*Invalid_Pid{759I9} 23|286r32
+805V13*Non_Blocking_Spawn{759I9} 23|283s30
 X 33 s-string.ads
 43P9*String_Access(string)
 52A9*String_List(43P9)<integer>
