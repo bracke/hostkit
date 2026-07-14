@@ -1,0 +1,133 @@
+V "GNAT Lib v15"
+A -gnatc
+A -gnat2022
+A -gnatW8
+A -gnaty3
+A -gnatyM120
+A -gnatwa
+A -gnatX
+A -mtune=generic
+A -march=x86-64
+P NO
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_UNCHECKED_ACCESS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+
+U hostkit.native%b	hostkit-native.adb	896ba2c4 OO PK
+W ada%s			ada.ads			ada.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+W gnat%s		gnat.ads		gnat.ali
+W gnat.os_lib%s		g-os_lib.ads		g-os_lib.ali
+W hostkit%s		hostkit.ads		hostkit.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W system%s		system.ads		system.ali
+
+U hostkit.native%s	hostkit-native.ads	f401e268 EE OO PK
+W hostkit%s		hostkit.ads		hostkit.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20250808065140 61e5e089 ada.containers%s
+D a-conhel.ads		20250808065140 46fe1ce3 ada.containers.helpers%s
+D a-convec.ads		20250808065140 91fb49f3 ada.containers.vectors%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-iteint.ads		20250808065140 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
+D gnat.ads		20250808065140 b5988c27 gnat%s
+D g-os_lib.ads		20250808065140 0db74523 gnat.os_lib%s
+D hostkit.ads		20260714164643 92b5a8d1 hostkit%s
+D hostkit-native.ads	20260714164740 66b44ab9 hostkit.native%s
+D hostkit-native.adb	20260714165125 ae0b2090 hostkit.native%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-os_lib.ads		20250808065140 dd4133ed system.os_lib%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-string.ads		20250808065140 582aac7d system.strings%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+G a e
+G c Z s b [reap_finished_children hostkit__native 10 14 none]
+G c Z s b [supports_raw_command_line hostkit__native 20 13 none]
+G c Z s b [run_command_line hostkit__native 24 13 none]
+G c Z s b [open_native hostkit__native 31 13 none]
+G c Z b b [waitpid hostkit__native 20 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 22|1r6 10r8
+X 8 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[6|119]>
+X 10 a-string.ads
+16K13*Strings 35e16 22|1r10 10r12
+X 14 a-strunb.ads
+91K21*Unbounded 1641e26 22|1w18 10r20
+X 18 gnat.ads
+40K9*GNAT 63e9 22|3r6 12r13 13r13 61r18 61r47 63r27 65r18 71r18 72r7 74r20
+. 83r13
+X 19 g-os_lib.ads
+51K14*OS_Lib=51:36 22|3w11 12r18 13r18 61r23 61r52 63r32 65r23 71r23 72r12
+. 74r25 83r18
+X 20 hostkit.ads
+23K9*Hostkit 32e12 21|3r17 33r5 22|9r14 88r5
+X 21 hostkit-native.ads
+3K25*Native 20|23k9 21|33l13 33e19 22|9b22 88l13 88t19
+10U14*Reap_Finished_Children 22|27b14 37l8 37t30 78s7
+20V13*Supports_Raw_Command_Line{boolean} 22|41b13 44l8 44t33
+24V13*Run_Command_Line{boolean} 25>7 26>7 27<7 22|46b13 56l8 56t24
+25a7 Command{string} 22|47b7 52r28
+26b7 Wait{boolean} 22|48b7 52r37
+27i7 Exit_Status{integer} 22|49b7 54m7
+31V13*Open_Native{boolean} 31>26 22|58b13 86l8 86t19
+31a26 Path{string} 22|58b26 62r36
+X 22 hostkit-native.adb
+15i4 WNOHANG{24|62I9} 31r57
+20V13 Waitpid{24|62I9} 21>7 22>7 23>7 31s23
+21i7 Pid{24|62I9}
+22m7 Status{25|67M9}
+23i7 Options{24|62I9}
+28i7 Collected{24|62I9} 31m10 32r20
+60a7 Opener{string} 61r80
+61p7 Located{28|64P12} 67r10 71r50 72m25 72r25 82r13 83m31 83r31
+62a7 Argument{string} 64m15 64r15
+63a7 Args{28|749A12} 71r63
+65i7 Started{28|759I9} 71m7 74r10
+X 23 interfac.ads
+47K9*Interfaces 22|5r6 11r13 15r23 21r17 23r17 24r14 28r19 23|247e15
+X 24 i-c.ads
+33K20*C 22|5w17 11r24 15r34 21r28 23r28 24r25 28r30 24|601e17
+62I9*int<integer> 22|11r26 15r36 21r30 23r30 24r27 28r32
+X 25 system.ads
+37K9*System 22|7w6 22r17 31r36 25|155e11
+67M9*Address 22|22r24
+69m4*Null_Address{67M9} 22|31r43
+X 28 s-os_lib.ads
+64P12*String_Access{30|43P9} 22|13r25 61r30
+69U14*Free=69:62 22|72s19 83s25
+71A12*String_List{30|52A9}<integer>
+497V13*Locate_Exec_On_Path{64P12} 22|61s59
+749A12*Argument_List{71A12}<integer> 22|63r39
+759I9*Process_Id<integer> 22|12r25 65r30
+764i4*Invalid_Pid{759I9} 22|74r32
+805V13*Non_Blocking_Spawn{759I9} 22|71s30
+X 30 s-string.ads
+43P9*String_Access(string)
+52A9*String_List(43P9)<integer>
+

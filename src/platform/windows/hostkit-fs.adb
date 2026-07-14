@@ -8,6 +8,7 @@ with System;
 
 package body Hostkit.Fs is
 
+   use type Ada.Directories.File_Kind;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
 
