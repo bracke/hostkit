@@ -1,0 +1,52 @@
+name: ci
+
+# Builds hostkit and runs its suite on Linux, macOS and Windows.
+#
+# A matrix is not optional for this crate: every line in it exists because the hosts
+# differ, so a green Linux build says nothing at all about whether it is right.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: build-and-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      ALIRE_NONINTERACTIVE: "true"
+    strategy:
+      fail-fast: false
+      matrix:
+        # An x86_64 macOS image is required: gnat_native=15.2.1 ships no
+        # aarch64-darwin binary, so macos-latest (arm64) cannot resolve the pin.
+        os: [ubuntu-latest, macos-15-intel, windows-latest]
+
+    steps:
+      - name: Check out hostkit
+        uses: actions/checkout@v4
+
+      - name: Set up Alire
+        # v5 defaults to alr 2.1.0, whose index carries gnat_native 15.2.1.
+        uses: alire-project/setup-alire@v5
+        with:
+          toolchain: gnat_native=15.2.1 gprbuild
+
+      - name: Build the library
+        shell: bash
+        run: alr --non-interactive build
+
+      - name: Build and run the test suite
+        shell: bash
+        working-directory: tests
+        run: |
+          alr --non-interactive build
+          # The binary is hostkit_tests.exe on Windows, and bash will not find it under
+          # the Unix name.
+          if [ -f ./bin/hostkit_tests.exe ]; then
+            ./bin/hostkit_tests.exe
+          else
+            ./bin/hostkit_tests
+          fi

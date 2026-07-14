@@ -1,0 +1,27 @@
+with "config/hostkit_tests_config.gpr";
+project Hostkit_Tests is
+
+   for Source_Dirs use ("tests/src/", "config/");
+   for Object_Dir use "obj/" & Hostkit_Tests_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Exec_Dir use "bin";
+   --  noop and failing are shipped, not borrowed from the host. Borrowing does not
+   --  travel: /bin/true is absent on macOS and on Windows, and every Windows stand-in
+   --  tried either refused its arguments or -- cmd.exe -- opened an interactive shell
+   --  and waited for input until CI gave up.
+   for Main use ("hostkit_tests.adb", "noop.adb", "failing.adb");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Hostkit_Tests_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es");
+   end Binder;
+
+   package Builder is
+      for Executable ("hostkit_tests.adb") use "hostkit_tests";
+   end Builder;
+
+end Hostkit_Tests;

@@ -1,0 +1,39 @@
+with "config/hostkit_config.gpr";
+project Hostkit is
+
+   for Library_Name use "Hostkit";
+   for Library_Version use Project'Library_Name & ".so." & Hostkit_Config.Crate_Version;
+
+   case Hostkit_Config.Alire_Host_OS is
+      when "windows" =>
+         for Source_Dirs use ("src/", "config/", "src/platform/windows");
+      when "macos" =>
+         for Source_Dirs use ("src/", "config/", "src/platform/macos");
+      when "linux" =>
+         for Source_Dirs use ("src/", "config/", "src/platform/linux");
+      when others =>
+         for Source_Dirs use ("src/", "config/", "src/platform/unsupported");
+   end case;
+   for Object_Dir use "obj/" & Hostkit_Config.Build_Profile;
+   for Create_Missing_Dirs use "True";
+   for Library_Dir use "lib";
+
+   type Library_Type_Type is ("relocatable", "static", "static-pic");
+   Library_Type : Library_Type_Type :=
+     external ("HOSTKIT_LIBRARY_TYPE", external ("LIBRARY_TYPE", "static"));
+   for Library_Kind use Library_Type;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        Hostkit_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
+   end Compiler;
+
+   package Binder is
+      for Switches ("Ada") use ("-Es"); --  Symbolic traceback
+   end Binder;
+
+   package Install is
+      for Artifacts (".") use ("share");
+   end Install;
+
+end Hostkit;
