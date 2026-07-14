@@ -43,6 +43,9 @@ private package Hostkit.Native is
       Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome;
 
+   --  Which body this is.
+   function Native_Backend_Label return String;
+
    --  Start whatever the host thinks Path is, the way a double-click would.
    function Open_Native (Path : String) return Boolean;
 

@@ -405,6 +405,11 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   function Native_Backend_Label return String is
+   begin
+      return "Windows/CreateProcess-TerminateProcess";
+   end Native_Backend_Label;
+
    function Open_Native (Path : String) return Boolean is
       Wide_Path : aliased Wide_String := Wide (Path);
       Operation : aliased Wide_String := Wide ("open");

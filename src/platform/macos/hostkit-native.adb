@@ -273,6 +273,11 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   function Native_Backend_Label return String is
+   begin
+      return "POSIX/fork-exec-waitpid-kill";
+   end Native_Backend_Label;
+
    function Open_Native (Path : String) return Boolean is
       --  "open" is how macOS starts a document or an application bundle.
       Opener   : constant String := "open";

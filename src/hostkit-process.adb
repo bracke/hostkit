@@ -179,6 +179,11 @@ package body Hostkit.Process is
          return Nothing;
    end Run_Captured;
 
+   function Native_Backend_Label return String is
+   begin
+      return Hostkit.Native.Native_Backend_Label;
+   end Native_Backend_Label;
+
    function Open_Native (Path : String) return Boolean is
    begin
       return Hostkit.Native.Open_Native (Path);

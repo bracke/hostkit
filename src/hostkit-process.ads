@@ -49,6 +49,10 @@ package Hostkit.Process is
       Exit_Status : out Integer)
       return Boolean;
 
+   --  Which process-control body is compiled in. Hostkit is the one thing that knows,
+   --  because it is the one thing with a body per host.
+   function Native_Backend_Label return String;
+
    --  What became of a process we ran and waited for.
    type Process_Outcome is record
       Started     : Boolean := False;

@@ -273,6 +273,11 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   function Native_Backend_Label return String is
+   begin
+      return "POSIX/fork-exec-waitpid-kill";
+   end Native_Backend_Label;
+
    function Open_Native (Path : String) return Boolean is
       --  xdg-open is the freedesktop way to hand a path to whatever handles it.
       Opener   : constant String := "xdg-open";

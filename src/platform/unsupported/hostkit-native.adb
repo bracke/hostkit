@@ -45,6 +45,11 @@ package body Hostkit.Native is
       return Nothing;
    end Run_Captured;
 
+   function Native_Backend_Label return String is
+   begin
+      return "none";
+   end Native_Backend_Label;
+
    function Open_Native (Path : String) return Boolean is
       pragma Unreferenced (Path);
    begin
