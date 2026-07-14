@@ -13,6 +13,7 @@ package body Hostkit.Native is
    use type Ada.Calendar.Time;
    use type Hostkit.Process.Cancel_Check;
    use type Hostkit.Process.Poll_Hook;
+   use type Hostkit.Process.Started_Hook;
    use type Interfaces.C.int;
    use type GNAT.OS_Lib.Process_Id;
    use type GNAT.OS_Lib.String_Access;
@@ -75,7 +76,8 @@ package body Hostkit.Native is
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
       Cancelled         : Hostkit.Process.Cancel_Check;
-      Poll              : Hostkit.Process.Poll_Hook)
+      Poll              : Hostkit.Process.Poll_Hook;
+      Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome
    is
       use type Interfaces.C.Strings.chars_ptr;
@@ -229,6 +231,10 @@ package body Hostkit.Native is
 
       --  The parent.
       Result.Started := True;
+
+      if Started_Notice /= null then
+         Started_Notice.all (Integer (Child));
+      end if;
 
       loop
          Collected := Waitpid (Child, Status'Address, WNOHANG);

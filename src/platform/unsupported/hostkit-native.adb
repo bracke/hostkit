@@ -33,12 +33,13 @@ package body Hostkit.Native is
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
       Cancelled         : Hostkit.Process.Cancel_Check;
-      Poll              : Hostkit.Process.Poll_Hook)
+      Poll              : Hostkit.Process.Poll_Hook;
+      Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome
    is
       pragma Unreferenced
         (Program, Arguments, Working_Directory, Stdout_Path, Stderr_Path,
-         Timeout_Ms, Cancelled, Poll);
+         Timeout_Ms, Cancelled, Poll, Started_Notice);
       Nothing : Hostkit.Process.Process_Outcome;
    begin
       return Nothing;

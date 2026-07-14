@@ -39,7 +39,8 @@ private package Hostkit.Native is
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
       Cancelled         : Hostkit.Process.Cancel_Check;
-      Poll              : Hostkit.Process.Poll_Hook)
+      Poll              : Hostkit.Process.Poll_Hook;
+      Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome;
 
    --  Start whatever the host thinks Path is, the way a double-click would.

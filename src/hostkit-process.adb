@@ -161,7 +161,8 @@ package body Hostkit.Process is
       Stderr_Path       : String := "";
       Timeout_Ms        : Natural := 0;
       Cancelled         : Cancel_Check := null;
-      Poll              : Poll_Hook := null)
+      Poll              : Poll_Hook := null;
+      Started           : Started_Hook := null)
       return Process_Outcome
    is
       Nothing : Process_Outcome;
@@ -172,7 +173,7 @@ package body Hostkit.Process is
 
       return Hostkit.Native.Run_Captured
                (Program, Arguments, Working_Directory,
-                Stdout_Path, Stderr_Path, Timeout_Ms, Cancelled, Poll);
+                Stdout_Path, Stderr_Path, Timeout_Ms, Cancelled, Poll, Started);
    exception
       when others =>
          return Nothing;

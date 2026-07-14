@@ -12,6 +12,7 @@ package body Hostkit.Native is
    use type Ada.Calendar.Time;
    use type Hostkit.Process.Cancel_Check;
    use type Hostkit.Process.Poll_Hook;
+   use type Hostkit.Process.Started_Hook;
 
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
@@ -233,7 +234,8 @@ package body Hostkit.Native is
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
       Cancelled         : Hostkit.Process.Cancel_Check;
-      Poll              : Hostkit.Process.Poll_Hook)
+      Poll              : Hostkit.Process.Poll_Hook;
+      Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome
    is
       --  CreateProcessW takes a command line, not a vector, so the arguments have to be
@@ -363,6 +365,10 @@ package body Hostkit.Native is
       end if;
 
       Result.Started := True;
+
+      if Started_Notice /= null then
+         Started_Notice.all (Integer (Information.Process_Id));
+      end if;
 
       --  Ours are closed straight away: the child has its own copies, and the file would
       --  otherwise stay open until we exited.

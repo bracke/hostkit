@@ -65,6 +65,10 @@ package Hostkit.Process is
    --  progress needs this; without it the output appears all at once, at the end.
    type Poll_Hook is access procedure;
 
+   --  Called once, with the operating system's process id, as soon as the program starts.
+   --  A caller that shows or tracks a running job needs the id to talk about it.
+   type Started_Hook is access procedure (Process_Id : Integer);
+
    --  Run a program to completion, with its output captured to files, under a deadline.
    --
    --  This is what a tool runner needs and Run does not give it: somewhere for the
@@ -92,7 +96,8 @@ package Hostkit.Process is
       Stderr_Path       : String := "";
       Timeout_Ms        : Natural := 0;
       Cancelled         : Cancel_Check := null;
-      Poll              : Poll_Hook := null)
+      Poll              : Poll_Hook := null;
+      Started           : Started_Hook := null)
       return Process_Outcome;
 
    --  Start whatever the host thinks this path is: a document in its default
