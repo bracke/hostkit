@@ -1,3 +1,5 @@
+with Ada.Calendar;
+with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
 
 with Interfaces.C;
@@ -6,9 +8,13 @@ with System.Storage_Elements;
 with System;
 
 package body Hostkit.Native is
+   use Ada.Strings.Unbounded;
+   use type Ada.Calendar.Time;
+   use type Hostkit.Process.Cancel_Check;
 
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
+   use type System.Address;
    use type System.Storage_Elements.Integer_Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
@@ -16,6 +22,7 @@ package body Hostkit.Native is
    Infinite     : constant C_DWord := 16#FFFF_FFFF#;
    Still_Active : constant C_DWord := 259;
    Wait_Failed  : constant C_DWord := 16#FFFF_FFFF#;
+   Wait_Timeout : constant C_DWord := 16#0000_0102#;
 
    SW_Show_Normal : constant Interfaces.C.int := 1;
 
@@ -175,6 +182,216 @@ package body Hostkit.Native is
       when others =>
          return False;
    end Run_Command_Line;
+
+   Generic_Write     : constant C_DWord := 16#4000_0000#;
+   File_Share_Read   : constant C_DWord := 16#0000_0001#;
+   Create_Always     : constant C_DWord := 2;
+   File_Attr_Normal  : constant C_DWord := 16#0000_0080#;
+   Start_Use_Handles : constant C_DWord := 16#0000_0100#;
+   Invalid_Handle    : constant System.Address :=
+     System.Storage_Elements.To_Address (-1);
+
+   type Security_Attributes is record
+      Length      : C_DWord := 0;
+      Descriptor  : System.Address := System.Null_Address;
+      Inheritable : Interfaces.C.int := 0;
+   end record
+     with Convention => C;
+
+   function Create_File
+     (Name       : System.Address;
+      Access_Way : C_DWord;
+      Share      : C_DWord;
+      Security   : access Security_Attributes;
+      Creation   : C_DWord;
+      Attributes : C_DWord;
+      Template   : System.Address)
+      return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
+
+   function Terminate_Process
+     (Process   : System.Address;
+      Exit_Code : Interfaces.C.unsigned)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "TerminateProcess";
+
+   --  Run a program with its output captured, under a deadline.
+   --
+   --  Windows has no fork: CreateProcessW takes the redirections up front, as handles in
+   --  STARTUPINFO. They must be inheritable, and bInheritHandles must be true, or the
+   --  child gets none of them and its output goes nowhere.
+   --
+   --  The wait is in slices rather than one INFINITE block, so that a cancellation is
+   --  noticed while it is still worth noticing. A program that will not stop is stopped:
+   --  there is no SIGTERM to ask politely with, so TerminateProcess is the whole of it.
+   function Run_Captured
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String;
+      Stdout_Path       : String;
+      Stderr_Path       : String;
+      Timeout_Ms        : Natural;
+      Cancelled         : Hostkit.Process.Cancel_Check)
+      return Hostkit.Process.Process_Outcome
+   is
+      --  CreateProcessW takes a command line, not a vector, so the arguments have to be
+      --  quoted into one -- the C runtime rules, which is what every Windows program
+      --  parses back out: wrap anything with a space, and double an embedded quote.
+      function Quote (Value : String) return String is
+         Result : Unbounded_String;
+         Needs  : Boolean := Value = "";
+      begin
+         for Character_Value of Value loop
+            if Character_Value = ' ' or else Character_Value = '"' then
+               Needs := True;
+            end if;
+         end loop;
+
+         if not Needs then
+            return Value;
+         end if;
+
+         Append (Result, '"');
+         for Character_Value of Value loop
+            if Character_Value = '"' then
+               Append (Result, """""");
+            else
+               Append (Result, Character_Value);
+            end if;
+         end loop;
+         Append (Result, '"');
+         return To_String (Result);
+      end Quote;
+
+      function Command_Line return String is
+         Result : Unbounded_String := To_Unbounded_String (Quote (Program));
+      begin
+         for Argument of Arguments loop
+            Append (Result, " ");
+            Append (Result, Quote (To_String (Argument)));
+         end loop;
+
+         return To_String (Result);
+      end Command_Line;
+
+      function Capture (Path : String) return System.Address is
+         Wide_Path : aliased Wide_String := Wide (Path);
+         Security  : aliased Security_Attributes;
+      begin
+         if Path = "" then
+            return Invalid_Handle;
+         end if;
+
+         Security.Length := C_DWord (Security_Attributes'Size / 8);
+         Security.Inheritable := 1;
+
+         return Create_File
+                  (Name       => Wide_Path'Address,
+                   Access_Way => Generic_Write,
+                   Share      => File_Share_Read,
+                   Security   => Security'Access,
+                   Creation   => Create_Always,
+                   Attributes => File_Attr_Normal,
+                   Template   => System.Null_Address);
+      end Capture;
+
+      Wide_Command : aliased Wide_String := Wide (Command_Line);
+      Wide_Dir     : aliased Wide_String := Wide (Working_Directory);
+
+      Out_Handle : System.Address := Capture (Stdout_Path);
+      Err_Handle : System.Address := Capture (Stderr_Path);
+
+      Startup     : aliased Startup_Info;
+      Information : aliased Process_Information;
+      Exit_Code   : aliased C_DWord := 0;
+      Started_At  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
+      Killed      : Boolean := False;
+      Waited      : C_DWord;
+      Ignored     : Interfaces.C.int;
+      Result      : Hostkit.Process.Process_Outcome;
+
+      function Should_Stop return Boolean is
+         Elapsed : constant Duration := Ada.Calendar.Clock - Started_At;
+      begin
+         if Cancelled /= null and then Cancelled.all then
+            return True;
+         end if;
+
+         return Timeout_Ms > 0 and then Elapsed * 1000.0 >= Duration (Timeout_Ms);
+      end Should_Stop;
+
+      procedure Close_Captures is
+      begin
+         if Out_Handle /= Invalid_Handle then
+            Ignored := Close_Handle (Out_Handle);
+            Out_Handle := Invalid_Handle;
+         end if;
+
+         if Err_Handle /= Invalid_Handle then
+            Ignored := Close_Handle (Err_Handle);
+            Err_Handle := Invalid_Handle;
+         end if;
+      end Close_Captures;
+   begin
+      Startup.Cb := C_DWord (Startup_Info'Size / 8);
+
+      if Out_Handle /= Invalid_Handle or else Err_Handle /= Invalid_Handle then
+         Startup.Flags := Start_Use_Handles;
+         Startup.Std_Output := Out_Handle;
+         Startup.Std_Error := Err_Handle;
+      end if;
+
+      if Create_Process
+           (Application_Name   => System.Null_Address,
+            Command_Line       => Wide_Command'Address,
+            Process_Attributes => System.Null_Address,
+            Thread_Attributes  => System.Null_Address,
+            --  The capture handles are inheritable and this is what lets the child have
+            --  them. Without it its output goes nowhere and the files stay empty.
+            Inherit_Handles    => 1,
+            Creation_Flags     => 0,
+            Environment        => System.Null_Address,
+            Current_Directory  =>
+              (if Working_Directory = "" then System.Null_Address else Wide_Dir'Address),
+            Startup            => Startup'Access,
+            Information        => Information'Access) = 0
+      then
+         Close_Captures;
+         return Result;
+      end if;
+
+      Result.Started := True;
+
+      --  Ours are closed straight away: the child has its own copies, and the file would
+      --  otherwise stay open until we exited.
+      Close_Captures;
+
+      loop
+         --  In slices, so a cancellation is noticed rather than waited out.
+         Waited := Wait_For_Single_Object (Information.Process, 5);
+
+         exit when Waited /= Wait_Timeout;
+
+         if not Killed and then Should_Stop then
+            Killed := True;
+            --  Nothing to ask with here. TerminateProcess is the request and the answer.
+            Ignored := Terminate_Process (Information.Process, 1);
+         end if;
+      end loop;
+
+      if Get_Exit_Code_Process (Information.Process, Exit_Code'Access) /= 0
+        and then Exit_Code /= Still_Active
+      then
+         Result.Exit_Status := Integer (Exit_Code);
+      end if;
+
+      Result.Timed_Out := Killed;
+
+      Ignored := Close_Handle (Information.Thread);
+      Ignored := Close_Handle (Information.Process);
+
+      return Result;
+   end Run_Captured;
 
    function Open_Native (Path : String) return Boolean is
       Wide_Path : aliased Wide_String := Wide (Path);

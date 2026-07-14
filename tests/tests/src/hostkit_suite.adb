@@ -4,6 +4,9 @@ with AUnit.Test_Cases;
 
 with Ada.Command_Line;
 with Ada.Directories;
+with Ada.Environment_Variables;
+with Ada.Strings.Fixed;
+with Ada.Text_IO;
 with Ada.Strings.Unbounded;
 
 with Hostkit;
@@ -29,6 +32,45 @@ package body Hostkit_Suite is
       when others =>
          return Name;
    end Companion;
+
+   --  Somewhere to put captured output. The host's own temporary directory, because /tmp
+   --  is not a place Windows has.
+   function Scratch return String is
+      Base : constant String :=
+        (if Ada.Environment_Variables.Exists ("TMPDIR")
+         then Ada.Environment_Variables.Value ("TMPDIR")
+         elsif Ada.Environment_Variables.Exists ("TEMP")
+         then Ada.Environment_Variables.Value ("TEMP")
+         else "/tmp");
+   begin
+      return Base;
+   end Scratch;
+
+   function File_Contains (Path : String; Text : String) return Boolean is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+
+      while not Ada.Text_IO.End_Of_File (File) loop
+         declare
+            Line : constant String := Ada.Text_IO.Get_Line (File);
+         begin
+            if Ada.Strings.Fixed.Index (Line, Text) > 0 then
+               Ada.Text_IO.Close (File);
+               return True;
+            end if;
+         end;
+      end loop;
+
+      Ada.Text_IO.Close (File);
+      return False;
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (File) then
+            Ada.Text_IO.Close (File);
+         end if;
+         return False;
+   end File_Contains;
 
    procedure Test_Quoting (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -115,6 +157,53 @@ package body Hostkit_Suite is
          & Status'Image);
    end Test_Shell_Quoting_Holds;
 
+   procedure Test_Captured_Run (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use Ada.Strings.Unbounded;
+
+      Out_Path : constant String := Ada.Directories.Compose (Scratch, "captured-out.txt");
+      Err_Path : constant String := Ada.Directories.Compose (Scratch, "captured-err.txt");
+
+      Empty   : Hostkit.String_Vectors.Vector;
+      Outcome : Hostkit.Process.Process_Outcome;
+   begin
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program     => Companion ("sleeper"),
+           Arguments   => Empty,
+           Stdout_Path => Out_Path,
+           Stderr_Path => Err_Path);
+
+      Assert (Outcome.Started, "the program started");
+      Assert (not Outcome.Timed_Out, "and finished on its own");
+      Assert (Outcome.Exit_Status = 0, "with its own exit status; was " & Outcome.Exit_Status'Image);
+
+      --  The point of capturing is that the output is somewhere afterwards.
+      Assert (File_Contains (Out_Path, "out-line"), "standard output was captured");
+      Assert (File_Contains (Err_Path, "err-line"), "standard error was captured, separately");
+   end Test_Captured_Run;
+
+   procedure Test_Timeout_Kills (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use Ada.Strings.Unbounded;
+
+      Arguments : Hostkit.String_Vectors.Vector;
+      Outcome   : Hostkit.Process.Process_Outcome;
+   begin
+      --  A program that will not stop. Without a deadline the caller waits for ever, which
+      --  is the whole reason Run_Captured takes one.
+      Arguments.Append (To_Unbounded_String ("--hang"));
+
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program    => Companion ("sleeper"),
+           Arguments  => Arguments,
+           Timeout_Ms => 300);
+
+      Assert (Outcome.Started, "the program started");
+      Assert (Outcome.Timed_Out, "and the deadline ended it, rather than the program");
+   end Test_Timeout_Kills;
+
    procedure Test_A_Directory_Is_Not_Executable (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
    begin
@@ -152,6 +241,10 @@ package body Hostkit_Suite is
         (T, Test_Shell_Quoting_Holds'Access, "shell : an argument cannot become a second command");
       Register_Routine
         (T, Test_A_Directory_Is_Not_Executable'Access, "fs : a directory is not executable");
+      Register_Routine
+        (T, Test_Captured_Run'Access, "process : a captured run keeps stdout and stderr apart");
+      Register_Routine
+        (T, Test_Timeout_Kills'Access, "process : a program that will not stop is stopped");
    end Register_Tests;
 
    function Suite return AUnit.Test_Suites.Access_Test_Suite is

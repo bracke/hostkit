@@ -49,6 +49,46 @@ package Hostkit.Process is
       Exit_Status : out Integer)
       return Boolean;
 
+   --  What became of a process we ran and waited for.
+   type Process_Outcome is record
+      Started     : Boolean := False;
+      Timed_Out   : Boolean := False;
+      Exit_Status : Integer := -1;
+   end record;
+
+   --  Asked periodically while waiting. Returning True kills the process, the same way a
+   --  timeout does. Null means nothing can cancel it.
+   type Cancel_Check is access function return Boolean;
+
+   --  Run a program to completion, with its output captured to files, under a deadline.
+   --
+   --  This is what a tool runner needs and Run does not give it: somewhere for the
+   --  output to go, a directory to run in, and a way to stop waiting. A compiler invoked
+   --  on a bad day does not return, and a caller that cannot give up on it is stuck.
+   --
+   --  On a deadline or a cancellation the process is asked to stop and then made to: on
+   --  POSIX, SIGTERM and then SIGKILL; on Windows, TerminateProcess.
+   --
+   --  @param Program The program to run; looked up on PATH if it is not a path.
+   --  @param Arguments Its arguments, as a vector -- never a command line, so a filename
+   --                   containing a space or a quote is just a filename.
+   --  @param Working_Directory Where to run it; the current directory when empty.
+   --  @param Stdout_Path File to capture standard output into; discarded when empty.
+   --  @param Stderr_Path File to capture standard error into; discarded when empty.
+   --  @param Timeout_Ms How long to wait before killing it; 0 waits indefinitely.
+   --  @param Cancelled Asked while waiting; True kills the process.
+   --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
+   --          rather than the program deciding to stop.
+   function Run_Captured
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String := "";
+      Stdout_Path       : String := "";
+      Stderr_Path       : String := "";
+      Timeout_Ms        : Natural := 0;
+      Cancelled         : Cancel_Check := null)
+      return Process_Outcome;
+
    --  Start whatever the host thinks this path is: a document in its default
    --  application, a Start Menu shortcut, an application bundle.
    --

@@ -1,5 +1,7 @@
 --  The parts of starting a program that only the host can answer. One body per OS;
 --  everything above this is portable and shared.
+with Hostkit.Process;
+
 private package Hostkit.Native is
 
    --  Collect any children that have already finished, and return at once whether or
@@ -26,6 +28,18 @@ private package Hostkit.Native is
       Wait        : Boolean;
       Exit_Status : out Integer)
       return Boolean;
+
+   --  Run a program to completion with its output captured, under a deadline. See
+   --  Hostkit.Process.Run_Captured, which is the documented face of this.
+   function Run_Captured
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String;
+      Stdout_Path       : String;
+      Stderr_Path       : String;
+      Timeout_Ms        : Natural;
+      Cancelled         : Hostkit.Process.Cancel_Check)
+      return Hostkit.Process.Process_Outcome;
 
    --  Start whatever the host thinks Path is, the way a double-click would.
    function Open_Native (Path : String) return Boolean;

@@ -153,6 +153,30 @@ package body Hostkit.Process is
       end;
    end Run_Shell_Command;
 
+   function Run_Captured
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String := "";
+      Stdout_Path       : String := "";
+      Stderr_Path       : String := "";
+      Timeout_Ms        : Natural := 0;
+      Cancelled         : Cancel_Check := null)
+      return Process_Outcome
+   is
+      Nothing : Process_Outcome;
+   begin
+      if Program = "" then
+         return Nothing;
+      end if;
+
+      return Hostkit.Native.Run_Captured
+               (Program, Arguments, Working_Directory,
+                Stdout_Path, Stderr_Path, Timeout_Ms, Cancelled);
+   exception
+      when others =>
+         return Nothing;
+   end Run_Captured;
+
    function Open_Native (Path : String) return Boolean is
    begin
       return Hostkit.Native.Open_Native (Path);
