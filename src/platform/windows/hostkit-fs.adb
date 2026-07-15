@@ -118,4 +118,12 @@ package body Hostkit.Fs is
          return False;
    end Is_Executable;
 
+   --  No mode bits on Windows; access is by ACL, and reading it is not done here. Answer
+   --  False -- decline to guess rather than reject a key the profile ACL already protects.
+   function Accessible_By_Others (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Accessible_By_Others;
+
 end Hostkit.Fs;

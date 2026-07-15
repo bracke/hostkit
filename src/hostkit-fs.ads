@@ -34,4 +34,17 @@ package Hostkit.Fs is
    --  file on the other, and both answers are right.
    function Is_Executable (Path : String) return Boolean;
 
+   --  Can anyone but the owner get at this file?
+   --
+   --  A private key must not be. OpenSSH refuses one whose file is group- or world-readable,
+   --  and this is the fact that check needs: on POSIX, whether any group or other permission
+   --  bit is set (mode and 8#077#). It answers for a regular file only -- a directory's bits
+   --  mean something else -- and False for anything it cannot read, so a missing file is
+   --  "not exposed" rather than a spurious rejection.
+   --
+   --  On Windows there are no such bits; access is by ACL, and a file in the user's profile
+   --  is already owner-scoped by the default ACL. This does not read the ACL, so it answers
+   --  False there -- it does not enforce the check on Windows, it declines to guess.
+   function Accessible_By_Others (Path : String) return Boolean;
+
 end Hostkit.Fs;

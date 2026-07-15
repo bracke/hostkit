@@ -17,7 +17,7 @@ RV NO_IO
 RV NO_DYNAMIC_SIZED_OBJECTS
 RV NO_ELABORATION_CODE
 
-U hostkit.fs%b		hostkit-fs.adb		1d030515 OO PK
+U hostkit.fs%b		hostkit-fs.adb		6887f292 OO PK
 W ada%s			ada.ads			ada.ali
 W ada.directories%s	a-direct.adb		a-direct.ali
 Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
@@ -27,8 +27,9 @@ W hostkit%s		hostkit.ads		hostkit.ali
 W interfaces%s		interfac.ads		interfac.ali
 W interfaces.c%s	i-c.adb			i-c.ali
 W interfaces.c.strings%s  i-cstrin.adb		i-cstrin.ali
+W system%s		system.ads		system.ali
 
-U hostkit.fs%s		hostkit-fs.ads		15c21470 EE OO PK
+U hostkit.fs%s		hostkit-fs.ads		c0aff0d7 EE OO PK
 W hostkit%s		hostkit.ads		hostkit.ali
 
 D ada.ads		20250808065140 76789da1 ada%s
@@ -54,8 +55,8 @@ D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
 D gnat.ads		20250808065140 b5988c27 gnat%s
 D g-os_lib.ads		20250808065140 0db74523 gnat.os_lib%s
 D hostkit.ads		20260714164643 92b5a8d1 hostkit%s
-D hostkit-fs.ads	20260714164940 8777bca1 hostkit.fs%s
-D hostkit-fs.adb	20260714165007 85b4ba92 hostkit.fs%b
+D hostkit-fs.ads	20260715183819 521a5806 hostkit.fs%s
+D hostkit-fs.adb	20260715184015 a0643b7c hostkit.fs%b
 D interfac.ads		20250808065140 9111f9c1 interfaces%s
 D i-c.ads		20250808065140 e94c966a interfaces.c%s
 D i-cstrin.ads		20250808065140 5409c1a4 interfaces.c.strings%s
@@ -70,55 +71,71 @@ G a e
 G c Z s b [is_link hostkit__fs 14 13 none]
 G c Z s b [create_link hostkit__fs 20 13 none]
 G c Z s b [is_executable hostkit__fs 35 13 none]
-G c Z b b [symlink hostkit__fs 10 13 none]
+G c Z s b [accessible_by_others hostkit__fs 48 13 none]
+G c Z b b [symlink hostkit__fs 12 13 none]
 X 1 ada.ads
-18K9*Ada 22e8 25|1r6 55r16 57r14 58r18 58r48
+18K9*Ada 22e8 25|3r6 57r16 59r14 60r18 60r48 74r16 87r14 88r17 88r48
 X 8 a-direct.ads
-76K13*Directories 524e20 25|1w10 55r20 57r18 58r22 58r52
-303E9*File_Kind 303e62 25|55r32
-303n34*Ordinary_File{303E9} 25|58r64
-310V13*Exists{boolean} 25|57s30
-316V13*Kind{303E9} 25|58s34
+76K13*Directories 524e20 25|3w10 57r20 59r18 60r22 60r52 74r20 87r18 88r21
+. 88r52
+303E9*File_Kind 303e62 25|57r32 74r32
+303n34*Ordinary_File{303E9} 25|60r64 88r64
+310V13*Exists{boolean} 25|59s30 87s30
+316V13*Kind{303E9} 25|60s34 88s33
 X 11 a-iteint.ads
 24h9 Forward_Iterator
 32h9 Reversible_Iterator<24R9[7|119]>
 X 21 gnat.ads
-40K9*GNAT 63e9 25|3r6 21r14 59r18
+40K9*GNAT 63e9 25|5r6 23r14 61r18
 X 22 g-os_lib.ads
-51K14*OS_Lib=51:36 25|3w11 21r19 59r23
+51K14*OS_Lib=51:36 25|5w11 23r19 61r23
 X 23 hostkit.ads
-23K9*Hostkit 32e12 24|3r9 37r5 25|7r14 65r5
+23K9*Hostkit 32e12 24|3r9 50r5 25|9r14 109r5
 X 24 hostkit-fs.ads
-3K17*Fs 23|23k9 24|37l13 37e15 25|7b22 65l13 65t15
-14V13*Is_Link{boolean} 14>22 25|19b13 25l8 25t15
-14a22 Path{string} 25|19b22 21r44
-20V13*Create_Link{boolean} 21>7 22>7 25|27b13 50l8 50t19
-21a7 Target{string} 25|28b7 33r85
-22a7 Link_Path{string} 25|29b7 34r85
-35V13*Is_Executable{boolean} 35>28 25|54b13 63l8 63t21
-35a28 Path{string} 25|54b28 57r38 58r40 59r50
+3K17*Fs 23|23k9 24|50l13 50e15 25|9b22 109l13 109t15
+14V13*Is_Link{boolean} 14>22 25|21b13 27l8 27t15
+14a22 Path{string} 25|21b22 23r44
+20V13*Create_Link{boolean} 21>7 22>7 25|29b13 52l8 52t19
+21a7 Target{string} 25|30b7 35r85
+22a7 Link_Path{string} 25|31b7 36r85
+35V13*Is_Executable{boolean} 35>28 25|56b13 65l8 65t21
+35a28 Path{string} 25|56b28 59r38 60r40 61r50
+48V13*Accessible_By_Others{boolean} 48>35 25|71b13 107l8 107t28
+48a35 Path{string} 25|71b35 84r83 87r38 88r39
 X 25 hostkit-fs.adb
-10V13 Symlink{27|62I9} 11>7 12>7 37s17
-11p7 Target{28|65P9}
-12p7 Link{28|65P9}
-33p7 C_Target{28|65P9} 37r26 38m34 38r34 43r13 44m40 44r40
-34p7 C_Link{28|65P9} 37r36 39m34 39r34 46r13 47m40 47r40
-35i7 Status{27|62I9} 37m7 40r14
+12V13 Symlink{27|62I9} 13>7 14>7 39s17
+13p7 Target{28|65P9}
+14p7 Link{28|65P9}
+35p7 C_Target{28|65P9} 39r26 40m34 40r34 45r13 46m40 46r40
+36p7 C_Link{28|65P9} 39r36 41m34 41r34 48r13 49m40 49r40
+37i7 Status{27|62I9} 39m7 42r14
+78a7 Buffer(26|81M9) 94m33 94r33 103r15
+80V16*C_Stat{27|62I9} 80>24 80>63 94s17
+80p24 Path{28|65P9}
+80m63 Buf{29|67M9}
+84p7 C_Path{28|65P9} 90m37 90r37 94r25 95m34 95r34
+85i7 Result{27|62I9} 94m7 97r10
 X 26 interfac.ads
-47K9*Interfaces 25|5r6 8r13 11r16 12r16 13r14 32r16 33r18 33r52 34r18 34r52
-. 35r18 38r7 39r7 43r25 44r13 46r23 47r13 26|247e15
+47K9*Interfaces 25|2w6 7r6 10r13 13r16 14r16 15r14 34r16 35r18 35r52 36r18
+. 36r52 37r18 40r7 41r7 45r25 46r13 48r23 49r13 72r16 73r16 78r44 80r31 81r16
+. 84r16 84r50 85r16 90r10 95r7 26|247e15
+81M9*Unsigned_8 25|73r27 78r55
 X 27 i-c.ads
-33K20*C 25|5r17 8r24 11r27 12r27 13r25 32r27 33r29 33r63 34r29 34r63 35r29
-. 38r18 39r18 43r36 44r24 46r34 47r24 27|601e17
-62I9*int<integer> 25|8r26 13r27 35r31
+33K20*C 25|7r17 10r24 13r27 14r27 15r25 34r27 35r29 35r63 36r29 36r63 37r29
+. 40r18 41r18 45r36 46r24 48r34 49r24 72r27 80r42 81r27 84r27 84r61 85r27
+. 90r21 95r18 27|601e17
+62I9*int<integer> 25|10r26 15r27 37r31 72r29 81r29 85r29
 X 28 i-cstrin.ads
-48K22*Strings 25|5w19 11r29 12r29 32r29 33r31 33r65 34r31 34r65 38r20 39r20
-. 43r38 44r26 46r36 47r26 28|171e25
-65P9*chars_ptr 25|11r37 12r37 32r37 33r39 34r39
-70p4*Null_Ptr{65P9} 25|43r46 46r44
-86V13*New_String{65P9} 25|33s73 34s73
-92U14*Free 25|38s28 39s28 44s34 47s34
+48K22*Strings 25|7w19 13r29 14r29 34r29 35r31 35r65 36r31 36r65 40r20 41r20
+. 45r38 46r26 48r36 49r26 80r44 84r29 84r63 90r23 95r20 28|171e25
+65P9*chars_ptr 25|13r37 14r37 34r37 35r39 36r39 80r52 84r37
+70p4*Null_Ptr{65P9} 25|45r46 48r44
+86V13*New_String{65P9} 25|35s73 36s73 84s71
+92U14*Free 25|40s28 41s28 46s34 49s34 90s31 95s28
+X 29 system.ads
+37K9*System 25|1w6 80r69 29|155e11
+67M9*Address 25|80r76
 X 32 s-os_lib.ads
-441V13*Is_Executable_File{boolean} 25|59s30
-464V13*Is_Symbolic_Link{boolean} 25|21s26
+441V13*Is_Executable_File{boolean} 25|61s30
+464V13*Is_Symbolic_Link{boolean} 25|23s26
 
