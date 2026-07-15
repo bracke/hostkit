@@ -126,4 +126,32 @@ package body Hostkit.Fs is
       return False;
    end Accessible_By_Others;
 
+   --  MoveFileEx with MOVEFILE_REPLACE_EXISTING is the atomic replacing rename Windows
+   --  offers; plain rename (and GNAT.OS_Lib.Rename_File) fails when the target exists.
+   function Replace_File
+     (Source : String;
+      Target : String)
+      return Boolean
+   is
+      Move_File_Replace_Existing : constant C_DWord := 16#0000_0001#;
+
+      function Move_File_Ex
+        (Existing : System.Address;
+         New_Name : System.Address;
+         Flags    : C_DWord)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
+
+      Wide_Source : aliased Wide_String := Wide (Source);
+      Wide_Target : aliased Wide_String := Wide (Target);
+   begin
+      return Move_File_Ex
+               (Wide_Source'Address,
+                Wide_Target'Address,
+                Move_File_Replace_Existing) /= 0;
+   exception
+      when others =>
+         return False;
+   end Replace_File;
+
 end Hostkit.Fs;

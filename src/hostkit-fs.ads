@@ -47,4 +47,18 @@ package Hostkit.Fs is
    --  False there -- it does not enforce the check on Windows, it declines to guess.
    function Accessible_By_Others (Path : String) return Boolean;
 
+   --  Atomically replace Target with Source (a completed temp file), on one filesystem.
+   --
+   --  An atomic write ends by renaming the temp file over the real one. POSIX rename does
+   --  that in a single step even when Target already exists; Windows rename -- and
+   --  GNAT.OS_Lib.Rename_File with it -- fails when it does, so rewriting a file that was
+   --  already there reported a write failure. This asks the host for a replacing rename:
+   --  rename on POSIX, MoveFileEx with MOVEFILE_REPLACE_EXISTING on Windows.
+   --
+   --  @return True when Target now holds what Source held and Source is gone.
+   function Replace_File
+     (Source : String;
+      Target : String)
+      return Boolean;
+
 end Hostkit.Fs;

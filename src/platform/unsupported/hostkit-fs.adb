@@ -31,4 +31,14 @@ package body Hostkit.Fs is
       return False;
    end Accessible_By_Others;
 
+   function Replace_File
+     (Source : String;
+      Target : String)
+      return Boolean
+   is
+      pragma Unreferenced (Source, Target);
+   begin
+      return False;
+   end Replace_File;
+
 end Hostkit.Fs;
