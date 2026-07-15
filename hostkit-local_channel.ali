@@ -1,0 +1,160 @@
+V "GNAT Lib v15"
+A -gnatc
+A -gnat2022
+A -gnatW8
+A -gnaty3
+A -gnatyM120
+A -gnatwa
+A -gnatX
+A -mtune=generic
+A -march=x86-64
+P NO
+
+RN
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+RV NO_ELABORATION_CODE
+
+U hostkit.local_channel%b  hostkit-local_channel.adb  355dc1e1 OO PK
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W hostkit%s		hostkit.ads		hostkit.ali
+W interfaces%s		interfac.ads		interfac.ali
+W interfaces.c%s	i-c.adb			i-c.ali
+W system%s		system.ads		system.ali
+
+U hostkit.local_channel%s  hostkit-local_channel.ads  42ffb599 EE OO PK
+W ada%s			ada.ads			ada.ali
+W ada.streams%s		a-stream.adb		a-stream.ali
+W hostkit%s		hostkit.ads		hostkit.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20250808065140 61e5e089 ada.containers%s
+D a-conhel.ads		20250808065140 46fe1ce3 ada.containers.helpers%s
+D a-convec.ads		20250808065140 91fb49f3 ada.containers.vectors%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-iteint.ads		20250808065140 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D hostkit.ads		20260714164643 92b5a8d1 hostkit%s
+D hostkit-local_channel.ads  20260715181102 c70d61f5 hostkit.local_channel%s
+D hostkit-local_channel.adb  20260715181348 0f345d71 hostkit.local_channel%b
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+G a e
+G c Z s b [connect hostkit__local_channel 16 13 none]
+G c Z s b [is_open hostkit__local_channel 18 13 none]
+G c Z s b [send hostkit__local_channel 21 13 none]
+G c Z s b [receive hostkit__local_channel 28 13 none]
+G c Z s b [close hostkit__local_channel 33 14 none]
+G c Z b b [c_socket hostkit__local_channel 24 13 none]
+G c Z b b [c_connect hostkit__local_channel 27 13 none]
+G c Z b b [c_send hostkit__local_channel 30 13 none]
+G c Z b b [c_recv hostkit__local_channel 34 13 none]
+G c Z b b [c_close hostkit__local_channel 38 13 none]
+X 1 ada.ads
+18K9*Ada 22e8 18|1r6 23r14 30r18 19|88r14 91r16 93r14 106r25 117r18 120r16
+. 122r14 138r25
+X 8 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[6|119]>
+X 9 a-stream.ads
+36K13*Streams 90e16 18|1w10 23r18 30r22 19|88r18 91r20 93r18 106r29 117r22
+. 120r20 122r18 138r29
+42M9*Stream_Element
+44I9*Stream_Element_Offset<long_long_integer> 19|91r28 93r26 106r37 120r28
+. 122r26 138r37
+54A9*Stream_Element_Array(42M9)<44I9> 18|23r26 30r30 19|88r26 117r30
+X 17 hostkit.ads
+23K9*Hostkit 32e12 18|10r9 46r5 19|6r14 165r5
+X 18 hostkit-local_channel.ads
+10K17*Local_Channel 17|23k9 18|39E4 46l13 46e26 19|6b22 165l13 165t26
+12R9*Channel 16r48 18r29 22r21 29r21 33r35 41c9 44e14 19|41r48 81r29 87r21
+. 116r21 147r35
+16V13*Connect{boolean} 16>22 16<37 19|41b13 79l8 79t15
+16a22 Path{string} 19|41b22 50r10 50r34 60r16 61r46 61r81
+16r37 Item{12R9} 19|41b37 45m7 46m7 73m7 74m7
+18V13*Is_Open{boolean} 18>22 19|81b13 84l8 84t15
+18r22 Item{12R9} 19|81b22 83r14
+21V13*Send{boolean} 22=7 23>7 19|86b13 113l8 113t12
+22r7 Item{12R9} 19|87b7 92r39 96r14
+23a7 Data{9|54A9} 19|88b7 93r51 100r21 101r30 102r47
+28V13*Receive{boolean} 29=7 30<7 19|115b13 145l8 145t15
+29r7 Item{12R9} 19|116b7 121r39 127r14
+30a7 Data{9|54A9} 19|117b7 122r51 125m7 125r16 131r21 132m29 132r29 133r46
+33U14*Close 33=21 19|147b14 163l8 163t13
+33r21 Item{12R9} 19|147b21 149r10 151r57 157m7 158m7 161m10 162m7
+39N4 Invalid 43r32 19|46r22 158r22 162r22
+42b7*Open{boolean} 19|45m12 73m12 83r19 96r19 127r19 149r15 157m12 161m15
+43i7*Native{long_integer} 19|46m12 74m12 92r44 121r44 151r62 158m12 162m12
+X 19 hostkit-local_channel.adb
+11I12 C_Int{21|62I9} 13r27 14r27 24r48 24r62 27r29 27r65 27r79 30r26 30r90
+. 34r26 34r90 38r27 38r41 42r14 66r32 92r23 92r32 121r23 121r32 151r32 151r50
+13i4 AF_UNIX{11I12} 54r23 59r42
+14i4 SOCK_STREAM{11I12} 54r32
+18R9 Sockaddr_Un 22e6 43r22 64r39
+19i7*Family{21|63I9} 59m12
+20a7*Path{21|124A9} 61m15
+24V13 C_Socket{11I12} 24>23 24>31 24>37 54s13
+24i23 Domain{11I12}
+24i31 Kind{11I12}
+24i37 Protocol{11I12}
+27V13 C_Connect{11I12} 27>24 27>36 27>59 64s10
+27i24 FD{11I12}
+27m36 Addr{22|67M9}
+27i59 Len{11I12}
+30V13 C_Send{21|64I9} 30>21 30>33 30>55 30>82 101s18
+30i21 FD{11I12}
+30m33 Buf{22|67M9}
+30m55 Len{21|92M9}
+30i82 Flags{11I12}
+34V13 C_Recv{21|64I9} 34>21 34>33 34>55 34>82 132s17
+34i21 FD{11I12}
+34m33 Buf{22|67M9}
+34m55 Len{21|92M9}
+34i82 Flags{11I12}
+38V13 C_Close{11I12} 38>22 66s41 151s41
+38i22 FD{11I12}
+42i7 FD{11I12} 54m7 55r10 64r21 66r50 74r36
+43r7 Addr{18R9} 59m7 61m10 64m25 64r25
+60i11 I{integer} 61r42 61r87
+66i13 Ignored{11I12} 68r34
+92i7 FD{11I12} 101r26
+93i7 From{9|44I9} 100r13 101r36 102r59 106m10 106r18
+94i7 Sent{21|64I9} 101m10 103r13 106r60
+121i7 FD{11I12} 132r25
+122i7 Into{9|44I9} 131r13 132r35 133r58 138m10 138r18
+123i7 Got{21|64I9} 132m10 135r13 138r60
+151i13 Ignored{11I12} 153r34
+X 20 interfac.ads
+47K9*Interfaces 19|1r6 8r13 9r13 11r21 19r16 20r16 20r65 30r61 31r13 34r61
+. 35r13 59r22 61r21 61r62 94r14 102r26 123r14 133r25 20|247e15
+X 21 i-c.ads
+33K20*C 19|1w17 8r24 9r24 11r32 19r27 20r27 20r76 30r72 31r24 34r72 35r24
+. 59r33 61r32 61r73 94r25 102r37 123r25 133r36 21|601e17
+62I9*int<integer> 19|8r26 11r34
+63I9*short<short_integer> 19|19r29 59r35
+64I9*long<long_integer> 19|9r26 31r26 35r26 94r27 123r27
+92M9*size_t 19|30r74 34r74 61r34 102r39 133r38
+109E9*char<character>
+111e4*nul{109E9} 19|20r78
+116V13*To_C{109E9} 19|61s75
+124A9*char_array(109E9)<92M9> 19|20r29
+X 22 system.ads
+37K9*System 19|4w6 27r43 30r39 34r39 22|155e11
+67M9*Address 19|27r50 30r46 34r46
+
