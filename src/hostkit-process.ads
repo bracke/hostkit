@@ -58,6 +58,27 @@ package Hostkit.Process is
    --  @return True when the request reached the process.
    function Request_Stop (Process_Id : Integer) return Boolean;
 
+   type Wait_Outcome is (Wait_Ready, Wait_Timed_Out, Wait_Error);
+
+   --  Wait until a file descriptor -- a subprocess's stdio pipe, typically -- is ready to be
+   --  read or written, or a deadline passes. Without this a reader hangs for ever on a helper
+   --  that has stopped talking.
+   --
+   --  POSIX polls the descriptor. Windows cannot: a pipe descriptor is not a socket, and poll
+   --  and select are for sockets there. It looks at the pipe directly instead -- whether there
+   --  are bytes waiting -- which is what "ready to read" actually means. Write readiness it
+   --  reports at once, as a pipe write to a helper rarely blocks and there is no cheap way to
+   --  ask.
+   --
+   --  @param FD The descriptor, as GNAT.OS_Lib hands it out.
+   --  @param For_Write True to wait for writability, False for readability.
+   --  @param Timeout_MS Milliseconds to wait; a negative value waits indefinitely.
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Wait_Outcome;
+
    --  Which process-control body is compiled in. Hostkit is the one thing that knows,
    --  because it is the one thing with a body per host.
    function Native_Backend_Label return String;

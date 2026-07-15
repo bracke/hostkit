@@ -51,6 +51,17 @@ package body Hostkit.Native is
       return False;
    end Request_Stop;
 
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome
+   is
+      pragma Unreferenced (FD, For_Write, Timeout_MS);
+   begin
+      return Hostkit.Process.Wait_Error;
+   end Wait_FD;
+
    function Native_Backend_Label return String is
    begin
       return "none";

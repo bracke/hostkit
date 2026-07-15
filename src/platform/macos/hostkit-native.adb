@@ -1,3 +1,4 @@
+with Hostkit.Process;
 with Ada.Calendar;
 with Ada.Strings.Unbounded;
 
@@ -284,6 +285,54 @@ package body Hostkit.Native is
       when others =>
          return False;
    end Request_Stop;
+
+   --  poll() one descriptor for readability or writability, with a timeout in milliseconds
+   --  (negative waits indefinitely). This is what an SSH or git helper's pipe is waited on.
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome
+   is
+      Poll_In  : constant Interfaces.C.short := 16#0001#;
+      Poll_Out : constant Interfaces.C.short := 16#0004#;
+
+      type Poll_FD is record
+         FD      : Interfaces.C.int;
+         Events  : Interfaces.C.short;
+         Revents : Interfaces.C.short := 0;
+      end record
+        with Convention => C;
+
+      function C_Poll
+        (FDs : access Poll_FD; NFDs : Interfaces.C.unsigned_long; Timeout : Interfaces.C.int)
+        return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "poll";
+
+      Item : aliased Poll_FD :=
+        (FD      => Interfaces.C.int (FD),
+         Events  => (if For_Write then Poll_Out else Poll_In),
+         Revents => 0);
+      Result : Interfaces.C.int;
+   begin
+      if FD < 0 then
+         return Hostkit.Process.Wait_Error;
+      end if;
+
+      Result := C_Poll (Item'Access, 1, Interfaces.C.int (Timeout_MS));
+
+      if Result > 0 then
+         return Hostkit.Process.Wait_Ready;
+      elsif Result = 0 then
+         return Hostkit.Process.Wait_Timed_Out;
+      else
+         return Hostkit.Process.Wait_Error;
+      end if;
+   exception
+      when others =>
+         return Hostkit.Process.Wait_Error;
+   end Wait_FD;
+
 
    function Native_Backend_Label return String is
    begin

@@ -46,6 +46,13 @@ private package Hostkit.Native is
    --  Ask a process, by id, to stop. See Hostkit.Process.Request_Stop.
    function Request_Stop (Process_Id : Integer) return Boolean;
 
+   --  Wait for a descriptor to be ready. See Hostkit.Process.Wait_FD.
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome;
+
    --  Which body this is.
    function Native_Backend_Label return String;
 

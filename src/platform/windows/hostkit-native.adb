@@ -1,3 +1,4 @@
+with Hostkit.Process;
 with Ada.Calendar;
 with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
@@ -435,6 +436,74 @@ package body Hostkit.Native is
       when others =>
          return False;
    end Request_Stop;
+
+   --  Windows cannot poll a pipe descriptor -- poll and select are for sockets. Turn the CRT
+   --  descriptor into the pipe HANDLE and ask the pipe directly whether bytes are waiting
+   --  (PeekNamedPipe), in a short loop until they are or the deadline passes. Write readiness
+   --  is reported at once: a pipe write to a helper rarely blocks, and there is no cheap ask.
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome
+   is
+      function Get_Osfhandle (FD : Interfaces.C.int) return System.Address
+        with Import => True, Convention => C, External_Name => "_get_osfhandle";
+
+      function Peek_Named_Pipe
+        (Pipe             : System.Address;
+         Buffer           : System.Address;
+         Buffer_Size      : C_DWord;
+         Bytes_Read       : access C_DWord;
+         Total_Available  : access C_DWord;
+         Bytes_Left       : access C_DWord)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "PeekNamedPipe";
+
+      procedure Sleep (Milliseconds : C_DWord)
+        with Import => True, Convention => Stdcall, External_Name => "Sleep";
+
+      Handle    : constant System.Address := Get_Osfhandle (Interfaces.C.int (FD));
+      Available : aliased C_DWord := 0;
+      Waited    : Integer := 0;
+      Slice     : constant Integer := 10;  --  ms between peeks
+   begin
+      if FD < 0
+        or else System.Storage_Elements.To_Integer (Handle) = -1
+      then
+         return Hostkit.Process.Wait_Error;
+      end if;
+
+      --  Nothing cheap to test for writability; a helper pipe write does not usually block.
+      if For_Write then
+         return Hostkit.Process.Wait_Ready;
+      end if;
+
+      loop
+         Available := 0;
+         if Peek_Named_Pipe
+              (Handle, System.Null_Address, 0, null, Available'Access, null) = 0
+         then
+            --  The pipe is gone (the helper exited). That is a readable event -- the caller's
+            --  next read returns end-of-file -- not a wait error.
+            return Hostkit.Process.Wait_Ready;
+         end if;
+
+         if Available > 0 then
+            return Hostkit.Process.Wait_Ready;
+         end if;
+
+         exit when Timeout_MS >= 0 and then Waited >= Timeout_MS;
+         Sleep (C_DWord (Slice));
+         Waited := Waited + Slice;
+      end loop;
+
+      return Hostkit.Process.Wait_Timed_Out;
+   exception
+      when others =>
+         return Hostkit.Process.Wait_Error;
+   end Wait_FD;
+
 
    function Native_Backend_Label return String is
    begin

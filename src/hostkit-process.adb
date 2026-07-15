@@ -191,6 +191,18 @@ package body Hostkit.Process is
          return False;
    end Request_Stop;
 
+   function Wait_FD
+     (FD         : Integer;
+      For_Write  : Boolean;
+      Timeout_MS : Integer)
+      return Wait_Outcome is
+   begin
+      return Hostkit.Native.Wait_FD (FD, For_Write, Timeout_MS);
+   exception
+      when others =>
+         return Wait_Error;
+   end Wait_FD;
+
    function Native_Backend_Label return String is
    begin
       return Hostkit.Native.Native_Backend_Label;
