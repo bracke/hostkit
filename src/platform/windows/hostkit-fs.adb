@@ -5,6 +5,9 @@ with Ada.Strings.UTF_Encoding.Wide_Strings;
 with Interfaces.C.Strings;
 
 with System;
+with Interfaces;
+with System.Storage_Elements;
+with Ada.Strings.Unbounded;
 
 package body Hostkit.Fs is
 
@@ -153,5 +156,141 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Replace_File;
+
+   --  Windows has no readlink: a link is a reparse point. Open it without following it
+   --  (FILE_FLAG_OPEN_REPARSE_POINT) and pull the target out of the reparse data. The
+   --  print name is the human target ("real.txt"); the substitute name is a fallback.
+   function Read_Link_Target
+     (Path   : String;
+      Target : out Ada.Strings.Unbounded.Unbounded_String)
+      return Boolean
+   is
+      use type System.Address;
+
+      Fsctl_Get_Reparse_Point : constant C_DWord := 16#0009_00A8#;
+      Open_Existing           : constant C_DWord := 3;
+      Flag_Backup_Semantics   : constant C_DWord := 16#0200_0000#;
+      Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
+      Share_All               : constant C_DWord := 7;
+      Tag_Symlink             : constant C_DWord := 16#A000_000C#;
+      Tag_Mount_Point         : constant C_DWord := 16#A000_0003#;
+      Invalid_Handle          : constant System.Address :=
+        System.Storage_Elements.To_Address
+          (System.Storage_Elements.Integer_Address'Last);
+
+      function Create_File
+        (Name       : System.Address;
+         Access_Way : C_DWord;
+         Share      : C_DWord;
+         Security   : System.Address;
+         Creation   : C_DWord;
+         Flags      : C_DWord;
+         Template   : System.Address)
+         return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
+
+      function Device_Io_Control
+        (Handle     : System.Address;
+         Code       : C_DWord;
+         In_Buffer  : System.Address;
+         In_Size    : C_DWord;
+         Out_Buffer : System.Address;
+         Out_Size   : C_DWord;
+         Returned   : access C_DWord;
+         Overlapped : System.Address)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall,
+             External_Name => "DeviceIoControl";
+
+      function Close_Handle (Handle : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
+
+      Wide_Path : aliased Wide_String := Wide (Path);
+      Buffer    : array (0 .. 16 * 1024 - 1) of aliased Interfaces.Unsigned_8 :=
+        [others => 0];
+      Handle    : System.Address;
+      Returned  : aliased C_DWord := 0;
+      Outcome   : Interfaces.C.int;
+      Ignored   : Interfaces.C.int;
+
+      function U16 (At_Index : Natural) return Natural is
+        (Natural (Buffer (At_Index)) + Natural (Buffer (At_Index + 1)) * 256);
+
+      function U32 (At_Index : Natural) return C_DWord is
+        (C_DWord (Buffer (At_Index))
+         + C_DWord (Buffer (At_Index + 1)) * 256
+         + C_DWord (Buffer (At_Index + 2)) * 65_536
+         + C_DWord (Buffer (At_Index + 3)) * 16_777_216);
+   begin
+      Target := Ada.Strings.Unbounded.Null_Unbounded_String;
+
+      Handle := Create_File
+        (Name       => Wide_Path'Address,
+         Access_Way => 0,
+         Share      => Share_All,
+         Security   => System.Null_Address,
+         Creation   => Open_Existing,
+         Flags      => Flag_Backup_Semantics + Flag_Open_Reparse_Point,
+         Template   => System.Null_Address);
+      if Handle = Invalid_Handle then
+         return False;
+      end if;
+
+      Outcome := Device_Io_Control
+        (Handle     => Handle,
+         Code       => Fsctl_Get_Reparse_Point,
+         In_Buffer  => System.Null_Address,
+         In_Size    => 0,
+         Out_Buffer => Buffer'Address,
+         Out_Size   => Buffer'Length,
+         Returned   => Returned'Access,
+         Overlapped => System.Null_Address);
+      Ignored := Close_Handle (Handle);
+      if Outcome = 0 then
+         return False;
+      end if;
+
+      declare
+         Tag           : constant C_DWord := U32 (0);
+         Path_Buf_Base : Natural;
+         Name_Off      : Natural;
+         Name_Len      : Natural;   --  in bytes
+      begin
+         if Tag = Tag_Symlink then
+            Path_Buf_Base := 20;
+         elsif Tag = Tag_Mount_Point then
+            Path_Buf_Base := 16;
+         else
+            return False;
+         end if;
+
+         Name_Off := U16 (12);   --  PrintNameOffset
+         Name_Len := U16 (14);   --  PrintNameLength
+         if Name_Len = 0 then
+            Name_Off := U16 (8);    --  SubstituteNameOffset
+            Name_Len := U16 (10);   --  SubstituteNameLength
+         end if;
+         if Name_Len = 0 then
+            return False;
+         end if;
+
+         declare
+            Start  : constant Natural := Path_Buf_Base + Name_Off;
+            Chars  : constant Natural := Name_Len / 2;
+            Wide_T : Wide_String (1 .. Chars);
+         begin
+            for Index in 0 .. Chars - 1 loop
+               Wide_T (Index + 1) :=
+                 Wide_Character'Val (U16 (Start + Index * 2));
+            end loop;
+            Target := Ada.Strings.Unbounded.To_Unbounded_String
+              (Ada.Strings.UTF_Encoding.Wide_Strings.Encode (Wide_T));
+         end;
+      end;
+      return True;
+   exception
+      when others =>
+         return False;
+   end Read_Link_Target;
 
 end Hostkit.Fs;

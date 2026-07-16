@@ -1,3 +1,5 @@
+with Ada.Strings.Unbounded;
+
 package body Hostkit.Fs is
 
    --  An unknown host: nothing is claimed, and nothing is pretended.
@@ -40,5 +42,16 @@ package body Hostkit.Fs is
    begin
       return False;
    end Replace_File;
+
+   function Read_Link_Target
+     (Path   : String;
+      Target : out Ada.Strings.Unbounded.Unbounded_String)
+      return Boolean
+   is
+      pragma Unreferenced (Path);
+   begin
+      Target := Ada.Strings.Unbounded.Null_Unbounded_String;
+      return False;
+   end Read_Link_Target;
 
 end Hostkit.Fs;

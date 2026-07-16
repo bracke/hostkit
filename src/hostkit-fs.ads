@@ -1,3 +1,5 @@
+with Ada.Strings.Unbounded;
+
 --  Facts about a path that the host answers differently -- and that GNAT gets wrong on
 --  Windows without saying so.
 package Hostkit.Fs is
@@ -59,6 +61,20 @@ package Hostkit.Fs is
    function Replace_File
      (Source : String;
       Target : String)
+      return Boolean;
+
+   --  Read the literal target of the symbolic link (or junction) at Path.
+   --
+   --  POSIX has readlink. Windows has no such call: a link is a reparse point, so this
+   --  opens it without following (FILE_FLAG_OPEN_REPARSE_POINT) and reads the target out
+   --  of the reparse data. GNAT offers nothing here -- its own reader is a Windows stub
+   --  that always fails, which made a scanner treat every Windows link as broken.
+   --
+   --  @return False when Path is not a link or the target cannot be read; Target is then
+   --          empty. On success Target holds the link's own target text.
+   function Read_Link_Target
+     (Path   : String;
+      Target : out Ada.Strings.Unbounded.Unbounded_String)
       return Boolean;
 
 end Hostkit.Fs;
