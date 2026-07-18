@@ -331,55 +331,99 @@ package body Hostkit.Fs is
       function Close_Handle (Handle : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
-      Wide_Path : aliased Wide_String := Wide (Path);
-      Wide_Buf  : aliased Wide_String (1 .. 32 * 1024) := [others => Wide_Character'Val (0)];
-      Handle    : System.Address;
-      Length    : C_DWord;
-      Ignored   : Interfaces.C.int;
-   begin
-      Handle := Create_File
-        (Name       => Wide_Path'Address,
-         Access_Way => 0,
-         Share      => Share_All,
-         Security   => System.Null_Address,
-         Creation   => Open_Existing,
-         Flags      => Flag_Backup_Semantics,
-         Template   => System.Null_Address);
-      if Handle = Invalid_Handle then
-         return "";
-      end if;
-
-      --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
-      --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it would
-      --  not fit -- the required size including the NUL, which we treat as failure.
-      Length := Get_Final_Path_Name_By_Handle
-        (Handle => Handle,
-         Path   => Wide_Buf'Address,
-         Count  => Wide_Buf'Length,
-         Flags  => 0);
-      Ignored := Close_Handle (Handle);
-
-      if Length = 0 or else Length > Wide_Buf'Length then
-         return "";
-      end if;
-
-      declare
-         Resolved : constant String :=
-           Ada.Strings.UTF_Encoding.Wide_Strings.Encode
-             (Wide_Buf (1 .. Natural (Length)));
+      --  Resolve a single path that must exist, to its canonical long-name form (with
+      --  the \\?\ / \\?\UNC\ prefix stripped). Returns "" when Target does not exist.
+      function Resolve (Target : String) return String is
+         Wide_Path : aliased Wide_String := Wide (Target);
+         Wide_Buf  : aliased Wide_String (1 .. 32 * 1024) :=
+           [others => Wide_Character'Val (0)];
+         Handle    : System.Address;
+         Length    : C_DWord;
+         Ignored   : Interfaces.C.int;
       begin
-         --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.
-         if Resolved'Length >= 8
-           and then Resolved (Resolved'First .. Resolved'First + 7) = "\\?\UNC\"
-         then
-            return "\\" & Resolved (Resolved'First + 8 .. Resolved'Last);
-         elsif Resolved'Length >= 4
-           and then Resolved (Resolved'First .. Resolved'First + 3) = "\\?\"
-         then
-            return Resolved (Resolved'First + 4 .. Resolved'Last);
-         else
-            return Resolved;
+         Handle := Create_File
+           (Name       => Wide_Path'Address,
+            Access_Way => 0,
+            Share      => Share_All,
+            Security   => System.Null_Address,
+            Creation   => Open_Existing,
+            Flags      => Flag_Backup_Semantics,
+            Template   => System.Null_Address);
+         if Handle = Invalid_Handle then
+            return "";
          end if;
+
+         --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
+         --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it
+         --  would not fit -- the required size including the NUL, treated as failure.
+         Length := Get_Final_Path_Name_By_Handle
+           (Handle => Handle,
+            Path   => Wide_Buf'Address,
+            Count  => Wide_Buf'Length,
+            Flags  => 0);
+         Ignored := Close_Handle (Handle);
+
+         if Length = 0 or else Length > Wide_Buf'Length then
+            return "";
+         end if;
+
+         declare
+            Resolved : constant String :=
+              Ada.Strings.UTF_Encoding.Wide_Strings.Encode
+                (Wide_Buf (1 .. Natural (Length)));
+         begin
+            --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.
+            if Resolved'Length >= 8
+              and then Resolved (Resolved'First .. Resolved'First + 7) = "\\?\UNC\"
+            then
+               return "\\" & Resolved (Resolved'First + 8 .. Resolved'Last);
+            elsif Resolved'Length >= 4
+              and then Resolved (Resolved'First .. Resolved'First + 3) = "\\?\"
+            then
+               return Resolved (Resolved'First + 4 .. Resolved'Last);
+            else
+               return Resolved;
+            end if;
+         end;
+      end Resolve;
+
+      --  Index of the last path separator in S, or 0 if there is none.
+      function Last_Separator (S : String) return Natural is
+      begin
+         for Index in reverse S'Range loop
+            if S (Index) = '\' or else S (Index) = '/' then
+               return Index;
+            end if;
+         end loop;
+         return 0;
+      end Last_Separator;
+
+      Direct : constant String := Resolve (Path);
+   begin
+      if Direct /= "" then
+         return Direct;
+      end if;
+
+      --  Path does not exist -- a broken or cyclic symbolic-link target, or a proposed
+      --  output. GetFinalPathNameByHandleW cannot resolve it, and a lexical fallback would
+      --  keep 8.3 short names (...\RUNNER~1\...) that never share a prefix with a resolved
+      --  input root (...\runneradmin\...). Resolve the existing parent to its long-name
+      --  form and re-attach the leaf, so a nonexistent target lands in the same canonical
+      --  form as the roots it is compared against. Deterministic, so cycle detection still
+      --  matches a revisited link.
+      declare
+         Cut : constant Natural := Last_Separator (Path);
+      begin
+         if Cut > Path'First then
+            declare
+               Parent : constant String := Resolve (Path (Path'First .. Cut - 1));
+            begin
+               if Parent /= "" then
+                  return Parent & "\" & Path (Cut + 1 .. Path'Last);
+               end if;
+            end;
+         end if;
+         return "";
       end;
    exception
       when others =>
