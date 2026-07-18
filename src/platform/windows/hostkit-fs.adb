@@ -453,7 +453,7 @@ package body Hostkit.Fs is
                         elsif T'Length >= 2 and then T (T'First + 1) = ':'
                         then T
                         elsif Cut > P'First
-                        then P (P'First .. Cut - 1) & "\" & T
+                        then P (P'First .. Cut - 1) & "/" & T
                         else T);
                   begin
                      return Resolve_Chain (Abs_Target, Depth - 1, New_Min);
