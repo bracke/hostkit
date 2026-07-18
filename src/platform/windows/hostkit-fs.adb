@@ -293,6 +293,44 @@ package body Hostkit.Fs is
          return False;
    end Read_Link_Target;
 
+   --  Which call removes a link here depends on what the link points at: a link to a
+   --  directory carries FILE_ATTRIBUTE_DIRECTORY and only RemoveDirectoryW will take it,
+   --  while DeleteFileW takes every other reparse point. Ada.Directories.Delete_File is
+   --  DeleteFileW on both platforms, so a directory symlink refused it and came back as
+   --  NAME_ERROR "does not exist".
+   --
+   --  GetFileAttributesW reports the link's own attributes rather than the target's, so
+   --  neither the test nor the removal follows the link -- the target is left alone.
+   function Delete_Link (Path : String) return Boolean is
+      function Remove_Directory (Name : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "RemoveDirectoryW";
+
+      function Delete_File (Name : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
+
+      C_Path     : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (C_Path);
+      Wide_Path  : aliased Wide_String := Wide (Path);
+   begin
+      Interfaces.C.Strings.Free (C_Path);
+
+      if Attributes = Invalid_File_Attributes
+        or else (Attributes and File_Attribute_Reparse_Point) = 0
+      then
+         return False;
+      end if;
+
+      if (Attributes and File_Attribute_Directory) /= 0 then
+         return Remove_Directory (Wide_Path'Address) /= 0;
+      else
+         return Delete_File (Wide_Path'Address) /= 0;
+      end if;
+   exception
+      when others =>
+         return False;
+   end Delete_Link;
+
    --  Windows has no realpath. Open the path -- following links, so no
    --  FILE_FLAG_OPEN_REPARSE_POINT here -- and ask the kernel for the final, canonical
    --  name of what the handle actually refers to. GetFinalPathNameByHandleW returns it in

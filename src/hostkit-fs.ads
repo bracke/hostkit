@@ -77,6 +77,22 @@ package Hostkit.Fs is
       Target : out Ada.Strings.Unbounded.Unbounded_String)
       return Boolean;
 
+   --  Remove the link at Path -- the link itself, never what it points at.
+   --
+   --  A link to a directory is a link on POSIX and a directory on Windows, and the two
+   --  hosts remove it with different calls: unlink there, RemoveDirectoryW here for a
+   --  directory reparse point and DeleteFileW for any other. Ada.Directories.Delete_File
+   --  is the file call on both, so a Windows directory symlink refused it -- and, having
+   --  asked a stat that followed the link, reported the refusal as "file does not exist".
+   --
+   --  Not following is the point. The target is someone else's -- often deliberately
+   --  outside the tree being cleared -- and a caller that followed the link would delete
+   --  it. This removes a link or nothing.
+   --
+   --  @return True when the link is gone. False when Path is not a link (a regular file
+   --          or directory is left alone) or the host refused to remove it.
+   function Delete_Link (Path : String) return Boolean;
+
    --  Resolve Path to its canonical absolute form, following symbolic links and
    --  reparse points -- POSIX realpath, Windows GetFinalPathNameByHandleW.
    --  Ada.Directories.Full_Name cannot be used: on POSIX it resolves links, but on

@@ -54,6 +54,12 @@ package body Hostkit.Fs is
       return False;
    end Read_Link_Target;
 
+   function Delete_Link (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Delete_Link;
+
    function Real_Path (Path : String) return String is
       pragma Unreferenced (Path);
    begin
