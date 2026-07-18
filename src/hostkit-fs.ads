@@ -77,4 +77,12 @@ package Hostkit.Fs is
       Target : out Ada.Strings.Unbounded.Unbounded_String)
       return Boolean;
 
+   --  Resolve Path to its canonical absolute form, following symbolic links and
+   --  reparse points -- POSIX realpath, Windows GetFinalPathNameByHandleW.
+   --  Ada.Directories.Full_Name cannot be used: on POSIX it resolves links, but on
+   --  Windows it is GetFullPathName (purely lexical, does not follow reparse points).
+   --  @return Empty string if Path cannot be resolved; otherwise the resolved path
+   --          (on Windows with the \\?\ and \\?\UNC\ prefix stripped).
+   function Real_Path (Path : String) return String;
+
 end Hostkit.Fs;

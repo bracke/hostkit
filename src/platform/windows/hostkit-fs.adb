@@ -293,4 +293,97 @@ package body Hostkit.Fs is
          return False;
    end Read_Link_Target;
 
+   --  Windows has no realpath. Open the path -- following links, so no
+   --  FILE_FLAG_OPEN_REPARSE_POINT here -- and ask the kernel for the final, canonical
+   --  name of what the handle actually refers to. GetFinalPathNameByHandleW returns it in
+   --  the \\?\ (or \\?\UNC\) namespace; strip that prefix so callers see an ordinary path.
+   --  Ada.Directories.Full_Name is GetFullPathName here: purely lexical, follows nothing.
+   function Real_Path (Path : String) return String is
+      use type System.Address;
+
+      Open_Existing         : constant C_DWord := 3;
+      Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
+      Share_All             : constant C_DWord := 7;
+      Invalid_Handle        : constant System.Address :=
+        System.Storage_Elements.To_Address
+          (System.Storage_Elements.Integer_Address'Last);
+
+      function Create_File
+        (Name       : System.Address;
+         Access_Way : C_DWord;
+         Share      : C_DWord;
+         Security   : System.Address;
+         Creation   : C_DWord;
+         Flags      : C_DWord;
+         Template   : System.Address)
+         return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
+
+      function Get_Final_Path_Name_By_Handle
+        (Handle : System.Address;
+         Path   : System.Address;
+         Count  : C_DWord;
+         Flags  : C_DWord)
+         return C_DWord
+        with Import => True, Convention => Stdcall,
+             External_Name => "GetFinalPathNameByHandleW";
+
+      function Close_Handle (Handle : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
+
+      Wide_Path : aliased Wide_String := Wide (Path);
+      Wide_Buf  : aliased Wide_String (1 .. 32 * 1024) := [others => Wide_Character'Val (0)];
+      Handle    : System.Address;
+      Length    : C_DWord;
+      Ignored   : Interfaces.C.int;
+   begin
+      Handle := Create_File
+        (Name       => Wide_Path'Address,
+         Access_Way => 0,
+         Share      => Share_All,
+         Security   => System.Null_Address,
+         Creation   => Open_Existing,
+         Flags      => Flag_Backup_Semantics,
+         Template   => System.Null_Address);
+      if Handle = Invalid_Handle then
+         return "";
+      end if;
+
+      --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
+      --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it would
+      --  not fit -- the required size including the NUL, which we treat as failure.
+      Length := Get_Final_Path_Name_By_Handle
+        (Handle => Handle,
+         Path   => Wide_Buf'Address,
+         Count  => Wide_Buf'Length,
+         Flags  => 0);
+      Ignored := Close_Handle (Handle);
+
+      if Length = 0 or else Length > Wide_Buf'Length then
+         return "";
+      end if;
+
+      declare
+         Resolved : constant String :=
+           Ada.Strings.UTF_Encoding.Wide_Strings.Encode
+             (Wide_Buf (1 .. Natural (Length)));
+      begin
+         --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.
+         if Resolved'Length >= 8
+           and then Resolved (Resolved'First .. Resolved'First + 7) = "\\?\UNC\"
+         then
+            return "\\" & Resolved (Resolved'First + 8 .. Resolved'Last);
+         elsif Resolved'Length >= 4
+           and then Resolved (Resolved'First .. Resolved'First + 3) = "\\?\"
+         then
+            return Resolved (Resolved'First + 4 .. Resolved'Last);
+         else
+            return Resolved;
+         end if;
+      end;
+   exception
+      when others =>
+         return "";
+   end Real_Path;
+
 end Hostkit.Fs;

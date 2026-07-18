@@ -54,4 +54,10 @@ package body Hostkit.Fs is
       return False;
    end Read_Link_Target;
 
+   function Real_Path (Path : String) return String is
+      pragma Unreferenced (Path);
+   begin
+      return "";
+   end Real_Path;
+
 end Hostkit.Fs;
