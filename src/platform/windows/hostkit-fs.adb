@@ -398,33 +398,73 @@ package body Hostkit.Fs is
          return 0;
       end Last_Separator;
 
-      Direct : constant String := Resolve (Path);
-   begin
-      if Direct /= "" then
-         return Direct;
-      end if;
-
-      --  Path does not exist -- a broken or cyclic symbolic-link target, or a proposed
-      --  output. GetFinalPathNameByHandleW cannot resolve it, and a lexical fallback would
-      --  keep 8.3 short names (...\RUNNER~1\...) that never share a prefix with a resolved
-      --  input root (...\runneradmin\...). Resolve the existing parent to its long-name
-      --  form and re-attach the leaf, so a nonexistent target lands in the same canonical
-      --  form as the roots it is compared against. Deterministic, so cycle detection still
-      --  matches a revisited link.
-      declare
-         Cut : constant Natural := Last_Separator (Path);
+      --  Re-attach a nonexistent leaf onto its resolved parent, so a path that does not
+      --  exist still lands in the same long-name form as the roots it is compared against.
+      function Parent_Compose (P : String) return String is
+         Cut : constant Natural := Last_Separator (P);
       begin
-         if Cut > Path'First then
+         if Cut > P'First then
             declare
-               Parent : constant String := Resolve (Path (Path'First .. Cut - 1));
+               Parent : constant String := Resolve (P (P'First .. Cut - 1));
             begin
                if Parent /= "" then
-                  return Parent & "\" & Path (Cut + 1 .. Path'Last);
+                  return Parent & "\" & P (Cut + 1 .. P'Last);
                end if;
             end;
          end if;
          return "";
-      end;
+      end Parent_Compose;
+
+      --  Canonicalize P, following symbolic links even when their target does not exist.
+      --  GetFinalPathNameByHandleW resolves an existing path directly; when it cannot
+      --  (a broken or cyclic link) and P is itself a link, read the link's own target and
+      --  resolve THAT -- matching POSIX, where Full_Name resolves a link to its target
+      --  path even if the target is missing. Without this a broken-link input root stayed
+      --  the link's own path while the followed target became a sibling, so the scanner's
+      --  containment check read them as unrelated (SCAN_SYMLINK_TARGET_OUTSIDE_INPUT). A
+      --  link cycle collapses to the lexically-smallest path in the chain, so every member
+      --  maps to one representative and the scanner detects the revisit as a cycle.
+      function Resolve_Chain
+        (P : String; Depth : Natural; Min_So_Far : String) return String
+      is
+         Direct  : constant String := Resolve (P);
+         New_Min : constant String :=
+           (if Min_So_Far = "" or else P < Min_So_Far then P else Min_So_Far);
+      begin
+         if Direct /= "" then
+            return Direct;
+         end if;
+         if Is_Link (P) then
+            if Depth = 0 then
+               return Parent_Compose (New_Min);
+            end if;
+            declare
+               Target : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               if Read_Link_Target (P, Target) then
+                  declare
+                     T   : constant String :=
+                       Ada.Strings.Unbounded.To_String (Target);
+                     Cut : constant Natural := Last_Separator (P);
+                     Abs_Target : constant String :=
+                       (if T'Length >= 1
+                          and then (T (T'First) = '\' or else T (T'First) = '/')
+                        then T
+                        elsif T'Length >= 2 and then T (T'First + 1) = ':'
+                        then T
+                        elsif Cut > P'First
+                        then P (P'First .. Cut - 1) & "\" & T
+                        else T);
+                  begin
+                     return Resolve_Chain (Abs_Target, Depth - 1, New_Min);
+                  end;
+               end if;
+            end;
+         end if;
+         return Parent_Compose (P);
+      end Resolve_Chain;
+   begin
+      return Resolve_Chain (Path, 40, "");
    exception
       when others =>
          return "";
