@@ -101,4 +101,12 @@ package Hostkit.Fs is
    --          (on Windows with the \\?\ and \\?\UNC\ prefix stripped).
    function Real_Path (Path : String) return String;
 
+   --  The host's directory for temporary/scratch files, without a trailing
+   --  separator. On POSIX this is $TMPDIR, else /tmp. On Windows it is
+   --  GetTempPathA, which consults TMP/TEMP/USERPROFILE and falls back to the
+   --  Windows directory -- so it is valid even when the process environment
+   --  carries no temp variable (a spawned tool often has none), unlike reading
+   --  %TEMP% directly. Never empty.
+   function Temp_Directory return String;
+
 end Hostkit.Fs;

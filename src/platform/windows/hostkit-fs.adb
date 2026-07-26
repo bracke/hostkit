@@ -29,6 +29,12 @@ package body Hostkit.Fs is
       return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesA";
 
+   function Get_Temp_Path
+     (Buffer_Length : C_DWord;
+      Buffer        : System.Address)
+      return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "GetTempPathA";
+
    function Create_Symbolic_Link
      (Link   : System.Address;
       Target : System.Address;
@@ -507,5 +513,28 @@ package body Hostkit.Fs is
       when others =>
          return "";
    end Real_Path;
+
+   function Temp_Directory return String is
+      use type Interfaces.C.size_t;
+      Buf : Interfaces.C.char_array (0 .. 519) := (others => Interfaces.C.nul);
+      N   : constant C_DWord := Get_Temp_Path (C_DWord (Buf'Length), Buf'Address);
+   begin
+      --  GetTempPathA returns 0 on failure, or the length required if the
+      --  buffer was too small; 520 bytes comfortably holds any MAX_PATH temp dir.
+      if N = 0 or else N > C_DWord (Buf'Length) then
+         return ".";
+      end if;
+      declare
+         Raw : constant String :=
+           Interfaces.C.To_Ada (Buf (0 .. Interfaces.C.size_t (N) - 1), Trim_Nul => False);
+      begin
+         --  GetTempPathA always appends a trailing backslash; drop it so the
+         --  result composes with "/" or "\" the way callers expect.
+         if Raw'Length > 1 and then (Raw (Raw'Last) = '\' or else Raw (Raw'Last) = '/') then
+            return Raw (Raw'First .. Raw'Last - 1);
+         end if;
+         return Raw;
+      end;
+   end Temp_Directory;
 
 end Hostkit.Fs;

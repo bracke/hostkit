@@ -1,3 +1,4 @@
+with Ada.Environment_Variables;
 with System;
 with Interfaces;
 with Ada.Directories;
@@ -5,7 +6,6 @@ with Ada.Directories;
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
-with Ada.Strings.Unbounded;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -70,7 +70,6 @@ package body Hostkit.Fs is
    --  rather than reconstructing the whole field. A regular file only -- a directory's bits
    --  mean something else.
    function Accessible_By_Others (Path : String) return Boolean is
-      use type Interfaces.C.int;
       use type Interfaces.Unsigned_8;
       use type Ada.Directories.File_Kind;
 
@@ -229,5 +228,15 @@ package body Hostkit.Fs is
       when others =>
          return "";
    end Real_Path;
+
+   function Temp_Directory return String is
+   begin
+      if Ada.Environment_Variables.Exists ("TMPDIR")
+        and then Ada.Environment_Variables.Value ("TMPDIR") /= ""
+      then
+         return Ada.Environment_Variables.Value ("TMPDIR");
+      end if;
+      return "/tmp";
+   end Temp_Directory;
 
 end Hostkit.Fs;
