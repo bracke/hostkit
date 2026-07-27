@@ -1,4 +1,6 @@
+with Ada.Streams;
 with Ada.Strings.Unbounded;
+with Interfaces;
 
 --  Facts about a path that the host answers differently -- and that GNAT gets wrong on
 --  Windows without saying so.
@@ -77,6 +79,53 @@ package Hostkit.Fs is
    --          False for a path that does not exist, and for anything that is neither a
    --          regular file nor a directory.
    function Make_Private (Path : String) return Boolean;
+
+   --  Give Path to another owner.
+   --
+   --  POSIX ownership is a pair of numbers and a privileged operation; Windows has
+   --  no such pair, and an owner there is a SID in a security descriptor. False on
+   --  Windows means it was not done, not that it succeeded silently.
+   --  @return True when the host applied it
+   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean;
+
+   --  Attach an extended attribute to Path.
+   --
+   --  Windows has alternate data streams, which are not the same thing and are not
+   --  written here; this declines there rather than approximating.
+   --  @return True when the host applied it
+   function Set_Extended_Attribute
+     (Path  : String;
+      Name  : String;
+      Value : Ada.Streams.Stream_Element_Array) return Boolean;
+
+   --  Create a named pipe in the filesystem at Path.
+   --
+   --  A Windows named pipe lives in its own namespace, never in a directory, so
+   --  there is nothing here to create and this declines.
+   --  @return True when the host created one
+   function Create_FIFO (Path : String; Mode : Natural) return Boolean;
+
+   type Device_Kind is (Character_Device, Block_Device);
+
+   --  Create a device node at Path.
+   --
+   --  Device is the host's own encoding of major and minor, which differs between
+   --  Linux, BSD and Solaris -- the caller decides that, because a caller reading an
+   --  archive knows which layout wrote it. Windows has no device nodes in the
+   --  filesystem and declines.
+   --  @return True when the host created one
+   function Create_Device
+     (Path   : String;
+      Kind   : Device_Kind;
+      Device : Interfaces.Unsigned_64;
+      Mode   : Natural) return Boolean;
+
+   --  Create a second name for an existing file.
+   --
+   --  Unlike the rest of these, Windows does have this one: CreateHardLinkW, on a
+   --  volume that supports it.
+   --  @return True when Link_Path now names the same file as Target
+   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean;
 
    --  Atomically replace Target with Source (a completed temp file), on one filesystem.
    --

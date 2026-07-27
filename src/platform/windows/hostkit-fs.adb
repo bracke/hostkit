@@ -1,5 +1,6 @@
 with Ada.Characters.Handling;
 with Ada.Directories;
+with Ada.Streams;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
 
 with Interfaces.C.Strings;
@@ -143,6 +144,63 @@ package body Hostkit.Fs is
    end Directory_Accessible_By_Others;
 
    --  No mode bits to set, and this does not write an ACL; see the spec.
+
+   --  None of these exist on this host; see the spec for what each would mean.
+   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean is
+      pragma Unreferenced (Path, User, Group);
+   begin
+      return False;
+   end Set_Owner;
+
+   function Set_Extended_Attribute
+     (Path  : String;
+      Name  : String;
+      Value : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      pragma Unreferenced (Path, Name, Value);
+   begin
+      return False;
+   end Set_Extended_Attribute;
+
+   function Create_FIFO (Path : String; Mode : Natural) return Boolean is
+      pragma Unreferenced (Path, Mode);
+   begin
+      return False;
+   end Create_FIFO;
+
+   function Create_Device
+     (Path   : String;
+      Kind   : Device_Kind;
+      Device : Interfaces.Unsigned_64;
+      Mode   : Natural) return Boolean
+   is
+      pragma Unreferenced (Path, Kind, Device, Mode);
+   begin
+      return False;
+   end Create_Device;
+
+   --  The one of these Windows does have. NTFS keeps a hard link; FAT does not,
+   --  and the call fails there rather than pretending.
+   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean is
+      function Create_Hard_Link_W
+        (Link_Name     : System.Address;
+         Existing_File : System.Address;
+         Attributes    : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall,
+             External_Name => "CreateHardLinkW";
+
+      Wide_Target : aliased Wide_String := Wide (Target);
+      Wide_Link   : aliased Wide_String := Wide (Link_Path);
+      Created     : constant Interfaces.C.int :=
+        Create_Hard_Link_W
+          (Wide_Link'Address, Wide_Target'Address, System.Null_Address);
+   begin
+      return Created /= 0;
+   exception
+      when others =>
+         return False;
+   end Create_Hard_Link;
+
    function Make_Private (Path : String) return Boolean is
       pragma Unreferenced (Path);
    begin

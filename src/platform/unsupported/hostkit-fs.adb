@@ -42,6 +42,47 @@ package body Hostkit.Fs is
    end Directory_Accessible_By_Others;
 
    --  No mode bits to set, and this does not write an ACL; see the spec.
+
+   --  None of these exist on this host; see the spec for what each would mean.
+   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean is
+      pragma Unreferenced (Path, User, Group);
+   begin
+      return False;
+   end Set_Owner;
+
+   function Set_Extended_Attribute
+     (Path  : String;
+      Name  : String;
+      Value : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      pragma Unreferenced (Path, Name, Value);
+   begin
+      return False;
+   end Set_Extended_Attribute;
+
+   function Create_FIFO (Path : String; Mode : Natural) return Boolean is
+      pragma Unreferenced (Path, Mode);
+   begin
+      return False;
+   end Create_FIFO;
+
+   function Create_Device
+     (Path   : String;
+      Kind   : Device_Kind;
+      Device : Interfaces.Unsigned_64;
+      Mode   : Natural) return Boolean
+   is
+      pragma Unreferenced (Path, Kind, Device, Mode);
+   begin
+      return False;
+   end Create_Device;
+
+   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean is
+      pragma Unreferenced (Target, Link_Path);
+   begin
+      return False;
+   end Create_Hard_Link;
+
    function Make_Private (Path : String) return Boolean is
       pragma Unreferenced (Path);
    begin

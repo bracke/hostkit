@@ -2,6 +2,7 @@ with Ada.Environment_Variables;
 with System;
 with Interfaces;
 with Ada.Directories;
+with Ada.Streams;
 
 with GNAT.OS_Lib;
 
@@ -9,6 +10,7 @@ with Interfaces.C.Strings;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
+   use type Interfaces.C.unsigned;
 
    function Symlink
      (Target : Interfaces.C.Strings.chars_ptr;
@@ -117,6 +119,129 @@ package body Hostkit.Fs is
    end Directory_Accessible_By_Others;
 
    --  chmod(2), not a spawned chmod(1): no PATH to find, and a return code to check.
+
+   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean is
+      function C_Chown
+        (Path : Interfaces.C.Strings.chars_ptr;
+         UID  : Interfaces.C.int;
+         GID  : Interfaces.C.int) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "chown";
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Status : Interfaces.C.int;
+   begin
+      Status :=
+        C_Chown (C_Path, Interfaces.C.int (User), Interfaces.C.int (Group));
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Set_Owner;
+
+   function Set_Extended_Attribute
+     (Path  : String;
+      Name  : String;
+      Value : Ada.Streams.Stream_Element_Array) return Boolean
+   is
+      function C_Setxattr
+        (Path  : Interfaces.C.Strings.chars_ptr;
+         Name  : Interfaces.C.Strings.chars_ptr;
+         Value : System.Address;
+         Size  : Interfaces.C.size_t;
+         Flags : Interfaces.C.int) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "setxattr";
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      C_Name : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Name);
+      Buffer : Ada.Streams.Stream_Element_Array := Value;
+      Status : Interfaces.C.int;
+   begin
+      Status :=
+        C_Setxattr
+          (C_Path, C_Name, Buffer'Address,
+           Interfaces.C.size_t (Value'Length), 0);
+      Interfaces.C.Strings.Free (C_Path);
+      Interfaces.C.Strings.Free (C_Name);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Set_Extended_Attribute;
+
+   function Create_FIFO (Path : String; Mode : Natural) return Boolean is
+      function C_Mkfifo
+        (Path : Interfaces.C.Strings.chars_ptr;
+         Mode : Interfaces.C.unsigned) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "mkfifo";
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Status : Interfaces.C.int;
+   begin
+      Status := C_Mkfifo (C_Path, Interfaces.C.unsigned (Mode));
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Create_FIFO;
+
+   function Create_Device
+     (Path   : String;
+      Kind   : Device_Kind;
+      Device : Interfaces.Unsigned_64;
+      Mode   : Natural) return Boolean
+   is
+      function C_Mknod
+        (Path : Interfaces.C.Strings.chars_ptr;
+         Mode : Interfaces.C.unsigned;
+         Dev  : Interfaces.C.unsigned_long) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "mknod";
+
+      S_IFCHR : constant Interfaces.C.unsigned := 8#020000#;
+      S_IFBLK : constant Interfaces.C.unsigned := 8#060000#;
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Full   : constant Interfaces.C.unsigned :=
+        (if Kind = Character_Device then S_IFCHR else S_IFBLK)
+        or Interfaces.C.unsigned (Mode);
+      Status : Interfaces.C.int;
+   begin
+      Status :=
+        C_Mknod (C_Path, Full, Interfaces.C.unsigned_long (Device));
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Create_Device;
+
+   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean is
+      function C_Link
+        (Old_Path : Interfaces.C.Strings.chars_ptr;
+         New_Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "link";
+
+      C_Target : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Target);
+      C_Link_P : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Link_Path);
+      Status   : Interfaces.C.int;
+   begin
+      Status := C_Link (C_Target, C_Link_P);
+      Interfaces.C.Strings.Free (C_Target);
+      Interfaces.C.Strings.Free (C_Link_P);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Create_Hard_Link;
+
    function Make_Private (Path : String) return Boolean is
       use type Interfaces.C.int;
       use type Ada.Directories.File_Kind;
