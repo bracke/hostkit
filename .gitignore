@@ -7,3 +7,5 @@ tests/obj/
 tests/bin/
 tests/alire/
 tests/config/
+*.ali
+*.o
