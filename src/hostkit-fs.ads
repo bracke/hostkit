@@ -62,6 +62,22 @@ package Hostkit.Fs is
    --  private directory as exposed, or an exposed one as private.
    function Directory_Accessible_By_Others (Path : String) return Boolean;
 
+   --  Restrict Path to its owner: 0600 for a regular file, 0700 for a directory, which
+   --  needs the owner's execute bit to be entered at all.
+   --
+   --  The usual way to do this is to spawn chmod, and that is the trouble: on Windows
+   --  there is no chmod to find, so the spawn is skipped, the write goes on, and a
+   --  private key ends up with whatever permissions it was created with -- silently,
+   --  because a caller that spawns a tool it cannot find learns nothing from its
+   --  absence. This is a call, not a spawn: it needs no PATH and it has a result.
+   --
+   --  @return True when the host applied it. False on Windows, where there are no mode
+   --          bits and this does not write an ACL -- the caller has *not* been handed a
+   --          private path, and if that matters it has to say so rather than assume.
+   --          False for a path that does not exist, and for anything that is neither a
+   --          regular file nor a directory.
+   function Make_Private (Path : String) return Boolean;
+
    --  Atomically replace Target with Source (a completed temp file), on one filesystem.
    --
    --  An atomic write ends by renaming the temp file over the real one. POSIX rename does

@@ -48,6 +48,21 @@ package body Hostkit_Suite is
       return Base;
    end Scratch;
 
+   --  Setting a mode is the fixture here, not the thing under test, so it goes straight
+   --  to chmod(2) rather than through Hostkit.Fs.Make_Private, which is one of the
+   --  things being tested. A no-op on Windows, where the callers guard for it anyway.
+   procedure Chmod (Path : String; Mode : Interfaces.C.int) is
+      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
+        return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "chmod";
+
+      C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Ignored : constant Interfaces.C.int := C_Chmod (C_Path, Mode);
+   begin
+      pragma Unreferenced (Ignored);
+      Interfaces.C.Strings.Free (C_Path);
+   end Chmod;
+
    function File_Contains (Path : String; Text : String) return Boolean is
       File : Ada.Text_IO.File_Type;
    begin
@@ -260,18 +275,6 @@ package body Hostkit_Suite is
       Open_Dir    : constant String := Ada.Directories.Compose (Scratch, "hk-dir-0755");
       A_File      : constant String := Ada.Directories.Compose (Scratch, "hk-dir-file");
 
-      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
-        return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "chmod";
-
-      procedure Chmod (Path : String; Mode : Interfaces.C.int) is
-         C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-         Ignored : constant Interfaces.C.int := C_Chmod (C_Path, Mode);
-      begin
-         pragma Unreferenced (Ignored);
-         Interfaces.C.Strings.Free (C_Path);
-      end Chmod;
-
       File : Ada.Text_IO.File_Type;
    begin
       Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, A_File);
@@ -297,6 +300,45 @@ package body Hostkit_Suite is
         (not Hostkit.Fs.Directory_Accessible_By_Others (A_File),
          "a regular file is not judged by this -- directories only");
    end Test_Directory_Accessible_By_Others;
+
+   procedure Test_Make_Private (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+
+      A_File  : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-file");
+      A_Dir   : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-dir");
+      Missing : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-gone");
+
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, A_File);
+      Ada.Text_IO.Close (File);
+      Ada.Directories.Create_Path (A_Dir);
+      Chmod (A_File, 8#644#);
+      Chmod (A_Dir, 8#755#);
+
+      if Hostkit.Shell.Is_Command_Shell then
+         Assert
+           (not Hostkit.Fs.Make_Private (A_File),
+            "a host with no mode bits says it did not make the path private");
+      else
+         Assert (Hostkit.Fs.Make_Private (A_File), "a file is made private");
+         Assert
+           (not Hostkit.Fs.Accessible_By_Others (A_File),
+            "a file made private is no longer accessible by others");
+
+         Assert (Hostkit.Fs.Make_Private (A_Dir), "a directory is made private");
+         Assert
+           (not Hostkit.Fs.Directory_Accessible_By_Others (A_Dir),
+            "a directory made private is no longer accessible by others");
+         Assert
+           (Ada.Directories.Exists (A_Dir),
+            "a directory made private can still be entered by its owner");
+      end if;
+
+      Assert
+        (not Hostkit.Fs.Make_Private (Missing),
+         "a path that is not there is not reported as made private");
+   end Test_Make_Private;
 
    procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -353,6 +395,8 @@ package body Hostkit_Suite is
         (T,
          Test_Directory_Accessible_By_Others'Access,
          "fs : a group- or world-readable directory is flagged");
+      Register_Routine
+        (T, Test_Make_Private'Access, "fs : a path is restricted to its owner");
       Register_Routine
         (T, Test_The_Host_Is_Not_Guessed'Access, "host : the host identifies itself");
       Register_Routine

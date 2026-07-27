@@ -41,6 +41,13 @@ package body Hostkit.Fs is
       return False;
    end Directory_Accessible_By_Others;
 
+   --  No mode bits to set, and this does not write an ACL; see the spec.
+   function Make_Private (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Make_Private;
+
    function Replace_File
      (Source : String;
       Target : String)
