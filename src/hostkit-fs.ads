@@ -49,6 +49,19 @@ package Hostkit.Fs is
    --  False there -- it does not enforce the check on Windows, it declines to guess.
    function Accessible_By_Others (Path : String) return Boolean;
 
+   --  Can anyone but the owner get at this directory?
+   --
+   --  The same mode test (mode and 8#077#), asked separately because a directory's bits
+   --  do not mean what a file's mean -- r is listing it, x is traversing it -- and
+   --  because a caller wanting one is rarely asking about the other. A private tree is
+   --  the case that needs it: a CA root, an ssh directory, a keyring. It answers for a
+   --  directory only, and False for anything it cannot read.
+   --
+   --  On Windows there are no such bits; access is by ACL, and this does not read the
+   --  ACL, so it answers False there -- it declines to guess rather than reporting a
+   --  private directory as exposed, or an exposed one as private.
+   function Directory_Accessible_By_Others (Path : String) return Boolean;
+
    --  Atomically replace Target with Source (a completed temp file), on one filesystem.
    --
    --  An atomic write ends by renaming the temp file over the real one. POSIX rename does

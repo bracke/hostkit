@@ -67,9 +67,9 @@ package body Hostkit.Fs is
 
    --  Group or other having any permission at all: (st_mode and 8#077#) /= 0. Those six bits
    --  live in the lowest byte of st_mode, so this reads that one byte out of the stat buffer
-   --  rather than reconstructing the whole field. A regular file only -- a directory's bits
-   --  mean something else.
-   function Accessible_By_Others (Path : String) return Boolean is
+   --  rather than reconstructing the whole field. Want keeps the two callers apart: a file's
+   --  bits and a directory's do not mean the same thing, so neither answers for the other.
+   function Exposed (Path : String; Want : Ada.Directories.File_Kind) return Boolean is
       use type Interfaces.Unsigned_8;
       use type Ada.Directories.File_Kind;
 
@@ -85,7 +85,7 @@ package body Hostkit.Fs is
       Result : Interfaces.C.int;
    begin
       if not Ada.Directories.Exists (Path)
-        or else Ada.Directories.Kind (Path) /= Ada.Directories.Ordinary_File
+        or else Ada.Directories.Kind (Path) /= Want
       then
          Interfaces.C.Strings.Free (C_Path);
          return False;
@@ -104,7 +104,17 @@ package body Hostkit.Fs is
    exception
       when others =>
          return False;
+   end Exposed;
+
+   function Accessible_By_Others (Path : String) return Boolean is
+   begin
+      return Exposed (Path, Ada.Directories.Ordinary_File);
    end Accessible_By_Others;
+
+   function Directory_Accessible_By_Others (Path : String) return Boolean is
+   begin
+      return Exposed (Path, Ada.Directories.Directory);
+   end Directory_Accessible_By_Others;
 
    --  POSIX rename replaces an existing Target atomically, which is exactly what the
    --  lock-file-then-rename write wants and what Windows rename cannot do.

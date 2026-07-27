@@ -12,6 +12,7 @@ with Ada.Strings.Unbounded;
 
 with Hostkit;
 with Hostkit.Fs;
+with Hostkit.Host;
 with Hostkit.Process;
 with Hostkit.Shell;
 
@@ -250,6 +251,65 @@ package body Hostkit_Suite is
          "a directory is not judged by this -- regular files only");
    end Test_Accessible_By_Others;
 
+   procedure Test_Directory_Accessible_By_Others
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Private_Dir : constant String := Ada.Directories.Compose (Scratch, "hk-dir-0700");
+      Open_Dir    : constant String := Ada.Directories.Compose (Scratch, "hk-dir-0755");
+      A_File      : constant String := Ada.Directories.Compose (Scratch, "hk-dir-file");
+
+      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
+        return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "chmod";
+
+      procedure Chmod (Path : String; Mode : Interfaces.C.int) is
+         C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+         Ignored : constant Interfaces.C.int := C_Chmod (C_Path, Mode);
+      begin
+         pragma Unreferenced (Ignored);
+         Interfaces.C.Strings.Free (C_Path);
+      end Chmod;
+
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, A_File);
+      Ada.Text_IO.Close (File);
+
+      --  Only meaningful where mode bits mean something; on Windows this always answers
+      --  False, and setting a POSIX mode there is a no-op, so there is nothing to assert.
+      if not Hostkit.Shell.Is_Command_Shell then
+         Ada.Directories.Create_Path (Private_Dir);
+         Ada.Directories.Create_Path (Open_Dir);
+         Chmod (Private_Dir, 8#700#);
+         Chmod (Open_Dir, 8#755#);
+
+         Assert
+           (not Hostkit.Fs.Directory_Accessible_By_Others (Private_Dir),
+            "a 0700 directory is not accessible by others");
+         Assert
+           (Hostkit.Fs.Directory_Accessible_By_Others (Open_Dir),
+            "a 0755 directory is accessible by others");
+      end if;
+
+      Assert
+        (not Hostkit.Fs.Directory_Accessible_By_Others (A_File),
+         "a regular file is not judged by this -- directories only");
+   end Test_Directory_Accessible_By_Others;
+
+   procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+   begin
+      --  Two per-OS bodies, written independently, must agree about which host this is.
+      --  An environment-sniffing answer is what this exists to replace, so the check is
+      --  that the identity matches a fact of the host itself rather than a variable.
+      Assert
+        ((Hostkit.Host.Current = Hostkit.Host.Windows) = Hostkit.Shell.Is_Command_Shell,
+         "the host kind agrees with the shell the host runs");
+   end Test_The_Host_Is_Not_Guessed;
+
    procedure Test_A_Directory_Is_Not_Executable (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
    begin
@@ -289,6 +349,12 @@ package body Hostkit_Suite is
         (T, Test_A_Directory_Is_Not_Executable'Access, "fs : a directory is not executable");
       Register_Routine
         (T, Test_Accessible_By_Others'Access, "fs : a group- or world-readable file is flagged");
+      Register_Routine
+        (T,
+         Test_Directory_Accessible_By_Others'Access,
+         "fs : a group- or world-readable directory is flagged");
+      Register_Routine
+        (T, Test_The_Host_Is_Not_Guessed'Access, "host : the host identifies itself");
       Register_Routine
         (T, Test_Captured_Run'Access, "process : a captured run keeps stdout and stderr apart");
       Register_Routine

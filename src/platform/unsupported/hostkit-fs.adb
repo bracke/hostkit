@@ -34,6 +34,13 @@ package body Hostkit.Fs is
       return False;
    end Accessible_By_Others;
 
+   --  No mode bits here; see the comment on the file-level answer.
+   function Directory_Accessible_By_Others (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Directory_Accessible_By_Others;
+
    function Replace_File
      (Source : String;
       Target : String)

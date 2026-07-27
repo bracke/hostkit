@@ -135,6 +135,13 @@ package body Hostkit.Fs is
       return False;
    end Accessible_By_Others;
 
+   --  No mode bits here; see the comment on the file-level answer.
+   function Directory_Accessible_By_Others (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Directory_Accessible_By_Others;
+
    --  MoveFileEx with MOVEFILE_REPLACE_EXISTING is the atomic replacing rename Windows
    --  offers; plain rename (and GNAT.OS_Lib.Rename_File) fails when the target exists.
    function Replace_File
