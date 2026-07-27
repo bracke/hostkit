@@ -160,7 +160,6 @@ package body Hostkit_Suite is
 
    procedure Test_Captured_Run (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use Ada.Strings.Unbounded;
 
       Out_Path : constant String := Ada.Directories.Compose (Scratch, "captured-out.txt");
       Err_Path : constant String := Ada.Directories.Compose (Scratch, "captured-err.txt");
@@ -186,7 +185,6 @@ package body Hostkit_Suite is
 
    procedure Test_Timeout_Kills (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use Ada.Strings.Unbounded;
 
       Arguments : Hostkit.String_Vectors.Vector;
       Outcome   : Hostkit.Process.Process_Outcome;
@@ -207,7 +205,6 @@ package body Hostkit_Suite is
 
    procedure Test_Accessible_By_Others (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use Ada.Strings.Unbounded;
 
       procedure Write (Path : String) is
          File : Ada.Text_IO.File_Type;
@@ -301,9 +298,7 @@ package body Hostkit_Suite is
    function Suite return AUnit.Test_Suites.Access_Test_Suite is
       Result : constant AUnit.Test_Suites.Access_Test_Suite := new AUnit.Test_Suites.Test_Suite;
    begin
-      pragma Warnings (Off, "use of an anonymous access type allocator");
-      Result.Add_Test (new Hostkit_Test_Case);
-      pragma Warnings (On, "use of an anonymous access type allocator");
+      Result.Add_Test (AUnit.Test_Cases.Test_Case_Access'(new Hostkit_Test_Case));
       return Result;
    end Suite;
 

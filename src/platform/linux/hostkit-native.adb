@@ -332,7 +332,6 @@ package body Hostkit.Native is
          return Hostkit.Process.Wait_Error;
    end Wait_FD;
 
-
    function Native_Backend_Label return String is
    begin
       return "POSIX/fork-exec-waitpid-kill";

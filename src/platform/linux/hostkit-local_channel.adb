@@ -1,6 +1,5 @@
 with Interfaces.C;
 
-
 with System;
 
 package body Hostkit.Local_Channel is
