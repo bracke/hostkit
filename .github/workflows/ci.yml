@@ -26,11 +26,11 @@ jobs:
 
     steps:
       - name: Check out hostkit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Alire
         # v5 defaults to alr 2.1.0, whose index carries gnat_native 15.2.1.
-        uses: alire-project/setup-alire@v5
+        uses: alire-project/setup-alire@v6
         with:
           toolchain: gnat_native=15.2.1 gprbuild
 
