@@ -31,6 +31,18 @@ package Hostkit.Process is
 
    --  Run Program to completion and report its exit status. For a short-lived helper,
    --  where the status is the point.
+   --  Where this host would find Program, or "" when it would not find it.
+   --
+   --  Run and Run_Captured take a path, not a name: the spawn underneath them
+   --  does not search PATH, and a name it cannot resolve fails in a way that
+   --  looks exactly like a program that ran and returned non-zero. Resolve
+   --  first and the two are distinguishable.
+   --
+   --  Windows is why this is not a PATH split of the caller's own: a name there
+   --  matches with any of the PATHEXT suffixes, and "setfacl" may be
+   --  "setfacl.exe".
+   function Locate (Program : String) return String;
+
    function Run
      (Program     : String;
       Arguments   : String_Vectors.Vector;

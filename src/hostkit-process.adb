@@ -86,6 +86,26 @@ package body Hostkit.Process is
          return False;
    end Launch;
 
+   function Locate (Program : String) return String is
+      use type GNAT.OS_Lib.String_Access;
+      Found : GNAT.OS_Lib.String_Access :=
+        GNAT.OS_Lib.Locate_Exec_On_Path (Program);
+   begin
+      if Found = null then
+         return "";
+      end if;
+
+      declare
+         Result : constant String := Found.all;
+      begin
+         GNAT.OS_Lib.Free (Found);
+         return Result;
+      end;
+   exception
+      when others =>
+         return "";
+   end Locate;
+
    function Run
      (Program     : String;
       Arguments   : String_Vectors.Vector;
