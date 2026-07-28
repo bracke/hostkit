@@ -1,3 +1,4 @@
+with Ada.Streams.Stream_IO;
 with Ada.Strings.Unbounded;
 
 with GNAT.OS_Lib;
@@ -177,6 +178,7 @@ package body Hostkit.Process is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String := "";
+      Stdin_Path        : String := "";
       Stdout_Path       : String := "";
       Stderr_Path       : String := "";
       Timeout_Ms        : Natural := 0;
@@ -186,13 +188,33 @@ package body Hostkit.Process is
       return Process_Outcome
    is
       Nothing : Process_Outcome;
+
+      --  Asked here rather than in the four bodies so that every host answers
+      --  the same way. A body left to discover it has nowhere to read from is
+      --  already inside its own spawn, where POSIX can only end the child and
+      --  Windows can only decline -- two different stories for one mistake.
+      function Input_Is_Readable return Boolean is
+         File : Ada.Streams.Stream_IO.File_Type;
+      begin
+         Ada.Streams.Stream_IO.Open
+           (File, Ada.Streams.Stream_IO.In_File, Stdin_Path);
+         Ada.Streams.Stream_IO.Close (File);
+         return True;
+      exception
+         when others =>
+            return False;
+      end Input_Is_Readable;
    begin
       if Program = "" then
          return Nothing;
       end if;
 
+      if Stdin_Path /= "" and then not Input_Is_Readable then
+         return Nothing;
+      end if;
+
       return Hostkit.Native.Run_Captured
-               (Program, Arguments, Working_Directory,
+               (Program, Arguments, Working_Directory, Stdin_Path,
                 Stdout_Path, Stderr_Path, Timeout_Ms, Cancelled, Poll, Started);
    exception
       when others =>

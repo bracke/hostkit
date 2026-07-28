@@ -29,6 +29,7 @@ package body Hostkit.Native is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String;
+      Stdin_Path        : String;
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
@@ -38,7 +39,7 @@ package body Hostkit.Native is
       return Hostkit.Process.Process_Outcome
    is
       pragma Unreferenced
-        (Program, Arguments, Working_Directory, Stdout_Path, Stderr_Path,
+        (Program, Arguments, Working_Directory, Stdin_Path, Stdout_Path, Stderr_Path,
          Timeout_Ms, Cancelled, Poll, Started_Notice);
       Nothing : Hostkit.Process.Process_Outcome;
    begin

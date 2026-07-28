@@ -128,6 +128,13 @@ package Hostkit.Process is
    --  @param Arguments Its arguments, as a vector -- never a command line, so a filename
    --                   containing a space or a quote is just a filename.
    --  @param Working_Directory Where to run it; the current directory when empty.
+   --  @param Stdin_Path File to feed the program on standard input; it reads the
+   --                    caller's own standard input when empty. A program that
+   --                    asks for a secret this way is the reason it is here: there
+   --                    is no other way to answer one without a terminal. A path
+   --                    that cannot be opened fails the launch rather than falling
+   --                    back to the caller's input -- silently handing a password
+   --                    prompt the caller's terminal is how a test hangs for ever.
    --  @param Stdout_Path File to capture standard output into; discarded when empty.
    --  @param Stderr_Path File to capture standard error into; discarded when empty.
    --  @param Timeout_Ms How long to wait before killing it; 0 waits indefinitely.
@@ -138,6 +145,7 @@ package Hostkit.Process is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String := "";
+      Stdin_Path        : String := "";
       Stdout_Path       : String := "";
       Stderr_Path       : String := "";
       Timeout_Ms        : Natural := 0;

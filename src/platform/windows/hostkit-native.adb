@@ -186,9 +186,11 @@ package body Hostkit.Native is
          return False;
    end Run_Command_Line;
 
+   Generic_Read      : constant C_DWord := 16#8000_0000#;
    Generic_Write     : constant C_DWord := 16#4000_0000#;
    File_Share_Read   : constant C_DWord := 16#0000_0001#;
    Create_Always     : constant C_DWord := 2;
+   Open_Existing     : constant C_DWord := 3;
    File_Attr_Normal  : constant C_DWord := 16#0000_0080#;
    Start_Use_Handles : constant C_DWord := 16#0000_0100#;
    Invalid_Handle    : constant System.Address :=
@@ -200,6 +202,15 @@ package body Hostkit.Native is
       Inheritable : Interfaces.C.int := 0;
    end record
      with Convention => C;
+
+   --  Whichever of the three the caller gave us no file for, the child gets
+   --  ours; see the note where STARTF_USESTDHANDLES is set.
+   Std_Input_Handle  : constant C_DWord := 16#FFFF_FFF6#;  --  (DWORD) -10
+   Std_Output_Handle : constant C_DWord := 16#FFFF_FFF5#;  --  -11
+   Std_Error_Handle  : constant C_DWord := 16#FFFF_FFF4#;  --  -12
+
+   function Get_Std_Handle (Which : C_DWord) return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
 
    function Create_File
      (Name       : System.Address;
@@ -231,6 +242,7 @@ package body Hostkit.Native is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String;
+      Stdin_Path        : String;
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
@@ -300,9 +312,35 @@ package body Hostkit.Native is
                    Template   => System.Null_Address);
       end Capture;
 
+      --  The other direction: a file the child reads, rather than one it
+      --  writes. Opening it here rather than in the child is not a choice --
+      --  Windows has no fork, so every redirection has to exist as a handle
+      --  before CreateProcessW is called.
+      function Feed (Path : String) return System.Address is
+         Wide_Path : aliased Wide_String := Wide (Path);
+         Security  : aliased Security_Attributes;
+      begin
+         if Path = "" then
+            return Invalid_Handle;
+         end if;
+
+         Security.Length := C_DWord (Security_Attributes'Size / 8);
+         Security.Inheritable := 1;
+
+         return Create_File
+                  (Name       => Wide_Path'Address,
+                   Access_Way => Generic_Read,
+                   Share      => File_Share_Read,
+                   Security   => Security'Access,
+                   Creation   => Open_Existing,
+                   Attributes => File_Attr_Normal,
+                   Template   => System.Null_Address);
+      end Feed;
+
       Wide_Command : aliased Wide_String := Wide (Command_Line);
       Wide_Dir     : aliased Wide_String := Wide (Working_Directory);
 
+      In_Handle  : System.Address := Feed (Stdin_Path);
       Out_Handle : System.Address := Capture (Stdout_Path);
       Err_Handle : System.Address := Capture (Stderr_Path);
 
@@ -327,6 +365,11 @@ package body Hostkit.Native is
 
       procedure Close_Captures is
       begin
+         if In_Handle /= Invalid_Handle then
+            Ignored := Close_Handle (In_Handle);
+            In_Handle := Invalid_Handle;
+         end if;
+
          if Out_Handle /= Invalid_Handle then
             Ignored := Close_Handle (Out_Handle);
             Out_Handle := Invalid_Handle;
@@ -340,10 +383,33 @@ package body Hostkit.Native is
    begin
       Startup.Cb := C_DWord (Startup_Info'Size / 8);
 
-      if Out_Handle /= Invalid_Handle or else Err_Handle /= Invalid_Handle then
+      --  Told to read a file and unable to open it: the child must not silently
+      --  get ours instead. See the note on Stdin_Path in Hostkit.Process.
+      if Stdin_Path /= "" and then In_Handle = Invalid_Handle then
+         Close_Captures;
+         return Result;
+      end if;
+
+      if In_Handle /= Invalid_Handle
+        or else Out_Handle /= Invalid_Handle
+        or else Err_Handle /= Invalid_Handle
+      then
+         --  STARTF_USESTDHANDLES is all or nothing: the child takes all three
+         --  from here, so a stream we were given no file for has to be filled
+         --  in with the one we have ourselves. Leaving it unset does not mean
+         --  "inherit" -- it means the child gets no handle at all for that
+         --  stream, and a program that writes to its standard error then
+         --  writes to nothing.
          Startup.Flags := Start_Use_Handles;
-         Startup.Std_Output := Out_Handle;
-         Startup.Std_Error := Err_Handle;
+         Startup.Std_Input :=
+           (if In_Handle /= Invalid_Handle then In_Handle
+            else Get_Std_Handle (Std_Input_Handle));
+         Startup.Std_Output :=
+           (if Out_Handle /= Invalid_Handle then Out_Handle
+            else Get_Std_Handle (Std_Output_Handle));
+         Startup.Std_Error :=
+           (if Err_Handle /= Invalid_Handle then Err_Handle
+            else Get_Std_Handle (Std_Error_Handle));
       end if;
 
       if Create_Process

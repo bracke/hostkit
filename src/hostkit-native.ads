@@ -35,6 +35,7 @@ private package Hostkit.Native is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String;
+      Stdin_Path        : String;
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;

@@ -73,6 +73,7 @@ package body Hostkit.Native is
      (Program           : String;
       Arguments         : String_Vectors.Vector;
       Working_Directory : String;
+      Stdin_Path        : String;
       Stdout_Path       : String;
       Stderr_Path       : String;
       Timeout_Ms        : Natural;
@@ -112,6 +113,7 @@ package body Hostkit.Native is
       procedure Underscore_Exit (Status : C_Int)
         with Import => True, Convention => C, External_Name => "_exit";
 
+      O_Rdonly : constant C_Int := 0;
       O_Wronly : constant C_Int := 1;
       O_Creat  : constant C_Int := 64;
       O_Trunc  : constant C_Int := 512;
@@ -169,6 +171,27 @@ package body Hostkit.Native is
          return 128 + Signal;
       end Exit_Code;
 
+      --  The child's standard input, out of a file. Unlike the capture
+      --  redirections this one must not fail quietly: a program that cannot
+      --  open the file it was told to read would go on to read the caller's
+      --  terminal instead, and a prompt for a password would sit there for
+      --  ever rather than fail.
+      procedure Feed (Path : String) is
+         Path_C  : Interfaces.C.Strings.chars_ptr :=
+           Interfaces.C.Strings.New_String (Path);
+         Opened  : constant C_Int := C_Open (Path_C, O_Rdonly, 0);
+         Ignored : C_Int;
+      begin
+         Interfaces.C.Strings.Free (Path_C);
+
+         if Opened < 0 then
+            Underscore_Exit (127);
+         end if;
+
+         Ignored := Dup2 (Opened, 0);
+         Ignored := C_Close (Opened);
+      end Feed;
+
       procedure Redirect (Path : String; Target_Fd : C_Int) is
          Path_C  : Interfaces.C.Strings.chars_ptr :=
            Interfaces.C.Strings.New_String (Path);
@@ -201,6 +224,10 @@ package body Hostkit.Native is
       if Child = 0 then
          --  The child. Nothing here may return: on any failure it must _exit, or two
          --  copies of the caller would carry on running.
+         if Stdin_Path /= "" then
+            Feed (Stdin_Path);
+         end if;
+
          if Stdout_Path /= "" then
             Redirect (Stdout_Path, 1);
          end if;
