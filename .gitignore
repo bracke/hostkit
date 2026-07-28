@@ -7,5 +7,18 @@ tests/obj/
 tests/bin/
 tests/alire/
 tests/config/
+
+# Release-checker crates (generated Alire artifacts)
+/tools/obj/
+/tools/bin/
+/tools/alire/
+/tools/config/
+/tools/alire.lock
+/check_hostkit/obj/
+/check_hostkit/bin/
+/check_hostkit/alire/
+/check_hostkit/config/
+/check_hostkit/alire.lock
+
 *.ali
 *.o

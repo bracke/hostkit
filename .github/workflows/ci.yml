@@ -50,3 +50,36 @@ jobs:
           else
             ./bin/hostkit_tests
           fi
+
+  # The release checklist (tools/bin/check_all) drives the project_tools-based
+  # check_hostkit checker: manifest pins, required docs, and a library+suite
+  # build. Linux-only -- it validates the release gate, not per-host behaviour,
+  # which the matrix above covers. hostkit is not SPARK, so no GNATprove step.
+  linux-release-check:
+    name: Linux release checklist
+    runs-on: ubuntu-latest
+    env:
+      ALIRE_NONINTERACTIVE: "true"
+    steps:
+      - name: Check out hostkit
+        uses: actions/checkout@v7
+        with:
+          path: hostkit
+      - name: Check out project_tools sibling
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/project_tools
+          path: project_tools
+      - name: Set up Alire
+        uses: alire-project/setup-alire@v6
+        with:
+          toolchain: gnat_native=15.2.1 gprbuild
+      - name: Build aggregate release checker
+        working-directory: hostkit/tools
+        run: alr --non-interactive build
+      - name: Self-test aggregate release checker
+        working-directory: hostkit
+        run: tools/bin/check_all_selftest
+      - name: Run aggregate release checker
+        working-directory: hostkit
+        run: tools/bin/check_all
