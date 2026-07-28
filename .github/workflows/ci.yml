@@ -65,11 +65,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: hostkit
-      - name: Check out project_tools sibling
-        uses: actions/checkout@v7
+      - name: Check out sibling crates (transitive pin closure)
+        uses: bracke/project_tools/.github/actions/checkout-ada-siblings@main
         with:
-          repository: ${{ github.repository_owner }}/project_tools
-          path: project_tools
+          root: hostkit
       - name: Set up Alire
         uses: alire-project/setup-alire@v6
         with:
