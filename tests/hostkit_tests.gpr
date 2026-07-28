@@ -17,8 +17,15 @@ project Hostkit_Tests is
         Hostkit_Tests_Config.Ada_Compiler_Switches & ("-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU");
    end Compiler;
 
+
+   --  Bytes out as bytes in. Alire's generated switches carry -gnatW8 and the
+   --  binder takes its run-time encoding from the same place, which makes
+   --  Ada.Text_IO encode every byte above 127 a second time on the way out:
+   --  text that was already UTF-8 -- an accented path, an internationalized
+   --  domain name, a translated message -- came out doubled. -Wb is the
+   --  compiler default and leaves the bytes alone.
    package Binder is
-      for Switches ("Ada") use ("-Es");
+      for Switches ("Ada") use ("-Es", "-Wb");
    end Binder;
 
    package Builder is
