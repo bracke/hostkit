@@ -13,6 +13,7 @@ package body Hostkit.Host is
    --  is not the question -- whether this token is elevated is.
    function Is_Elevated return Boolean is
       use type Interfaces.C.int;
+      use type Interfaces.C.unsigned_long;
       use type System.Address;
 
       subtype C_DWord is Interfaces.C.unsigned_long;
