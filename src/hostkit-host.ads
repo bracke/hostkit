@@ -17,4 +17,17 @@ package Hostkit.Host is
    --  host Hostkit has no body for, not a failure to look.
    function Current return Kind;
 
+   --  Is this process running with administrative privileges -- root, or an
+   --  elevated Windows token?
+   --
+   --  Use it to explain a failure, never to pre-empt an attempt. False means
+   --  "not known to be privileged", which on a host Hostkit has no body for is
+   --  all that can be said; a caller that skipped the operation on the strength
+   --  of it would refuse to do something it might well have been allowed to do.
+   --  Try, and if it fails, ask this why.
+   --
+   --  Per host because the question is: POSIX asks the effective user id,
+   --  Windows asks the process token, and neither has any meaning on the other.
+   function Is_Elevated return Boolean;
+
 end Hostkit.Host;
