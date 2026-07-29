@@ -2,6 +2,7 @@ with AUnit.Assertions;
 with AUnit;
 with AUnit.Test_Cases;
 
+with Ada.Calendar;
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Environment_Variables;
@@ -14,6 +15,7 @@ with Hostkit;
 with Hostkit.Filesystem_Rules;
 with Hostkit.Fs;
 with Hostkit.Host;
+with Hostkit.Metadata;
 with Hostkit.Process;
 with Hostkit.Shell;
 with Hostkit.Watch;
@@ -638,6 +640,207 @@ package body Hostkit_Suite is
          "and a program that this host runs, is");
    end Test_A_Directory_Is_Not_Executable;
 
+   --  Write a file with something in it, as a fixture.
+   procedure Write_File (Path : String; Text : String) is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put_Line (File, Text);
+      Ada.Text_IO.Close (File);
+   end Write_File;
+
+   procedure Test_Metadata_Reports_What_It_Could_Not_Get
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Missing   : constant String := Ada.Directories.Compose (Scratch, "hk-no-such-file-xyzzy");
+      Mode      : Natural;
+      Available : Boolean;
+      User_Id   : Natural;
+      Group_Id  : Natural;
+      Born      : Ada.Calendar.Time;
+      pragma Unreferenced (Born);
+   begin
+      --  The contract that keeps a caller from inventing facts: a path this host
+      --  cannot answer for reports Available => False, and the value that comes
+      --  back with it is not a fact about any file.
+      Mode := Hostkit.Metadata.File_Permission_Bits (Missing, Available);
+      Assert (not Available, "a missing file has no permission bits to report");
+      Assert (Mode = 0, "and the accompanying value is the neutral 0, not a mode");
+
+      Hostkit.Metadata.File_Ownership (Missing, User_Id, Group_Id, Available);
+      Assert (not Available, "a missing file has no ownership to report");
+
+      Born := Hostkit.Metadata.File_Creation_Time (Missing, Available);
+      Assert (not Available, "a missing file has no creation time to report");
+
+      Assert
+        (not Hostkit.Metadata.Volume_Capacity_Of (Missing & "/deeper").Available
+           or else True,
+         "asking about a volume that is not there does not raise");
+   end Test_Metadata_Reports_What_It_Could_Not_Get;
+
+   procedure Test_Mode_And_Ownership_Agree_With_The_Separate_Calls
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Path : constant String := Ada.Directories.Compose (Scratch, "hk-meta-modes");
+
+      Separate_Mode      : Natural;
+      Separate_Mode_Ok   : Boolean;
+      Separate_User      : Natural;
+      Separate_Group     : Natural;
+      Separate_Owner_Ok  : Boolean;
+
+      Joint_Mode         : Natural;
+      Joint_Mode_Ok      : Boolean;
+      Joint_User         : Natural;
+      Joint_Group        : Natural;
+      Joint_Owner_Ok     : Boolean;
+   begin
+      Write_File (Path, "x");
+
+      --  File_Mode_And_Ownership exists only to save a syscall. If it ever
+      --  disagreed with the two calls it stands in for, it would be a silent
+      --  wrong answer in the middle of a directory listing -- so this is the
+      --  assertion that earns it.
+      Separate_Mode := Hostkit.Metadata.File_Permission_Bits (Path, Separate_Mode_Ok);
+      Hostkit.Metadata.File_Ownership (Path, Separate_User, Separate_Group, Separate_Owner_Ok);
+
+      Hostkit.Metadata.File_Mode_And_Ownership
+        (Path, Joint_Mode, Joint_Mode_Ok, Joint_User, Joint_Group, Joint_Owner_Ok);
+
+      Assert (Joint_Mode_Ok = Separate_Mode_Ok, "both report mode availability the same way");
+      Assert (Joint_Owner_Ok = Separate_Owner_Ok, "both report ownership availability the same way");
+
+      if Separate_Mode_Ok then
+         Assert (Joint_Mode = Separate_Mode, "the joint call reports the same mode bits");
+      end if;
+
+      if Separate_Owner_Ok then
+         Assert (Joint_User = Separate_User, "the joint call reports the same owner");
+         Assert (Joint_Group = Separate_Group, "the joint call reports the same group");
+      end if;
+
+      --  And a mode this host can set is a mode it reads back.
+      if Hostkit.Metadata.Permissions_Supported then
+         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#640#), "the host sets a mode it supports");
+         Separate_Mode := Hostkit.Metadata.File_Permission_Bits (Path, Separate_Mode_Ok);
+         Assert
+           (Separate_Mode_Ok and then Separate_Mode = 8#640#,
+            "and reads back exactly the mode it was given");
+      end if;
+
+      Ada.Directories.Delete_File (Path);
+   end Test_Mode_And_Ownership_Agree_With_The_Separate_Calls;
+
+   procedure Test_Same_File_Sees_Through_A_Second_Name
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Original : constant String := Ada.Directories.Compose (Scratch, "hk-same-original");
+      Twin     : constant String := Ada.Directories.Compose (Scratch, "hk-same-twin");
+      Other    : constant String := Ada.Directories.Compose (Scratch, "hk-same-other");
+
+      procedure Remove (Path : String) is
+      begin
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+      end Remove;
+   begin
+      Remove (Original);
+      Remove (Twin);
+      Remove (Other);
+
+      Write_File (Original, "content");
+      Write_File (Other, "content");
+
+      Assert (Hostkit.Metadata.Same_File (Original, Original), "a file is the same file as itself");
+      Assert
+        (not Hostkit.Metadata.Same_File (Original, Other),
+         "two files with identical contents are still two files");
+      Assert
+        (not Hostkit.Metadata.Same_File (Original, Ada.Directories.Compose (Scratch, "hk-same-absent")),
+         "a path that does not exist is not the same file as one that does");
+
+      --  A hard link is the identity a case-insensitive host gives two spellings
+      --  of one name: two paths, one file. It is the case this exists to catch,
+      --  and the one that destroys data when answered wrongly.
+      if Hostkit.Fs.Create_Hard_Link (Original, Twin) then
+         Assert
+           (Hostkit.Metadata.Same_File (Original, Twin),
+            "two names for one file are the same file");
+         Ada.Directories.Delete_File (Twin);
+      end if;
+
+      Ada.Directories.Delete_File (Original);
+      Ada.Directories.Delete_File (Other);
+   end Test_Same_File_Sees_Through_A_Second_Name;
+
+   procedure Test_A_Name_Round_Trips_Through_Its_Id
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Path      : constant String := Ada.Directories.Compose (Scratch, "hk-meta-owner");
+      User_Id   : Natural;
+      Group_Id  : Natural;
+      Available : Boolean;
+   begin
+      if not Hostkit.Metadata.Ownership_Supported then
+         --  Windows has no uid/gid pair; the host says so once, here, rather than
+         --  every one of these answering with a plausible 0.
+         Assert
+           (Hostkit.Metadata.User_Name_For_Id (0) = "",
+            "a host without ownership resolves no names");
+         return;
+      end if;
+
+      Write_File (Path, "x");
+      Hostkit.Metadata.File_Ownership (Path, User_Id, Group_Id, Available);
+      Assert (Available, "a file this process just created has ownership to report");
+
+      declare
+         Name  : constant String := Hostkit.Metadata.User_Name_For_Id (User_Id);
+         Found : Boolean;
+         Back  : Natural;
+      begin
+         Assert (Name /= "", "the owning user id resolves to a name");
+         Back := Hostkit.Metadata.User_Id_For_Name (Name, Found);
+         Assert (Found, "and that name resolves back to an id");
+         Assert (Back = User_Id, "which is the id it came from");
+      end;
+
+      declare
+         Name  : constant String := Hostkit.Metadata.Group_Name_For_Id (Group_Id);
+         Found : Boolean;
+         Back  : Natural;
+      begin
+         if Name /= "" then
+            Back := Hostkit.Metadata.Group_Id_For_Name (Name, Found);
+            Assert (Found, "the owning group name resolves back to an id");
+            Assert (Back = Group_Id, "which is the id it came from");
+         end if;
+      end;
+
+      Ada.Directories.Delete_File (Path);
+   end Test_A_Name_Round_Trips_Through_Its_Id;
+
+   procedure Test_A_Volume_Has_Room (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Capacity : constant Hostkit.Metadata.Volume_Capacity :=
+        Hostkit.Metadata.Volume_Capacity_Of (Ada.Directories.Current_Directory);
+   begin
+      Assert (Capacity.Available, "the volume this test is running on reports its capacity");
+      Assert (Capacity.Capacity_Bytes > 0, "a mounted volume has a size");
+      Assert
+        (Capacity.Free_Bytes <= Capacity.Capacity_Bytes,
+         "free space cannot exceed the volume it is free on");
+      Assert
+        (not Capacity.Inodes_Known or else Capacity.Free_Inode_Count <= Capacity.Inode_Count,
+         "free inodes cannot exceed the inodes there are");
+   end Test_A_Volume_Has_Room;
+
    --  Notification is asynchronous on every host, so a change is waited for
    --  rather than expected on the first poll -- up to five seconds, which is far
    --  beyond any plausible delivery and still bounded.
@@ -781,6 +984,20 @@ package body Hostkit_Suite is
         (T, Test_Captured_Input'Access, "process : a captured run reads the file it was given");
       Register_Routine
         (T, Test_Timeout_Kills'Access, "process : a program that will not stop is stopped");
+      Register_Routine
+        (T, Test_Metadata_Reports_What_It_Could_Not_Get'Access,
+         "metadata : what the host could not answer is reported, not invented");
+      Register_Routine
+        (T, Test_Mode_And_Ownership_Agree_With_The_Separate_Calls'Access,
+         "metadata : the one-call mode+ownership read agrees with the two it replaces");
+      Register_Routine
+        (T, Test_Same_File_Sees_Through_A_Second_Name'Access,
+         "metadata : two names for one file are recognised as the same file");
+      Register_Routine
+        (T, Test_A_Name_Round_Trips_Through_Its_Id'Access,
+         "metadata : an owner name round-trips through its numeric id");
+      Register_Routine
+        (T, Test_A_Volume_Has_Room'Access, "metadata : a mounted volume reports its capacity");
       Register_Routine
         (T, Test_A_Fresh_Watch_Is_Inactive'Access, "watch : a fresh watch is inactive");
       Register_Routine
