@@ -5,6 +5,7 @@ with System;
 
 package body Hostkit.Host is
    use Ada.Strings.Unbounded;
+   use type Interfaces.C.int;
 
    function GetUserDefaultLocaleName
      (Locale_Name : System.Address;

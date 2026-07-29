@@ -3,6 +3,7 @@ with System;
 
 package body Hostkit.Host is
    use type System.Address;
+   use type Interfaces.C.int;
 
    type CF_Index is new Interfaces.C.long;
    type CF_String_Encoding is new Interfaces.C.unsigned;

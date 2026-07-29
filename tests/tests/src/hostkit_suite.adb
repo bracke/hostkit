@@ -740,6 +740,7 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
       Path : constant String := Ada.Directories.Compose (Scratch, "hk-meta-modes");
 
       Separate_Mode      : Natural;
@@ -778,13 +779,23 @@ package body Hostkit_Suite is
          Assert (Joint_Group = Separate_Group, "the joint call reports the same group");
       end if;
 
-      --  And a mode this host can set is a mode it reads back.
+      --  A mode this host can set is a mode it reads back -- but only where the
+      --  bits are real. Windows says Permissions_Supported because it can honour
+      --  the request, not because it stores POSIX bits: it writes an ACL and
+      --  synthesises the mode back out of one, and an ACL does not round-trip
+      --  8#640# exactly (owner rights are implicit, inherited entries are not
+      --  ours). Asserting exact equality there would be asserting POSIX on a
+      --  host that never claimed it.
       if Hostkit.Metadata.Permissions_Supported then
          Assert (Hostkit.Metadata.Set_Permissions (Path, 8#640#), "the host sets a mode it supports");
          Separate_Mode := Hostkit.Metadata.File_Permission_Bits (Path, Separate_Mode_Ok);
-         Assert
-           (Separate_Mode_Ok and then Separate_Mode = 8#640#,
-            "and reads back exactly the mode it was given");
+         Assert (Separate_Mode_Ok, "and still reports the mode afterwards");
+
+         if Hostkit.Host.Current /= Hostkit.Host.Windows then
+            Assert
+              (Separate_Mode = 8#640#,
+               "and on a host with real mode bits, reads back exactly what it was given");
+         end if;
       end if;
 
       Ada.Directories.Delete_File (Path);
@@ -838,6 +849,7 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
       Path      : constant String := Ada.Directories.Compose (Scratch, "hk-meta-owner");
       User_Id   : Natural;
       Group_Id  : Natural;
@@ -864,7 +876,13 @@ package body Hostkit_Suite is
          Assert (Name /= "", "the owning user id resolves to a name");
          Back := Hostkit.Metadata.User_Id_For_Name (Name, Found);
          Assert (Found, "and that name resolves back to an id");
-         Assert (Back = User_Id, "which is the id it came from");
+
+         --  The id is the identity on POSIX, so it comes back unchanged. Windows
+         --  has no uid: the number is derived from a SID for callers that want
+         --  one, and a name-to-number derivation is not required to invert.
+         if Hostkit.Host.Current /= Hostkit.Host.Windows then
+            Assert (Back = User_Id, "which is the id it came from");
+         end if;
       end;
 
       declare
@@ -875,7 +893,10 @@ package body Hostkit_Suite is
          if Name /= "" then
             Back := Hostkit.Metadata.Group_Id_For_Name (Name, Found);
             Assert (Found, "the owning group name resolves back to an id");
-            Assert (Back = Group_Id, "which is the id it came from");
+
+            if Hostkit.Host.Current /= Hostkit.Host.Windows then
+               Assert (Back = Group_Id, "which is the id it came from");
+            end if;
          end if;
       end;
 
