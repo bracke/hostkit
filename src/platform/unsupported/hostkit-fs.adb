@@ -147,6 +147,11 @@ package body Hostkit.Fs is
       return "";
    end Application_Data_Directory;
 
+   function Cache_Directory return String is
+   begin
+      return "";
+   end Cache_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")

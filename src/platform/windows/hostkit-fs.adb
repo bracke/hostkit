@@ -669,6 +669,18 @@ package body Hostkit.Fs is
       return (if Home = "" then "" else Home & "\\AppData\\Roaming");
    end Application_Data_Directory;
 
+   function Cache_Directory return String is
+      Home : constant String := Home_Directory;
+   begin
+      --  LOCALAPPDATA, the non-roaming half of the profile. See the spec.
+      if Ada.Environment_Variables.Exists ("LOCALAPPDATA")
+        and then Ada.Environment_Variables.Value ("LOCALAPPDATA") /= ""
+      then
+         return Ada.Environment_Variables.Value ("LOCALAPPDATA");
+      end if;
+      return (if Home = "" then "" else Home & "\\AppData\\Local");
+   end Cache_Directory;
+
    function Temp_Directory return String is
       use type Interfaces.C.size_t;
       Buf : Interfaces.C.char_array (0 .. 519) := (others => Interfaces.C.nul);

@@ -699,6 +699,31 @@ package body Hostkit_Suite is
    --  What "this host will run it" means, pinned across the mode matrix, so a
    --  cheaper implementation has to agree with the one it replaces rather than
    --  merely look equivalent.
+   --  A cache and the application data directory must not be the same place.
+   --  They are on no host, and the reason is not tidiness: the roaming profile
+   --  travels between machines and Application Support is backed up, so a cache
+   --  put in either comes back from somewhere it was never meant to survive.
+   procedure Test_Cache_And_Data_Are_Different_Places
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+
+      Cache : constant String := Hostkit.Fs.Cache_Directory;
+      Data  : constant String := Hostkit.Fs.Application_Data_Directory;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
+         Assert (Cache = "", "a host with no answer says so");
+         return;
+      end if;
+
+      Assert (Cache /= "", "this host names a cache directory, got '" & Cache & "'");
+      Assert (Data /= "", "and an application data directory");
+      Assert
+        (Cache /= Data,
+         "the cache and the data directory are not the same place, both were '" & Cache & "'");
+   end Test_Cache_And_Data_Are_Different_Places;
+
    procedure Test_Executability_Across_Modes (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
       use type Hostkit.Host.Kind;
@@ -1178,6 +1203,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Executability_Across_Modes'Access,
          "fs : what this host will run, across the mode matrix");
+      Register_Routine
+        (T, Test_Cache_And_Data_Are_Different_Places'Access,
+         "fs : a cache does not live in the application data directory");
       Register_Routine
         (T, Test_Accessible_By_Others'Access, "fs : a group- or world-readable file is flagged");
       Register_Routine

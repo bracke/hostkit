@@ -498,6 +498,12 @@ package body Hostkit.Fs is
       return (if Home = "" then "" else Home & "/Library/Application Support");
    end Application_Data_Directory;
 
+   function Cache_Directory return String is
+      Home : constant String := Home_Directory;
+   begin
+      return (if Home = "" then "" else Home & "/Library/Caches");
+   end Cache_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")

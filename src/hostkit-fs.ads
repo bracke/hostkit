@@ -214,6 +214,23 @@ package Hostkit.Fs is
    --  knows which one applies.
    function Application_Data_Directory return String;
 
+   --  Where this host keeps per-user caches -- regenerable data that may be
+   --  deleted behind the program's back without losing anything.
+   --
+   --  A different place from Application_Data_Directory on every host, and the
+   --  difference has consequences rather than being tidiness: %LOCALAPPDATA%
+   --  rather than %APPDATA% because the roaming profile is copied between
+   --  machines at login and nobody wants a thumbnail cache travelling with it;
+   --  ~/Library/Caches rather than Application Support because the first is
+   --  excluded from backups and the second is not; $XDG_CACHE_HOME rather than
+   --  $XDG_DATA_HOME for the same reason the specification separates them.
+   --
+   --  Putting a cache in the data directory works, right up until the user
+   --  restores a backup or signs in on another machine.
+   --
+   --  @return The directory, or "" where the host will not say.
+   function Cache_Directory return String;
+
    function Temp_Directory return String;
 
    --  Does the filesystem holding Path enforce DOS/Windows filename rules --
