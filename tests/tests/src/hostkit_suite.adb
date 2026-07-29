@@ -583,6 +583,64 @@ package body Hostkit_Suite is
          "the host kind agrees with the shell the host runs");
    end Test_The_Host_Is_Not_Guessed;
 
+   procedure Test_Where_This_Program_Is (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+
+      Own : constant String := Hostkit.Fs.Own_Executable;
+      Dir : constant String := Hostkit.Fs.Own_Executable_Directory;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
+         Assert (Own = "", "a host with no body says so rather than guessing");
+         return;
+      end if;
+
+      --  The point is that this does not come from argv[0]: the suite is run
+      --  through alr, from a directory that is not its own, and the answer has
+      --  to be the file on disk either way.
+      Assert (Own /= "", "the host says where this program is");
+      Assert
+        (Ada.Directories.Exists (Own),
+         "and it is a path that exists: " & Own);
+      Assert
+        (Hostkit.Fs.Is_Executable (Own),
+         "and the thing at it is a program");
+      Assert
+        (Dir /= "" and then Ada.Directories.Exists (Dir),
+         "and the directory holding it is where its neighbours would be");
+
+      --  Same file as the one the suite was started as, whatever spelling the
+      --  caller used to say it.
+      Assert
+        (Hostkit.Metadata.Same_File (Own, Ada.Command_Line.Command_Name)
+           or else Ada.Command_Line.Command_Name = "",
+         "and it is the program that is running");
+   end Test_Where_This_Program_Is;
+
+   procedure Test_Where_This_User_Lives (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+
+      Home : constant String := Hostkit.Fs.Home_Directory;
+      Data : constant String := Hostkit.Fs.Application_Data_Directory;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
+         return;
+      end if;
+
+      Assert (Home /= "", "the host has a home directory for this user");
+      Assert
+        (Ada.Directories.Exists (Home),
+         "and it is a directory that exists: " & Home);
+
+      --  Not the same question: a program that writes per-user data into the
+      --  home directory is wrong on two of the three hosts.
+      Assert (Data /= "", "and a place for per-user application data");
+      Assert
+        (Data /= Home,
+         "which is not simply the home directory");
+   end Test_Where_This_User_Lives;
+
    procedure Test_Elevation_Is_Asked_Not_Assumed
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1135,6 +1193,12 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Elevation_Is_Asked_Not_Assumed'Access,
          "host : elevation is asked of the host, not assumed");
+      Register_Routine
+        (T, Test_Where_This_Program_Is'Access,
+         "fs : the host says where this program is");
+      Register_Routine
+        (T, Test_Where_This_User_Lives'Access,
+         "fs : the host says where this user keeps things");
       Register_Routine
         (T, Test_Captured_Run'Access, "process : a captured run keeps stdout and stderr apart");
       Register_Routine

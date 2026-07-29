@@ -586,6 +586,88 @@ package body Hostkit.Fs is
          return "";
    end Real_Path;
 
+   --  The directory part of a Windows path, either separator.
+   function Directory_Part (Path : String) return String is
+   begin
+      for Index in reverse Path'Range loop
+         if Path (Index) = '\\' or else Path (Index) = '/' then
+            return Path (Path'First .. Index - 1);
+         end if;
+      end loop;
+      return "";
+   end Directory_Part;
+
+   --  GetModuleFileNameW with a null module is this program's own image path.
+   --  Wide, because a user profile with a non-Latin-1 name is ordinary here and
+   --  the ANSI call would mangle it.
+   function Own_Executable return String is
+      function Get_Module_File_Name
+        (Module : System.Address;
+         Buffer : System.Address;
+         Size   : C_DWord)
+         return C_DWord
+        with Import => True, Convention => Stdcall,
+             External_Name => "GetModuleFileNameW";
+
+      Buffer : aliased Wide_String (1 .. 32768) := [others => Wide_Character'Val (0)];
+      Length : constant C_DWord :=
+        Get_Module_File_Name
+          (System.Null_Address, Buffer'Address, C_DWord (Buffer'Length));
+      Result : Ada.Strings.Unbounded.Unbounded_String;
+   begin
+      if Length = 0 or else Length >= C_DWord (Buffer'Length) then
+         return "";
+      end if;
+
+      for Index in 1 .. Natural (Length) loop
+         exit when Buffer (Index) = Wide_Character'Val (0);
+         if Wide_Character'Pos (Buffer (Index)) <= Character'Pos (Character'Last) then
+            Ada.Strings.Unbounded.Append
+              (Result, Character'Val (Wide_Character'Pos (Buffer (Index))));
+         end if;
+      end loop;
+
+      return Ada.Strings.Unbounded.To_String (Result);
+   exception
+      when others =>
+         return "";
+   end Own_Executable;
+
+   function Own_Executable_Directory return String is
+      Own : constant String := Own_Executable;
+   begin
+      return (if Own = "" then "" else Directory_Part (Own));
+   end Own_Executable_Directory;
+
+   --  USERPROFILE is the profile folder, and HOMEDRIVE+HOMEPATH is what a
+   --  domain login sets instead. HOME exists only where something POSIX-shaped
+   --  put it there, which is why it is last rather than first.
+   function Home_Directory return String is
+      function Env (Name : String) return String is
+        (if Ada.Environment_Variables.Exists (Name)
+         then Ada.Environment_Variables.Value (Name)
+         else "");
+   begin
+      if Env ("USERPROFILE") /= "" then
+         return Env ("USERPROFILE");
+      elsif Env ("HOMEDRIVE") /= "" and then Env ("HOMEPATH") /= "" then
+         return Env ("HOMEDRIVE") & Env ("HOMEPATH");
+      else
+         return Env ("HOME");
+      end if;
+   end Home_Directory;
+
+   function Application_Data_Directory return String is
+      Home : constant String := Home_Directory;
+   begin
+      if Ada.Environment_Variables.Exists ("APPDATA")
+        and then Ada.Environment_Variables.Value ("APPDATA") /= ""
+      then
+         return Ada.Environment_Variables.Value ("APPDATA");
+      end if;
+      return (if Home = "" then "" else Home & "\\AppData\\Roaming");
+   end Application_Data_Directory;
+
    function Temp_Directory return String is
       use type Interfaces.C.size_t;
       Buf : Interfaces.C.char_array (0 .. 519) := (others => Interfaces.C.nul);

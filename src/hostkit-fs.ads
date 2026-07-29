@@ -185,6 +185,35 @@ package Hostkit.Fs is
    --  Windows directory -- so it is valid even when the process environment
    --  carries no temp variable (a spawned tool often has none), unlike reading
    --  %TEMP% directly. Never empty.
+   --  This program's own executable, in full.
+   --
+   --  Not argv[0], which is whatever the caller passed: a relative path that
+   --  stops meaning anything once the program changes directory, a bare name
+   --  that a PATH search may resolve to a different program of the same name,
+   --  or the link rather than what it points at. A program that finds its data
+   --  files beside itself is asking a question with an exact answer, and every
+   --  host has one -- /proc/self/exe, _NSGetExecutablePath, GetModuleFileNameW.
+   --
+   --  @return The path, or "" where the host will not say.
+   function Own_Executable return String;
+
+   --  The directory holding this program's own executable, or "" with it.
+   function Own_Executable_Directory return String;
+
+   --  This user's home directory.
+   --
+   --  HOME is a convention a process can be started without; the host has a
+   --  record -- getpwuid on POSIX, the profile folder on Windows -- and that is
+   --  the fallback here. Empty only where neither will say, which is worth
+   --  telling apart from "the home directory is the current directory".
+   function Home_Directory return String;
+
+   --  Where this host keeps per-user application data: %APPDATA% on Windows,
+   --  ~/Library/Application Support on macOS, $XDG_DATA_HOME or ~/.local/share
+   --  elsewhere. The three are not interchangeable and nothing but the host
+   --  knows which one applies.
+   function Application_Data_Directory return String;
+
    function Temp_Directory return String;
 
    --  Does the filesystem holding Path enforce DOS/Windows filename rules --

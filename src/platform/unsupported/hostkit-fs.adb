@@ -122,6 +122,31 @@ package body Hostkit.Fs is
       return "";
    end Real_Path;
 
+   --  No body for this host: say so by saying nothing, rather than guessing at
+   --  a layout that may not exist.
+   function Own_Executable return String is
+   begin
+      return "";
+   end Own_Executable;
+
+   function Own_Executable_Directory return String is
+   begin
+      return "";
+   end Own_Executable_Directory;
+
+   function Home_Directory return String is
+   begin
+      if Ada.Environment_Variables.Exists ("HOME") then
+         return Ada.Environment_Variables.Value ("HOME");
+      end if;
+      return "";
+   end Home_Directory;
+
+   function Application_Data_Directory return String is
+   begin
+      return "";
+   end Application_Data_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")

@@ -406,6 +406,98 @@ package body Hostkit.Fs is
          return "";
    end Real_Path;
 
+   --  Shared by the three questions below: the directory part of a path.
+   function Directory_Part (Path : String) return String is
+   begin
+      for Index in reverse Path'Range loop
+         if Path (Index) = '/' then
+            return (if Index = Path'First then "/" else Path (Path'First .. Index - 1));
+         end if;
+      end loop;
+      return "";
+   end Directory_Part;
+
+   function Own_Executable return String is
+      function NS_Get_Executable_Path
+        (Buffer : System.Address; Size : access Interfaces.C.unsigned)
+         return Interfaces.C.int
+        with Import => True, Convention => C,
+             External_Name => "_NSGetExecutablePath";
+
+      Buffer : aliased String (1 .. 4096) := [others => ASCII.NUL];
+      Size   : aliased Interfaces.C.unsigned := Buffer'Length;
+      use type Interfaces.C.int;
+   begin
+      if NS_Get_Executable_Path (Buffer'Address, Size'Access) /= 0 then
+         return "";
+      end if;
+
+      for Index in Buffer'Range loop
+         if Buffer (Index) = ASCII.NUL then
+            --  Through the symlinks, so a program reached through one finds its
+            --  own data rather than the link's neighbourhood.
+            return Real_Path (Buffer (Buffer'First .. Index - 1));
+         end if;
+      end loop;
+      return "";
+   exception
+      when others =>
+         return "";
+   end Own_Executable;
+
+   function Own_Executable_Directory return String is
+      Own : constant String := Own_Executable;
+   begin
+      return (if Own = "" then "" else Directory_Part (Own));
+   end Own_Executable_Directory;
+
+   --  HOME first, because a user who exports it means it. The password file is
+   --  what the host itself records, and is there when HOME is not.
+   function Home_Directory return String is
+      function Getuid return Interfaces.C.unsigned
+        with Import => True, Convention => C, External_Name => "getuid";
+
+      type Passwd is record
+         Name   : Interfaces.C.Strings.chars_ptr;
+         Passwd : Interfaces.C.Strings.chars_ptr;
+         Uid    : Interfaces.C.unsigned;
+         Gid    : Interfaces.C.unsigned;
+         Gecos  : Interfaces.C.Strings.chars_ptr;
+         Dir    : Interfaces.C.Strings.chars_ptr;
+         Shell  : Interfaces.C.Strings.chars_ptr;
+      end record
+        with Convention => C;
+      type Passwd_Access is access all Passwd;
+
+      function Getpwuid (Uid : Interfaces.C.unsigned) return Passwd_Access
+        with Import => True, Convention => C, External_Name => "getpwuid";
+
+      use type Interfaces.C.Strings.chars_ptr;
+      Entry_Item : Passwd_Access;
+   begin
+      if Ada.Environment_Variables.Exists ("HOME")
+        and then Ada.Environment_Variables.Value ("HOME") /= ""
+      then
+         return Ada.Environment_Variables.Value ("HOME");
+      end if;
+
+      Entry_Item := Getpwuid (Getuid);
+      if Entry_Item = null or else Entry_Item.Dir = Interfaces.C.Strings.Null_Ptr then
+         return "";
+      end if;
+
+      return Interfaces.C.Strings.Value (Entry_Item.Dir);
+   exception
+      when others =>
+         return "";
+   end Home_Directory;
+
+   function Application_Data_Directory return String is
+      Home : constant String := Home_Directory;
+   begin
+      return (if Home = "" then "" else Home & "/Library/Application Support");
+   end Application_Data_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")
