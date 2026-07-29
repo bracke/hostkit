@@ -1,5 +1,6 @@
 with Ada.Characters.Handling;
 with Ada.Directories;
+with Ada.Environment_Variables;
 with Ada.Streams;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
 
@@ -590,7 +591,7 @@ package body Hostkit.Fs is
    function Directory_Part (Path : String) return String is
    begin
       for Index in reverse Path'Range loop
-         if Path (Index) = '\\' or else Path (Index) = '/' then
+         if Path (Index) = '\' or else Path (Index) = '/' then
             return Path (Path'First .. Index - 1);
          end if;
       end loop;
