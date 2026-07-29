@@ -80,6 +80,60 @@ procedure Check_Hostkit is
       end if;
    end Run_Command;
 
+   --  Every per-OS body must actually bind its host's API.
+   --
+   --  A body that has quietly become a stub still compiles, still passes the
+   --  Linux suite, and answers exactly the "not available" that a genuinely
+   --  absent facility answers -- so nothing catches it except naming the import
+   --  that has to be there. These are the calls this crate exists to make; if
+   --  one is removed, that is a decision to take deliberately and to change here.
+   procedure Require_Binding (Relative_Path : String; Host_Call : String) is
+   begin
+      --  Match the import itself, not merely the name somewhere in the file.
+      --  The first version of this looked for the quoted name alone and was
+      --  satisfied by the diagnostic string in Current -- so renaming the actual
+      --  External_Name passed the check. A guardrail that cannot fail is worse
+      --  than none, because it reads as coverage.
+      Require_Text
+        (Relative_Path,
+         "External_Name => """ & Host_Call & """",
+         Relative_Path & " must bind " & Host_Call);
+   end Require_Binding;
+
+   --  A unit with per-OS bodies needs one for every host, or the build for the
+   --  missing host fails -- and it fails on that host's runner, not here.
+   procedure Require_A_Body_Per_Host is
+      Hosts  : constant array (1 .. 3) of Unbounded_String :=
+        [To_Unbounded_String ("macos"),
+         To_Unbounded_String ("windows"),
+         To_Unbounded_String ("unsupported")];
+      Search : Ada.Directories.Search_Type;
+      Item   : Ada.Directories.Directory_Entry_Type;
+   begin
+      Ada.Directories.Start_Search
+        (Search, Root & "/src/platform/linux", "*.adb");
+
+      while Ada.Directories.More_Entries (Search) loop
+         Ada.Directories.Get_Next_Entry (Search, Item);
+
+         declare
+            Name : constant String := Ada.Directories.Simple_Name (Item);
+         begin
+            for Host of Hosts loop
+               if not Ada.Directories.Exists
+                        (Root & "/src/platform/" & To_String (Host) & "/" & Name)
+               then
+                  Error
+                    (Name & " has a Linux body but none for "
+                     & To_String (Host) & "; every host needs one");
+               end if;
+            end loop;
+         end;
+      end loop;
+
+      Ada.Directories.End_Search (Search);
+   end Require_A_Body_Per_Host;
+
    procedure Check_Generated_Artifacts is
       Hygiene_Errors : Natural := 0;
    begin
@@ -129,6 +183,47 @@ begin
    Require_Text
      ("CLAUDE.md", "Cannot tell",
       "CLAUDE.md must carry the ""cannot tell is not fine"" contract");
+
+   Require_A_Body_Per_Host;
+
+   --  The host calls, per body. Grouped by what they are for rather than by
+   --  host, because the point of each row is that the same question is answered
+   --  by a different call on each one.
+   --
+   --  Directory-change notification.
+   Require_Binding ("src/platform/linux/hostkit-watch.adb", "inotify_init1");
+   Require_Binding ("src/platform/linux/hostkit-watch.adb", "inotify_add_watch");
+   Require_Binding ("src/platform/macos/hostkit-watch.adb", "kqueue");
+   Require_Binding ("src/platform/macos/hostkit-watch.adb", "kevent");
+   Require_Binding ("src/platform/windows/hostkit-watch.adb", "FindFirstChangeNotificationA");
+
+   --  File metadata: what the filesystem says about a file.
+   Require_Binding ("src/platform/linux/hostkit-metadata.adb", "statx");
+   Require_Binding ("src/platform/linux/hostkit-metadata.adb", "statvfs");
+   Require_Binding ("src/platform/macos/hostkit-metadata.adb", "statfs$INODE64");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetDiskFreeSpaceExA");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExA");
+
+   --  Ownership. The Windows pair is what makes Metadata.Set_Ownership a
+   --  different operation from Fs.Set_Owner, so losing it is losing a feature
+   --  rather than losing a duplicate -- which is exactly what happened once.
+   Require_Binding ("src/platform/linux/hostkit-metadata.adb", "chown");
+   Require_Binding ("src/platform/macos/hostkit-metadata.adb", "chown");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetNamedSecurityInfoA");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "SetNamedSecurityInfoA");
+
+   --  The host's own trash. Linux deliberately binds nothing: the freedesktop
+   --  trash is a filesystem layout for the caller to write, not a call to make.
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHFileOperationW");
+   Require_Binding ("src/platform/macos/hostkit-trash.adb", "FSMoveObjectToTrashSync");
+
+   --  The host's locale. POSIX has none, and answers "" on purpose.
+   Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserDefaultLocaleName");
+   Require_Binding ("src/platform/macos/hostkit-host.adb", "CFLocaleCopyCurrent");
+
+   --  Reading a link's own target, which Windows has no readlink for.
+   Require_Binding ("src/platform/linux/hostkit-fs.adb", "readlink");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeviceIoControl");
 
    Check_Generated_Artifacts;
 
