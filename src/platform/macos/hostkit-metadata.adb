@@ -145,6 +145,12 @@ package body Hostkit.Metadata is
       Mode : C_U16) return C_Int
      with Import, Convention => C, External_Name => "chmod";
 
+   function C_Chown
+     (Path     : Interfaces.C.Strings.chars_ptr;
+      User_Id  : C_U32;
+      Group_Id : C_U32) return C_Int
+     with Import, Convention => C, External_Name => "chown";
+
    function C_Getpwnam
      (Name : Interfaces.C.Strings.chars_ptr) return Passwd_Access
      with Import, Convention => C, External_Name => "getpwnam";
@@ -434,6 +440,25 @@ package body Hostkit.Metadata is
       when others =>
          return "";
    end Group_Name_For_Id;
+
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural) return Boolean
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Result : C_Int;
+   begin
+      Result := C_Chown (C_Path, C_U32 (User_Id), C_U32 (Group_Id));
+      Interfaces.C.Strings.Free (C_Path);
+      return Result = 0;
+
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return False;
+   end Set_Ownership;
 
    function Ownership_Supported return Boolean is
    begin

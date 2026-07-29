@@ -107,6 +107,17 @@ package body Hostkit.Metadata is
       return "";
    end Group_Name_For_Id;
 
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural)
+      return Boolean
+   is
+      pragma Unreferenced (Path, User_Id, Group_Id);
+   begin
+      return False;
+   end Set_Ownership;
+
    function Ownership_Supported return Boolean is
    begin
       return False;

@@ -17,8 +17,10 @@ with Ada.Calendar;
 --  a caller can leave the whole concept out of its interface on a host that has no
 --  such notion rather than showing every file as mode 0.
 --
---  Creating links, changing ownership and restricting a path to its owner are in
---  Hostkit.Fs -- they act on a file rather than ask about one.
+--  Creating links and restricting a path to its owner are in Hostkit.Fs -- they
+--  act on a file rather than ask about one. Setting ownership is here instead,
+--  and Set_Ownership below says why: it is the write half of File_Ownership and
+--  only means anything for the ids this package handed out.
 package Hostkit.Metadata is
 
    --  What a filesystem has room for. All byte and inode counts saturate: a value
@@ -124,8 +126,34 @@ package Hostkit.Metadata is
       Group_Id            : out Natural;
       Ownership_Available : out Boolean);
 
-   --  Does this host have file ownership to read and set? See Hostkit.Fs.Set_Owner
-   --  for why setting it is a separate question from having it.
+   --  Set the owner and group of Path to ids this package handed out.
+   --
+   --  NOT the same operation as Hostkit.Fs.Set_Owner, which is why both exist.
+   --  That one applies a POSIX uid/gid pair that came from somewhere else -- an
+   --  archive entry, a manifest -- and declines on Windows, where those numbers
+   --  mean nothing and inventing an owner from them would be a guess.
+   --
+   --  This one closes the loop with File_Ownership: it sets an identity this
+   --  package reported for some file, so on Windows the number is one it minted
+   --  from a real owner SID and can therefore turn back into that SID. An id
+   --  from anywhere else fails here, and says so rather than writing an owner
+   --  the caller did not mean.
+   --
+   --  Changing an owner is privileged on POSIX, so an unprivileged process
+   --  normally gets False for anything but a no-op.
+   --
+   --  @param Path Path whose ownership is changed.
+   --  @param User_Id New owning user id.
+   --  @param Group_Id New owning group id.
+   --  @return True when the host applied it.
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural)
+      return Boolean;
+
+   --  Does this host have file ownership to read and set? See Set_Ownership
+   --  above for why setting it is a separate question from having it.
    function Ownership_Supported return Boolean;
 
    --  Do Left and Right name the same underlying file?

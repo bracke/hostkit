@@ -917,6 +917,19 @@ package body Hostkit_Suite is
          end if;
       end;
 
+      --  Setting the ownership a file already has must be accepted. It is the
+      --  round trip that matters -- an id this package reported, handed back to
+      --  it -- and it is the one case that needs no privilege, so it is
+      --  checkable as an unprivileged CI user on every host.
+      --
+      --  This is why Set_Ownership is not Hostkit.Fs.Set_Owner: that one
+      --  declines on Windows, because a uid from elsewhere means nothing there.
+      --  Routing this through it made "change owner" a silent no-op on Windows,
+      --  which is what this assertion exists to stop happening again.
+      Assert
+        (Hostkit.Metadata.Set_Ownership (Path, User_Id, Group_Id),
+         "a file's own ownership can be set back onto it");
+
       Ada.Directories.Delete_File (Path);
    end Test_A_Name_Round_Trips_Through_Its_Id;
 

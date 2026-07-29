@@ -978,6 +978,52 @@ package body Hostkit.Metadata is
       return User_Name_For_Id (Id);
    end Group_Name_For_Id;
 
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural) return Boolean
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+
+      Owner_Sid : aliased Sid_Buffer;
+      Group_Sid : aliased Sid_Buffer;
+      Have_Owner : constant Boolean := Recall (User_Id, Owner_Sid);
+      Have_Group : constant Boolean := Recall (Group_Id, Group_Sid);
+
+      Information : C_DWord := 0;
+      Status      : C_DWord;
+   begin
+      --  Only a SID this process has already seen can be named again: the
+      --  identity the caller holds is a relative identifier, not a SID.
+      if not Have_Owner and then not Have_Group then
+         Interfaces.C.Strings.Free (C_Path);
+         return False;
+      end if;
+
+      if Have_Owner then
+         Information := Information or Owner_Information;
+      end if;
+      if Have_Group then
+         Information := Information or Group_Information;
+      end if;
+
+      Status :=
+        Set_Named_Security_Info
+          (C_Path, Se_File_Object, Information,
+           (if Have_Owner then Owner_Sid (1)'Address else System.Null_Address),
+           (if Have_Group then Group_Sid (1)'Address else System.Null_Address),
+           System.Null_Address, System.Null_Address);
+
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = Success;
+
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return False;
+   end Set_Ownership;
+
    function Ownership_Supported return Boolean is
    begin
       return True;

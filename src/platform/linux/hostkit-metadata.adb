@@ -98,6 +98,13 @@ package body Hostkit.Metadata is
       return C_Int
      with Import, Convention => C, External_Name => "statvfs";
 
+   function Chown
+     (Pathname : Interfaces.C.Strings.chars_ptr;
+      Owner    : C_U32;
+      Group    : C_U32)
+      return C_Int
+     with Import, Convention => C, External_Name => "chown";
+
    function Chmod
      (Pathname : Interfaces.C.Strings.chars_ptr;
       Mode     : C_Unsigned)
@@ -480,6 +487,24 @@ package body Hostkit.Metadata is
       when others =>
          return "";
    end Group_Name_For_Id;
+
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural)
+      return Boolean
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Status : C_Int;
+   begin
+      Status := Chown (C_Path, C_U32 (User_Id), C_U32 (Group_Id));
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0;
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return False;
+   end Set_Ownership;
 
    function Ownership_Supported return Boolean is
    begin
