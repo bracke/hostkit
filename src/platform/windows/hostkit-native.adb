@@ -1,6 +1,6 @@
 with Hostkit.Process;
+with Hostkit.Windows_Command_Line;
 with Ada.Calendar;
-with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
 
 with Interfaces.C;
@@ -9,7 +9,6 @@ with System.Storage_Elements;
 with System;
 
 package body Hostkit.Native is
-   use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
    use type Hostkit.Process.Cancel_Check;
    use type Hostkit.Process.Poll_Hook;
@@ -251,45 +250,12 @@ package body Hostkit.Native is
       Started_Notice    : Hostkit.Process.Started_Hook)
       return Hostkit.Process.Process_Outcome
    is
-      --  CreateProcessW takes a command line, not a vector, so the arguments have to be
-      --  quoted into one -- the C runtime rules, which is what every Windows program
-      --  parses back out: wrap anything with a space, and double an embedded quote.
-      function Quote (Value : String) return String is
-         Result : Unbounded_String;
-         Needs  : Boolean := Value = "";
-      begin
-         for Character_Value of Value loop
-            if Character_Value = ' ' or else Character_Value = '"' then
-               Needs := True;
-            end if;
-         end loop;
-
-         if not Needs then
-            return Value;
-         end if;
-
-         Append (Result, '"');
-         for Character_Value of Value loop
-            if Character_Value = '"' then
-               Append (Result, """""");
-            else
-               Append (Result, Character_Value);
-            end if;
-         end loop;
-         Append (Result, '"');
-         return To_String (Result);
-      end Quote;
-
+      --  CreateProcessW takes a command line, not a vector, so the arguments have
+      --  to be quoted into one with the C runtime rules every Windows program
+      --  parses back out. That quoting is pure text and easy to get subtly wrong,
+      --  so it lives in Hostkit.Windows_Command_Line where it is unit-tested.
       function Command_Line return String is
-         Result : Unbounded_String := To_Unbounded_String (Quote (Program));
-      begin
-         for Argument of Arguments loop
-            Append (Result, " ");
-            Append (Result, Quote (To_String (Argument)));
-         end loop;
-
-         return To_String (Result);
-      end Command_Line;
+        (Hostkit.Windows_Command_Line.Build (Program, Arguments));
 
       function Capture (Path : String) return System.Address is
          Wide_Path : aliased Wide_String := Wide (Path);
