@@ -504,6 +504,12 @@ package body Hostkit.Fs is
       return (if Home = "" then "" else Home & "/Library/Caches");
    end Cache_Directory;
 
+   --  Application Support, not Preferences: see the spec.
+   function Config_Directory return String is
+   begin
+      return Application_Data_Directory;
+   end Config_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")

@@ -231,6 +231,27 @@ package Hostkit.Fs is
    --  @return The directory, or "" where the host will not say.
    function Cache_Directory return String;
 
+   --  Where this host keeps per-user configuration -- what the user chose, which
+   --  is the one of these three that cannot be regenerated if it is lost.
+   --
+   --  On Linux this is a different place from the data directory
+   --  ($XDG_CONFIG_HOME, not $XDG_DATA_HOME); on Windows and macOS it is the same
+   --  place. That is exactly why a caller should not work it out itself: whether
+   --  the host separates configuration from data is the host's business, and a
+   --  program that hard-codes ~/.config gets it right on one host in three.
+   --
+   --  Roaming is correct here, unlike for a cache: %APPDATA% rather than
+   --  %LOCALAPPDATA%, because what the user chose should follow them to another
+   --  machine.
+   --
+   --  macOS answers ~/Library/Application Support rather than
+   --  ~/Library/Preferences deliberately. Preferences is for the plists
+   --  NSUserDefaults manages; writing a hand-editable text file into it puts it
+   --  where the system expects to own the contents.
+   --
+   --  @return The directory, or "" where the host will not say.
+   function Config_Directory return String;
+
    function Temp_Directory return String;
 
    --  Does the filesystem holding Path enforce DOS/Windows filename rules --

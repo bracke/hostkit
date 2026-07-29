@@ -502,6 +502,17 @@ package body Hostkit.Fs is
       return (if Home = "" then "" else Home & "/.cache");
    end Cache_Directory;
 
+   function Config_Directory return String is
+      Home : constant String := Home_Directory;
+   begin
+      if Ada.Environment_Variables.Exists ("XDG_CONFIG_HOME")
+        and then Ada.Environment_Variables.Value ("XDG_CONFIG_HOME") /= ""
+      then
+         return Ada.Environment_Variables.Value ("XDG_CONFIG_HOME");
+      end if;
+      return (if Home = "" then "" else Home & "/.config");
+   end Config_Directory;
+
    function Temp_Directory return String is
    begin
       if Ada.Environment_Variables.Exists ("TMPDIR")
