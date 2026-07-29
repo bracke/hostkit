@@ -30,4 +30,23 @@ package Hostkit.Host is
    --  Windows asks the process token, and neither has any meaning on the other.
    function Is_Elevated return Boolean;
 
+   --  Which locale is this host itself configured for?
+   --
+   --  Windows and macOS each keep one and will say: GetUserDefaultLocaleName
+   --  reads the user's regional setting, CFLocaleCopyCurrent the user's
+   --  preferred locale. The identifier comes back in the host's own spelling --
+   --  "en-GB" from Windows, "en_GB" from macOS -- and is returned as given,
+   --  because normalising it is the caller's convention, not the host's fact.
+   --
+   --  POSIX has no such call. The locale there is an environment convention
+   --  (LC_ALL, LC_MESSAGES, LANG) that any process can set for itself, plus
+   --  whatever files the desktop environment keeps, and reading those is the
+   --  caller's business rather than a fact this crate can state -- so Linux
+   --  answers with the empty string, meaning "ask the environment", not "no
+   --  locale".
+   --
+   --  @return The host's locale identifier, or "" where the host has none to
+   --          give.
+   function Native_Locale return String;
+
 end Hostkit.Host;

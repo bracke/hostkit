@@ -18,4 +18,11 @@ package body Hostkit.Host is
       return Geteuid = 0;
    end Is_Elevated;
 
+   --  POSIX has no call for this; the locale is an environment convention the
+   --  caller reads for itself. See the spec: "" means ask the environment.
+   function Native_Locale return String is
+   begin
+      return "";
+   end Native_Locale;
+
 end Hostkit.Host;

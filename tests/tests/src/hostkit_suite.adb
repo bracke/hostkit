@@ -18,6 +18,7 @@ with Hostkit.Host;
 with Hostkit.Metadata;
 with Hostkit.Process;
 with Hostkit.Shell;
+with Hostkit.Trash;
 with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
 
@@ -649,6 +650,61 @@ package body Hostkit_Suite is
       Ada.Text_IO.Close (File);
    end Write_File;
 
+   procedure Test_The_Host_Answers_For_Its_Own_Trash
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+      Facility : constant Hostkit.Trash.Facility := Hostkit.Trash.Current;
+   begin
+      --  Which hosts have a trash of their own is a fact about the hosts, not a
+      --  configuration: Windows and macOS do, Linux has a specification for the
+      --  caller to implement instead.
+      case Hostkit.Host.Current is
+         when Hostkit.Host.Windows | Hostkit.Host.MacOS =>
+            Assert (Facility.Available, "this host has a trash of its own");
+            Assert (Facility.Api_Name /= Null_Unbounded_String, "and names the call behind it");
+            Assert
+              (Facility.Uses_Recycle_Bin = (Hostkit.Host.Current = Hostkit.Host.Windows),
+               "only Windows calls its trash the Recycle Bin");
+
+         when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
+            Assert (not Facility.Available, "this host has no trash of its own to call");
+            Assert (Facility.Api_Name = Null_Unbounded_String, "and names no call");
+
+            --  The refusal must leave the file alone. A caller falling back to a
+            --  delete here would turn a recoverable action into a permanent one,
+            --  so the one thing this must never do is succeed by removing it.
+            declare
+               Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-untouched");
+            begin
+               Write_File (Path, "still here");
+               Assert (not Hostkit.Trash.Move_To_Trash (Path), "a host with no trash declines");
+               Assert (Ada.Directories.Exists (Path), "and leaves the file exactly where it was");
+               Ada.Directories.Delete_File (Path);
+            end;
+      end case;
+   end Test_The_Host_Answers_For_Its_Own_Trash;
+
+   procedure Test_The_Host_Locale_Is_Asked_Of_The_Host
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+      Locale : constant String := Hostkit.Host.Native_Locale;
+   begin
+      if Hostkit.Host.Current in Hostkit.Host.Windows | Hostkit.Host.MacOS then
+         --  Both hosts keep one and will say. It is returned in the host's own
+         --  spelling, so the only shape that can be asserted portably is that
+         --  there is a language in it.
+         Assert (Locale'Length >= 2, "this host names the locale it is set to, got '" & Locale & "'");
+      else
+         --  Not "no locale": the POSIX answer lives in the environment, which is
+         --  the caller's to read, and saying "" is how this declines to guess.
+         Assert (Locale = "", "a host with no locale API says so rather than guessing");
+      end if;
+   end Test_The_Host_Locale_Is_Asked_Of_The_Host;
+
    procedure Test_Metadata_Reports_What_It_Could_Not_Get
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -984,6 +1040,12 @@ package body Hostkit_Suite is
         (T, Test_Captured_Input'Access, "process : a captured run reads the file it was given");
       Register_Routine
         (T, Test_Timeout_Kills'Access, "process : a program that will not stop is stopped");
+      Register_Routine
+        (T, Test_The_Host_Answers_For_Its_Own_Trash'Access,
+         "trash : a host with no trash of its own declines and leaves the file alone");
+      Register_Routine
+        (T, Test_The_Host_Locale_Is_Asked_Of_The_Host'Access,
+         "host : the locale is asked of the host, and declined where there is none");
       Register_Routine
         (T, Test_Metadata_Reports_What_It_Could_Not_Get'Access,
          "metadata : what the host could not answer is reported, not invented");

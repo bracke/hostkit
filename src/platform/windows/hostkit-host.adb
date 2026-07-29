@@ -1,7 +1,16 @@
+with Ada.Strings.Unbounded;
+
 with Interfaces.C;
 with System;
 
 package body Hostkit.Host is
+   use Ada.Strings.Unbounded;
+
+   function GetUserDefaultLocaleName
+     (Locale_Name : System.Address;
+      Locale_Size : Interfaces.C.int)
+      return Interfaces.C.int
+     with Import, Convention => Stdcall, External_Name => "GetUserDefaultLocaleName";
 
    function Current return Kind is
    begin
@@ -65,5 +74,28 @@ package body Hostkit.Host is
 
       return Queried /= 0 and then Elevated /= 0;
    end Is_Elevated;
+
+   function Native_Locale return String is
+      Buffer : aliased Wide_String (1 .. 85) := [others => Wide_Character'Val (0)];
+      Length : constant Interfaces.C.int :=
+        GetUserDefaultLocaleName (Buffer'Address, Interfaces.C.int (Buffer'Length));
+      Result : Unbounded_String;
+   begin
+      if Length <= 1 then
+         return "";
+      end if;
+
+      for Index in Buffer'First .. Buffer'Last loop
+         exit when Buffer (Index) = Wide_Character'Val (0);
+         if Wide_Character'Pos (Buffer (Index)) <= Character'Pos (Character'Last) then
+            Append (Result, Character'Val (Wide_Character'Pos (Buffer (Index))));
+         end if;
+      end loop;
+
+      return To_String (Result);
+   exception
+      when others =>
+         return "";
+   end Native_Locale;
 
 end Hostkit.Host;
