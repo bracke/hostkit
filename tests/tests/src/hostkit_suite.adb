@@ -16,6 +16,7 @@ with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Process;
 with Hostkit.Shell;
+with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
 
 package body Hostkit_Suite is
@@ -637,6 +638,98 @@ package body Hostkit_Suite is
          "and a program that this host runs, is");
    end Test_A_Directory_Is_Not_Executable;
 
+   --  Notification is asynchronous on every host, so a change is waited for
+   --  rather than expected on the first poll -- up to five seconds, which is far
+   --  beyond any plausible delivery and still bounded.
+   Settle : constant Duration := 0.05;
+   Rounds : constant Natural := 100;
+
+   function Wait_For_Change (State : in out Hostkit.Watch.Watch_State) return Boolean is
+   begin
+      for Unused_Round in 1 .. Rounds loop
+         if Hostkit.Watch.Poll (State) then
+            return True;
+         end if;
+
+         delay Settle;
+      end loop;
+
+      return False;
+   end Wait_For_Change;
+
+   --  Swallow the events the fixture's own setup produced, so the assertions
+   --  that follow are about the change the test made.
+   procedure Drain (State : in out Hostkit.Watch.Watch_State) is
+      Ignored : Boolean;
+   begin
+      delay Settle;
+      Ignored := Hostkit.Watch.Poll (State);
+      pragma Unreferenced (Ignored);
+   end Drain;
+
+   procedure Touch (Directory : String; Name : String) is
+      Output : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create
+        (Output, Ada.Text_IO.Out_File, Ada.Directories.Compose (Directory, Name));
+      Ada.Text_IO.Put_Line (Output, "x");
+      Ada.Text_IO.Close (Output);
+   end Touch;
+
+   procedure Test_A_Fresh_Watch_Is_Inactive (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      State : Hostkit.Watch.Watch_State;
+   begin
+      Assert (not Hostkit.Watch.Is_Active (State), "a fresh watch is inactive");
+      Assert (not Hostkit.Watch.Poll (State), "polling an inactive watch reports no change");
+   end Test_A_Fresh_Watch_Is_Inactive;
+
+   procedure Test_An_Unwatchable_Path_Fails_Quietly (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      State : Hostkit.Watch.Watch_State;
+   begin
+      --  A watch that cannot be established leaves the caller to its polling
+      --  timer rather than raising: the listing still refreshes, less promptly.
+      Hostkit.Watch.Watch_Path (State, Ada.Directories.Compose (Scratch, "no-such-directory-xyzzy"));
+      Assert (not Hostkit.Watch.Is_Active (State), "an unwatchable path does not activate");
+      Assert (not Hostkit.Watch.Poll (State), "a watch that failed simply reports no change");
+
+      Hostkit.Watch.Watch_Path (State, "");
+      Assert (not Hostkit.Watch.Is_Active (State), "an empty path does not activate");
+   end Test_An_Unwatchable_Path_Fails_Quietly;
+
+   procedure Test_The_Watch_Notices_Changes (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Directory : constant String := Ada.Directories.Compose (Scratch, "hostkit_watch_test_dir");
+      State     : Hostkit.Watch.Watch_State;
+   begin
+      if Ada.Directories.Exists (Directory) then
+         Ada.Directories.Delete_Tree (Directory);
+      end if;
+
+      Ada.Directories.Create_Directory (Directory);
+
+      Hostkit.Watch.Watch_Path (State, Directory);
+      Assert (Hostkit.Watch.Is_Active (State), "watching a real directory activates the native watch");
+
+      Drain (State);
+      Assert (not Hostkit.Watch.Poll (State), "a directory nobody touched reports no change");
+
+      Touch (Directory, "created.txt");
+      Assert (Wait_For_Change (State), "creating a file is noticed");
+      Assert (not Hostkit.Watch.Poll (State), "the change is consumed, not reported twice");
+
+      Ada.Directories.Delete_File (Ada.Directories.Compose (Directory, "created.txt"));
+      Assert (Wait_For_Change (State), "deleting a file is noticed");
+
+      Assert (Hostkit.Watch.Event_Count (State) > 0, "events are counted");
+
+      Hostkit.Watch.Release (State);
+      Assert (not Hostkit.Watch.Is_Active (State), "release deactivates the watch");
+
+      Ada.Directories.Delete_Tree (Directory);
+   end Test_The_Watch_Notices_Changes;
+
    type Hostkit_Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
    overriding function Name (T : Hostkit_Test_Case) return AUnit.Message_String;
@@ -688,6 +781,14 @@ package body Hostkit_Suite is
         (T, Test_Captured_Input'Access, "process : a captured run reads the file it was given");
       Register_Routine
         (T, Test_Timeout_Kills'Access, "process : a program that will not stop is stopped");
+      Register_Routine
+        (T, Test_A_Fresh_Watch_Is_Inactive'Access, "watch : a fresh watch is inactive");
+      Register_Routine
+        (T, Test_An_Unwatchable_Path_Fails_Quietly'Access,
+         "watch : a directory that cannot be watched fails quietly");
+      Register_Routine
+        (T, Test_The_Watch_Notices_Changes'Access,
+         "watch : the host's notification facility notices creations and deletions");
    end Register_Tests;
 
    function Suite return AUnit.Test_Suites.Access_Test_Suite is
