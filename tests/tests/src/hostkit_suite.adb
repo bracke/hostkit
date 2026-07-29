@@ -70,6 +70,15 @@ package body Hostkit_Suite is
       Interfaces.C.Strings.Free (C_Path);
    end Chmod;
 
+   --  Write a file with something in it, as a fixture.
+   procedure Write_File (Path : String; Text : String) is
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put_Line (File, Text);
+      Ada.Text_IO.Close (File);
+   end Write_File;
+
    --  The first line of a file, with nothing either side of it.
    function First_Line (Path : String) return String is
       File : Ada.Text_IO.File_Type;
@@ -629,6 +638,53 @@ package body Hostkit_Suite is
       end;
    end Test_Elevation_Is_Asked_Not_Assumed;
 
+   --  What "this host will run it" means, pinned across the mode matrix, so a
+   --  cheaper implementation has to agree with the one it replaces rather than
+   --  merely look equivalent.
+   procedure Test_Executability_Across_Modes (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+
+      Path : constant String := Ada.Directories.Compose (Scratch, "hk-exec-modes");
+
+      function At_Mode (Mode : Interfaces.C.int) return Boolean is
+      begin
+         Chmod (Path, Mode);
+         return Hostkit.Fs.Is_Executable (Path);
+      end At_Mode;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         --  Windows decides by extension, not by mode; the matrix means nothing
+         --  there and Test_A_Directory_Is_Not_Executable covers what does.
+         return;
+      end if;
+
+      Write_File (Path, "#!/bin/sh" & ASCII.LF & "exit 0");
+
+      Assert (not At_Mode (8#644#), "a plain readable file is not executable");
+      Assert (At_Mode (8#755#), "the usual executable mode is");
+      Assert (At_Mode (8#700#), "owner-only rwx is");
+      Assert (At_Mode (8#100#), "owner execute alone is, with no read bit");
+      Assert (not At_Mode (8#600#), "read and write without execute is not");
+
+      --  The bit that separates "the owner may run it" from "somebody may":
+      --  recorded rather than assumed, because a one-stat implementation has to
+      --  test the same bit this one does.
+      Assert
+        (not At_Mode (8#011#),
+         "execute for group and other, but not owner, is not executable to us");
+
+      Chmod (Path, 8#644#);
+      Ada.Directories.Delete_File (Path);
+
+      Assert
+        (not Hostkit.Fs.Is_Executable (Ada.Directories.Compose (Scratch, "hk-exec-absent")),
+         "a path that does not exist is not executable");
+      Assert
+        (not Hostkit.Fs.Is_Executable (Scratch),
+         "a directory is not executable however its bits are set");
+   end Test_Executability_Across_Modes;
+
    procedure Test_A_Directory_Is_Not_Executable (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
    begin
@@ -641,15 +697,6 @@ package body Hostkit_Suite is
         (Hostkit.Fs.Is_Executable (Companion ("noop")),
          "and a program that this host runs, is");
    end Test_A_Directory_Is_Not_Executable;
-
-   --  Write a file with something in it, as a fixture.
-   procedure Write_File (Path : String; Text : String) is
-      File : Ada.Text_IO.File_Type;
-   begin
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-      Ada.Text_IO.Put_Line (File, Text);
-      Ada.Text_IO.Close (File);
-   end Write_File;
 
    procedure Test_The_Host_Answers_For_Its_Own_Trash
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -1070,6 +1117,9 @@ package body Hostkit_Suite is
         (T, Test_Shell_Quoting_Holds'Access, "shell : an argument cannot become a second command");
       Register_Routine
         (T, Test_A_Directory_Is_Not_Executable'Access, "fs : a directory is not executable");
+      Register_Routine
+        (T, Test_Executability_Across_Modes'Access,
+         "fs : what this host will run, across the mode matrix");
       Register_Routine
         (T, Test_Accessible_By_Others'Access, "fs : a group- or world-readable file is flagged");
       Register_Routine
