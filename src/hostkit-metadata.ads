@@ -92,6 +92,20 @@ package Hostkit.Metadata is
    --  rather than per file, to decide whether the concept exists here.
    function Permissions_Supported return Boolean;
 
+   --  Are the bits File_Permission_Bits reports the host's own, or a rendering?
+   --
+   --  A separate question from Permissions_Supported, which is True on Windows
+   --  because the request can be honoured there -- it writes an ACL and reads a
+   --  mode back out of one. That mode is this package's rendering of an ACL into
+   --  POSIX shape, not a field the filesystem stores, so it need not agree
+   --  bit-for-bit with whatever else on that host claims to answer the same
+   --  question.
+   --
+   --  A caller that wants to derive something from the bits -- "is this readable
+   --  by its owner" -- rather than display them should ask this first, and ask
+   --  the host directly where it answers False.
+   function Mode_Bits_Are_Native return Boolean;
+
    --  The numeric owner and group of Path.
    --
    --  @param Path Path to inspect.

@@ -460,6 +460,11 @@ package body Hostkit.Metadata is
          return False;
    end Set_Ownership;
 
+   function Mode_Bits_Are_Native return Boolean is
+   begin
+      return True;
+   end Mode_Bits_Are_Native;
+
    function Ownership_Supported return Boolean is
    begin
       return True;

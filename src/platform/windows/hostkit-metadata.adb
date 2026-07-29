@@ -1024,6 +1024,13 @@ package body Hostkit.Metadata is
          return False;
    end Set_Ownership;
 
+   --  False: the mode is rendered from the file's ACL, not stored by the
+   --  filesystem. See the spec.
+   function Mode_Bits_Are_Native return Boolean is
+   begin
+      return False;
+   end Mode_Bits_Are_Native;
+
    function Ownership_Supported return Boolean is
    begin
       return True;
