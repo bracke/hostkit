@@ -187,4 +187,21 @@ package Hostkit.Fs is
    --  %TEMP% directly. Never empty.
    function Temp_Directory return String;
 
+   --  Does the filesystem holding Path enforce DOS/Windows filename rules --
+   --  case-insensitive, forbidding \ : < > " | ? *, the reserved device names
+   --  and a trailing dot? True for a FAT, exFAT or NTFS volume, so a caller can
+   --  refuse a name the destination cannot store even when the host itself is
+   --  POSIX (a FAT USB stick on a Linux box).
+   --
+   --  Path is any path on the filesystem in question -- typically the directory
+   --  a file is about to be created in. When the filesystem cannot be
+   --  determined the answer follows the host: False on POSIX (do not invent a
+   --  restriction), True on Windows (its volumes are DOS-family in practice), so
+   --  an unknown case is never worse than validating by host alone.
+   --
+   --  Linux reads /proc/self/mountinfo; macOS answers False (its native volumes
+   --  are POSIX and a removable one is enforced by the OS at write time);
+   --  Windows answers True.
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean;
+
 end Hostkit.Fs;

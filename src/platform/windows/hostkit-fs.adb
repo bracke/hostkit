@@ -609,4 +609,14 @@ package body Hostkit.Fs is
       end;
    end Temp_Directory;
 
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      --  Every local Windows volume is a DOS-family filesystem (NTFS, FAT,
+      --  exFAT); a POSIX filesystem there needs a third-party driver and is
+      --  vanishingly rare. Treat them all as DOS-ruled, which is also exactly the
+      --  host-based behaviour this refines on the other platforms.
+      return True;
+   end Uses_Dos_Filename_Rules;
+
 end Hostkit.Fs;

@@ -132,4 +132,11 @@ package body Hostkit.Fs is
       return "/tmp";
    end Temp_Directory;
 
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      --  A host Hostkit has no body for: decline to guess a restriction.
+      return False;
+   end Uses_Dos_Filename_Rules;
+
 end Hostkit.Fs;

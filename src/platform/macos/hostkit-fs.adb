@@ -413,4 +413,13 @@ package body Hostkit.Fs is
       return "/tmp";
    end Temp_Directory;
 
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      --  The native volumes (APFS, HFS+) are POSIX; a removable FAT/exFAT one is
+      --  possible but its own rules are enforced by the OS at write time, so this
+      --  declines to guess a restriction rather than binding statfs here.
+      return False;
+   end Uses_Dos_Filename_Rules;
+
 end Hostkit.Fs;

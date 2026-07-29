@@ -3,10 +3,15 @@ with System;
 with Interfaces;
 with Ada.Directories;
 with Ada.Streams;
+with Ada.Text_IO;
+with Ada.Strings.Unbounded;
+with Ada.Characters.Latin_1;
 
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
+
+with Hostkit.Filesystem_Rules;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -409,5 +414,32 @@ package body Hostkit.Fs is
       end if;
       return "/tmp";
    end Temp_Directory;
+
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+      use Ada.Strings.Unbounded;
+      File    : Ada.Text_IO.File_Type;
+      Content : Unbounded_String;
+   begin
+      declare
+         Absolute : constant String := Ada.Directories.Full_Name (Path);
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/mountinfo");
+         while not Ada.Text_IO.End_Of_File (File) loop
+            Append (Content, Ada.Text_IO.Get_Line (File));
+            Append (Content, Ada.Characters.Latin_1.LF);
+         end loop;
+         Ada.Text_IO.Close (File);
+
+         return Hostkit.Filesystem_Rules.Dos_By_Type_Name
+           (Hostkit.Filesystem_Rules.Filesystem_Type_For_Mount
+              (To_String (Content), Absolute));
+      end;
+   exception
+      when others =>
+         if Ada.Text_IO.Is_Open (File) then
+            Ada.Text_IO.Close (File);
+         end if;
+         return False;
+   end Uses_Dos_Filename_Rules;
 
 end Hostkit.Fs;
