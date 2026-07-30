@@ -7,6 +7,7 @@ maintainers = ["Bent Bracke <bent@bracke.dk>"]
 maintainers-logins = ["bracke"]
 licenses = "MIT"
 website = ""
+long-description = "hostkit owns the code that exists only because operating systems differ: spawning a process and capturing what it wrote, running something through the host's shell with the quoting that shell expects, links, executability, home and application-data directories, temporary paths, and whether this process is elevated. Its consumers ask hostkit rather than each re-learning which of GNAT's portable-looking helpers can be trusted where. The danger it answers is not a helper that fails on the wrong host, which is visible, but one that answers confidently and wrongly while the code goes on looking correct."
 tags = ["os", "process", "portability"]
 
 [[depends-on]]
