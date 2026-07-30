@@ -1,10 +1,7 @@
 with Ada.Environment_Variables;
 with System;
-with Interfaces;
 with Ada.Directories;
-with Ada.Streams;
 with Ada.Text_IO;
-with Ada.Strings.Unbounded;
 with Ada.Characters.Latin_1;
 
 with GNAT.OS_Lib;
@@ -251,7 +248,6 @@ package body Hostkit.Fs is
    end Create_Hard_Link;
 
    function Make_Private (Path : String) return Boolean is
-      use type Interfaces.C.int;
       use type Ada.Directories.File_Kind;
 
       function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)

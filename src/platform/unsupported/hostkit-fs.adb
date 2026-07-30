@@ -1,5 +1,4 @@
 with Ada.Environment_Variables;
-with Ada.Strings.Unbounded;
 
 package body Hostkit.Fs is
 

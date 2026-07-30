@@ -1,13 +1,10 @@
 with Ada.Environment_Variables;
 with System;
-with Interfaces;
 with Ada.Directories;
-with Ada.Streams;
 
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
-with Ada.Strings.Unbounded;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -77,7 +74,6 @@ package body Hostkit.Fs is
    --  file's bits and a directory's do not mean the same thing, so neither answers for
    --  the other.
    function Exposed (Path : String; Want : Ada.Directories.File_Kind) return Boolean is
-      use type Interfaces.C.int;
       use type Interfaces.Unsigned_8;
       use type Ada.Directories.File_Kind;
 
@@ -249,7 +245,6 @@ package body Hostkit.Fs is
    end Create_Hard_Link;
 
    function Make_Private (Path : String) return Boolean is
-      use type Interfaces.C.int;
       use type Ada.Directories.File_Kind;
 
       function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
@@ -426,7 +421,6 @@ package body Hostkit.Fs is
 
       Buffer : aliased String (1 .. 4096) := [others => ASCII.NUL];
       Size   : aliased Interfaces.C.unsigned := Buffer'Length;
-      use type Interfaces.C.int;
    begin
       if NS_Get_Executable_Path (Buffer'Address, Size'Access) /= 0 then
          return "";

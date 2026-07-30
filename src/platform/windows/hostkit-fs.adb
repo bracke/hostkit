@@ -1,15 +1,12 @@
 with Ada.Characters.Handling;
 with Ada.Directories;
 with Ada.Environment_Variables;
-with Ada.Streams;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
 
 with Interfaces.C.Strings;
 
 with System;
-with Interfaces;
 with System.Storage_Elements;
-with Ada.Strings.Unbounded;
 
 package body Hostkit.Fs is
 
