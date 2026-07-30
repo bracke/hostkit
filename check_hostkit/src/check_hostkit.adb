@@ -178,11 +178,11 @@ begin
      ("README.md", "not optional",
       "README must document that tri-platform CI is mandatory");
    Require_Text
-     ("CLAUDE.md", "because the host differs",
-      "CLAUDE.md must carry the inclusion rule for agents");
+     ("AGENTS.md", "because the host differs",
+      "AGENTS.md must carry the inclusion rule for agents");
    Require_Text
-     ("CLAUDE.md", "Cannot tell",
-      "CLAUDE.md must carry the ""cannot tell is not fine"" contract");
+     ("AGENTS.md", "Cannot tell",
+      "AGENTS.md must carry the ""cannot tell is not fine"" contract");
 
    Require_A_Body_Per_Host;
 
