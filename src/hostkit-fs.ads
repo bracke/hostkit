@@ -254,6 +254,14 @@ package Hostkit.Fs is
 
    function Temp_Directory return String;
 
+   --  Create a private temporary directory under Temp_Directory.
+   --
+   --  Prefix is used as a readable filename prefix only; the returned path is
+   --  host-chosen and should be treated as opaque by callers.
+   --
+   --  @return Full path to the created directory, or "" when none could be made.
+   function Create_Temporary_Directory (Prefix : String) return String;
+
    --  Does the filesystem holding Path enforce DOS/Windows filename rules --
    --  case-insensitive, forbidding \ : < > " | ? *, the reserved device names
    --  and a trailing dot? True for a FAT, exFAT or NTFS volume, so a caller can
