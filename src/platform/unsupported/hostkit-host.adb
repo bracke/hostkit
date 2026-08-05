@@ -19,4 +19,11 @@ package body Hostkit.Host is
       return "";
    end Native_Locale;
 
+
+   ------------------------
+   -- Executable_Path --
+   ------------------------
+
+   function Executable_Path return String is ("");
+
 end Hostkit.Host;

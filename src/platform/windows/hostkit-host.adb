@@ -22,7 +22,6 @@ package body Hostkit.Host is
    --  token unless it was elevated, so membership of the Administrators group
    --  is not the question -- whether this token is elevated is.
    function Is_Elevated return Boolean is
-      use type Interfaces.C.int;
       use type Interfaces.C.unsigned_long;
       use type System.Address;
 
@@ -98,5 +97,39 @@ package body Hostkit.Host is
       when others =>
          return "";
    end Native_Locale;
+
+
+   ------------------------
+   -- Executable_Path --
+   ------------------------
+
+   function Executable_Path return String is
+      function Get_Module_File_Name
+        (Module : System.Address;
+         Buffer : System.Address;
+         Size   : Interfaces.C.unsigned_long)
+         return Interfaces.C.unsigned_long
+      with Import, Convention => Stdcall,
+           External_Name => "GetModuleFileNameA";
+
+      use type Interfaces.C.unsigned_long;
+
+      Buffer : aliased Interfaces.C.char_array (1 .. 4096) :=
+        [others => Interfaces.C.nul];
+      Filled : Interfaces.C.unsigned_long;
+   begin
+      --  A null module handle asks for this process's own image.
+      Filled :=
+        Get_Module_File_Name (System.Null_Address, Buffer'Address, 4096);
+
+      if Filled = 0 or else Filled >= 4096 then
+         return "";
+      end if;
+
+      return Interfaces.C.To_Ada (Buffer);
+   exception
+      when others =>
+         return "";
+   end Executable_Path;
 
 end Hostkit.Host;

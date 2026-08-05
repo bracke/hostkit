@@ -1,3 +1,4 @@
+with Ada.Directories;
 with Interfaces.C;
 with System;
 
@@ -87,5 +88,40 @@ package body Hostkit.Host is
 
          return "";
    end Native_Locale;
+
+
+   ------------------------
+   -- Executable_Path --
+   ------------------------
+
+   function Executable_Path return String is
+      --  _NSGetExecutablePath writes the path the process was started with,
+      --  which may contain symbolic links or relative segments; Full_Name
+      --  resolves them.
+      function Get_Executable_Path
+        (Buffer : System.Address; Size : access Interfaces.C.unsigned_long)
+         return Interfaces.C.int
+      with Import, Convention => C, External_Name => "_NSGetExecutablePath";
+
+      Room   : aliased Interfaces.C.unsigned_long := 4096;
+      Buffer : aliased Interfaces.C.char_array (1 .. 4096) :=
+        [others => Interfaces.C.nul];
+   begin
+      if Get_Executable_Path (Buffer'Address, Room'Access) /= 0 then
+         return "";
+      end if;
+
+      declare
+         Raw : constant String := Interfaces.C.To_Ada (Buffer);
+      begin
+         if Raw = "" then
+            return "";
+         end if;
+         return Ada.Directories.Full_Name (Raw);
+      end;
+   exception
+      when others =>
+         return "";
+   end Executable_Path;
 
 end Hostkit.Host;

@@ -1,3 +1,4 @@
+with Ada.Directories;
 with Interfaces.C;
 
 package body Hostkit.Host is
@@ -24,5 +25,27 @@ package body Hostkit.Host is
    begin
       return "";
    end Native_Locale;
+
+
+   ------------------------
+   -- Executable_Path --
+   ------------------------
+
+   function Executable_Path return String is
+   begin
+      --  procfs resolves symbolic links and survives a PATH lookup. It is
+      --  absent in a chroot or a container built without /proc, which is why
+      --  an empty answer is expected rather than exceptional.
+      if Ada.Directories.Exists ("/proc/self/exe") then
+         begin
+            return Ada.Directories.Full_Name ("/proc/self/exe");
+         exception
+            when others =>
+               return "";
+         end;
+      end if;
+
+      return "";
+   end Executable_Path;
 
 end Hostkit.Host;

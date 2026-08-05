@@ -49,4 +49,16 @@ package Hostkit.Host is
    --          give.
    function Native_Locale return String;
 
+   --  The path of the running executable, resolved.
+   --
+   --  Ada.Command_Line.Command_Name gives back whatever the caller typed: a
+   --  bare name found on PATH, a relative path from a directory since changed,
+   --  a symbolic link. A program that wants to find data installed beside
+   --  itself needs the real location, and every host keeps it somewhere else --
+   --  /proc/self/exe, _NSGetExecutablePath, GetModuleFileName.
+   --
+   --  Empty when the host will not say, which is a real answer: the caller
+   --  should fall back to the command name rather than treat it as a failure.
+   function Executable_Path return String;
+
 end Hostkit.Host;
