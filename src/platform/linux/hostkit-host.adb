@@ -48,4 +48,29 @@ package body Hostkit.Host is
       return "";
    end Executable_Path;
 
+   --  POSIX names the predicate isatty and numbers the streams zero, one and
+   --  two. A descriptor that is closed or not a terminal answers zero, and an
+   --  error answers zero as well, which is the answer this wants either way.
+   function C_Isatty (Descriptor : Interfaces.C.int) return Interfaces.C.int
+   with Import, Convention => C, External_Name => "isatty";
+
+   -----------------
+   -- Is_Terminal --
+   -----------------
+
+   function Is_Terminal (Stream : Stream_Kind) return Boolean is
+      use type Interfaces.C.int;
+
+      Descriptor : constant Interfaces.C.int :=
+        (case Stream is
+            when Standard_Input  => 0,
+            when Standard_Output => 1,
+            when Standard_Error  => 2);
+   begin
+      return C_Isatty (Descriptor) = 1;
+   exception
+      when others =>
+         return False;
+   end Is_Terminal;
+
 end Hostkit.Host;

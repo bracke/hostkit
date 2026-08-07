@@ -895,6 +895,46 @@ package body Hostkit_Suite is
    end Test_The_Host_Locale_Is_Asked_Of_The_Host;
 
    --  The path of the running executable, resolved.
+   --  Asking whether a stream is a terminal is answered, per stream.
+   --
+   --  A caller uses this to decide whether to colour output, draw progress or
+   --  hold a conversation. The question is about the stream and not about the
+   --  program: a suite like this one usually runs with its output captured
+   --  and its input from nowhere, so the honest expectation here is not that
+   --  any particular stream is a terminal but that each is answered
+   --  separately and none of them raises.
+   procedure Test_Terminal_Streams_Are_Answered_Separately
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Host.Kind;
+
+      Answers : array (Hostkit.Host.Stream_Kind) of Boolean;
+   begin
+      for Stream in Hostkit.Host.Stream_Kind loop
+         Answers (Stream) := Hostkit.Host.Is_Terminal (Stream);
+      end loop;
+
+      --  Asked twice, the same answer: this reads the state of a descriptor
+      --  and must not consume or change anything.
+      for Stream in Hostkit.Host.Stream_Kind loop
+         Assert (Hostkit.Host.Is_Terminal (Stream) = Answers (Stream),
+                 "asking twice about "
+                 & Hostkit.Host.Stream_Kind'Image (Stream)
+                 & " gave two answers");
+      end loop;
+
+      --  A host with no way to ask says no rather than guessing yes, because
+      --  treating an unknown destination as a terminal is what puts escape
+      --  sequences into a log file.
+      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
+         for Stream in Hostkit.Host.Stream_Kind loop
+            Assert (not Answers (Stream),
+                    "a host that cannot answer claimed a terminal");
+         end loop;
+      end if;
+   end Test_Terminal_Streams_Are_Answered_Separately;
+
    procedure Test_The_Executable_Path_Locates_This_Program
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1324,6 +1364,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_The_Host_Locale_Is_Asked_Of_The_Host'Access,
          "host : the locale is asked of the host, and declined where there is none");
+      Register_Routine
+        (T, Test_Terminal_Streams_Are_Answered_Separately'Access,
+         "terminal streams are answered separately and repeatably");
 
       Register_Routine
         (T, Test_The_Executable_Path_Locates_This_Program'Access,

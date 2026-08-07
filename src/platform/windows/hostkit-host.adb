@@ -132,4 +132,39 @@ package body Hostkit.Host is
          return "";
    end Executable_Path;
 
+   --  Windows answers through the console API rather than through isatty,
+   --  whose C name is spelled _isatty here. GetConsoleMode succeeds only for
+   --  a handle that really is a console, which is the question being asked.
+   type Handle is new Interfaces.C.ptrdiff_t;
+
+   function Get_Std_Handle (Which : Interfaces.C.unsigned_long) return Handle
+   with Import, Convention => Stdcall, External_Name => "GetStdHandle";
+
+   function Get_Console_Mode
+     (Item : Handle; Mode : access Interfaces.C.unsigned_long)
+      return Interfaces.C.int
+   with Import, Convention => Stdcall, External_Name => "GetConsoleMode";
+
+   -----------------
+   -- Is_Terminal --
+   -----------------
+
+   function Is_Terminal (Stream : Stream_Kind) return Boolean is
+      use type Interfaces.C.int;
+
+      --  STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE.
+      Which : constant Interfaces.C.unsigned_long :=
+        (case Stream is
+            when Standard_Input  => 16#FFFF_FFF6#,
+            when Standard_Output => 16#FFFF_FFF5#,
+            when Standard_Error  => 16#FFFF_FFF4#);
+
+      Mode : aliased Interfaces.C.unsigned_long := 0;
+   begin
+      return Get_Console_Mode (Get_Std_Handle (Which), Mode'Access) /= 0;
+   exception
+      when others =>
+         return False;
+   end Is_Terminal;
+
 end Hostkit.Host;

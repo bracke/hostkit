@@ -1,3 +1,4 @@
+with Interfaces.C;
 package body Hostkit.Host is
 
    function Current return Kind is
@@ -25,5 +26,18 @@ package body Hostkit.Host is
    ------------------------
 
    function Executable_Path return String is ("");
+
+   -----------------
+   -- Is_Terminal --
+   -----------------
+
+   --  A host this build does not know is treated as not a terminal, so a
+   --  program falls back to plain output rather than writing escape
+   --  sequences somewhere they will be read as text.
+   function Is_Terminal (Stream : Stream_Kind) return Boolean is
+      pragma Unreferenced (Stream);
+   begin
+      return False;
+   end Is_Terminal;
 
 end Hostkit.Host;

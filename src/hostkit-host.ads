@@ -61,4 +61,25 @@ package Hostkit.Host is
    --  should fall back to the command name rather than treat it as a failure.
    function Executable_Path return String;
 
+   --  A standard stream a program may be sharing with a person.
+   type Stream_Kind is (Standard_Input, Standard_Output, Standard_Error);
+
+   --  Report whether a standard stream is attached to a terminal.
+   --
+   --  A program answers this to decide whether to colour its output, draw a
+   --  progress line, or hold a conversation -- all of which are noise when
+   --  the stream is a file or a pipe. It is a question about the stream and
+   --  not about the program: standard output may be redirected while standard
+   --  error is still a terminal, and both are ordinary.
+   --
+   --  The hosts do not agree on how to ask. POSIX has isatty on a descriptor;
+   --  Windows has GetConsoleMode on a handle and spells the C name _isatty,
+   --  so a program importing isatty by that name builds on one and not the
+   --  other. False when the host will not say, because treating an unknown
+   --  destination as a terminal is what puts escape sequences in a log file.
+   --
+   --  @param Stream Which standard stream to ask about.
+   --  @return True when that stream is a terminal.
+   function Is_Terminal (Stream : Stream_Kind) return Boolean;
+
 end Hostkit.Host;
