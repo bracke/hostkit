@@ -768,4 +768,14 @@ package body Hostkit.Fs is
       return True;
    end Uses_Dos_Filename_Rules;
 
+
+   ---------------
+   -- Separator --
+   ---------------
+
+   --  Written as a backslash. Both are accepted by the file calls, which is
+   --  why a path built with the wrong one goes unnoticed until it is shown
+   --  to someone.
+   function Separator return Character is ('\\');
+
 end Hostkit.Fs;

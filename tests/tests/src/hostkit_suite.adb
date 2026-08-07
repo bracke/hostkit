@@ -15,6 +15,7 @@ with Ada.Strings.Unbounded;
 with Hostkit;
 with Hostkit.Filesystem_Rules;
 with Hostkit.Fs;
+with Hostkit.FS;
 with Hostkit.Host;
 with Hostkit.Metadata;
 with Hostkit.Process;
@@ -903,6 +904,49 @@ package body Hostkit_Suite is
    --  and its input from nowhere, so the honest expectation here is not that
    --  any particular stream is a terminal but that each is answered
    --  separately and none of them raises.
+   --  Joining path segments produces one separator, whatever it is given.
+   --
+   --  Ada.Directories.Compose is the portable-looking answer that is not:
+   --  its Name is a simple name, so a multi-segment tail is outside what it
+   --  is for. This is the operation callers actually want, and it is here
+   --  rather than in each of them because what goes between two segments is
+   --  the host's business.
+   procedure Test_Joining_Paths_Uses_One_Separator
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Slash : constant Character := Hostkit.FS.Separator;
+   begin
+      Assert (Hostkit.FS.Join ("a", "b") = "a" & Slash & "b",
+              "two segments were not joined by one separator: "
+              & Hostkit.FS.Join ("a", "b"));
+
+      --  A base that already ends in a separator does not get another, and
+      --  either spelling counts as one: a path may have come from somewhere
+      --  that writes them the other way.
+      Assert (Hostkit.FS.Join ("a/", "b") = "a/b",
+              "a trailing slash gained a second separator: "
+              & Hostkit.FS.Join ("a/", "b"));
+      Assert (Hostkit.FS.Join ("a\", "b") = "a\b",
+              "a trailing backslash gained a second separator: "
+              & Hostkit.FS.Join ("a\", "b"));
+
+      --  An empty side is the other side, so a caller need not test for it
+      --  before every join.
+      Assert (Hostkit.FS.Join ("", "b") = "b", "an empty base changed the part");
+      Assert (Hostkit.FS.Join ("a", "") = "a", "an empty part changed the base");
+      Assert (Hostkit.FS.Join ("", "") = "", "two empty sides produced something");
+
+      --  Chaining is how a multi-segment tail is built, since that is what
+      --  Compose cannot do.
+      Assert (Hostkit.FS.Join (Hostkit.FS.Join ("a", "b"), "c")
+              = "a" & Slash & "b" & Slash & "c",
+              "chaining did not build a three-segment path");
+
+      Assert (Slash = '/' or else Slash = '\',
+              "the separator is neither of the two a host writes");
+   end Test_Joining_Paths_Uses_One_Separator;
+
    procedure Test_Terminal_Streams_Are_Answered_Separately
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1364,6 +1408,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_The_Host_Locale_Is_Asked_Of_The_Host'Access,
          "host : the locale is asked of the host, and declined where there is none");
+      Register_Routine
+        (T, Test_Joining_Paths_Uses_One_Separator'Access,
+         "joining path segments produces one separator");
       Register_Routine
         (T, Test_Terminal_Streams_Are_Answered_Separately'Access,
          "terminal streams are answered separately and repeatably");

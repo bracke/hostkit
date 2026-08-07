@@ -224,4 +224,13 @@ package body Hostkit.Fs is
       return False;
    end Uses_Dos_Filename_Rules;
 
+
+   ---------------
+   -- Separator --
+   ---------------
+
+   --  A host this build does not know is assumed to write the separator
+   --  that most of them do.
+   function Separator return Character is ('/');
+
 end Hostkit.Fs;

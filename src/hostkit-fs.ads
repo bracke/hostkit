@@ -200,6 +200,33 @@ package Hostkit.Fs is
    --  The directory holding this program's own executable, or "" with it.
    function Own_Executable_Directory return String;
 
+   --  The character this host writes between path segments.
+   --
+   --  Windows accepts both and writes a backslash; everywhere else it is a
+   --  forward slash. Asked rather than assumed because a path built with the
+   --  wrong one is the kind of mistake that works until it does not: the Win32
+   --  file calls take either, so a forward slash survives until something
+   --  shows the path to a person or hands it to a tool that does not.
+   function Separator return Character;
+
+   --  Join two path segments the way this host writes them.
+   --
+   --  Ada.Directories.Compose looks like the portable answer and is not: its
+   --  Name is a *simple* name, so composing a multi-segment tail is not what
+   --  it is for, and what it does with one is not something to rely on. This
+   --  takes either side as it finds it, joins with one separator, and returns
+   --  the other side alone when one is empty.
+   --
+   --  @param Base Leading part, possibly empty.
+   --  @param Part Trailing part, possibly empty.
+   --  @return The two joined by exactly one separator.
+   function Join (Base : String; Part : String) return String
+   is (if Base = "" then Part
+       elsif Part = "" then Base
+       elsif Base (Base'Last) = '/' or else Base (Base'Last) = '\'
+       then Base & Part
+       else Base & Separator & Part);
+
    --  This user's home directory.
    --
    --  HOME is a convention a process can be started without; the host has a

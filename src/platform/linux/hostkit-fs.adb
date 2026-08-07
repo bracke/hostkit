@@ -596,4 +596,11 @@ package body Hostkit.Fs is
          return False;
    end Uses_Dos_Filename_Rules;
 
+
+   ---------------
+   -- Separator --
+   ---------------
+
+   function Separator return Character is ('/');
+
 end Hostkit.Fs;
