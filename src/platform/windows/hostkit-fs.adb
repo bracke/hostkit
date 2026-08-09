@@ -665,7 +665,7 @@ package body Hostkit.Fs is
       then
          return Ada.Environment_Variables.Value ("APPDATA");
       end if;
-      return (if Home = "" then "" else Home & "\\AppData\\Roaming");
+      return (if Home = "" then "" else Home & "\AppData\Roaming");
    end Application_Data_Directory;
 
    function Cache_Directory return String is
@@ -677,7 +677,7 @@ package body Hostkit.Fs is
       then
          return Ada.Environment_Variables.Value ("LOCALAPPDATA");
       end if;
-      return (if Home = "" then "" else Home & "\\AppData\\Local");
+      return (if Home = "" then "" else Home & "\AppData\Local");
    end Cache_Directory;
 
    --  The same place as the application data, and roaming on purpose: what the
@@ -776,6 +776,11 @@ package body Hostkit.Fs is
    --  Written as a backslash. Both are accepted by the file calls, which is
    --  why a path built with the wrong one goes unnoticed until it is shown
    --  to someone.
-   function Separator return Character is ('\\');
+   --
+   --  One backslash. Ada string and character literals carry no escapes, so
+   --  a doubled one here is two characters where one is meant -- and in a
+   --  character literal it is not a literal at all, which is what stopped
+   --  every Windows build of this crate.
+   function Separator return Character is ('\');
 
 end Hostkit.Fs;

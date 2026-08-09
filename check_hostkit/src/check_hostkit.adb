@@ -134,6 +134,91 @@ procedure Check_Hostkit is
       Ada.Directories.End_Search (Search);
    end Require_A_Body_Per_Host;
 
+   --  And every one of those bodies must parse, here, whatever host this is.
+   --
+   --  A body for another host is compiled only on that host's runner, so a
+   --  syntax error in it survives every build and every check on this one and
+   --  fails there. That is not hypothetical: `function Separator return
+   --  Character is ('\\');` sat in the Windows body -- a C escape, and Ada
+   --  literals carry no escapes, so it was two characters where one was meant
+   --  and not a character literal at all. It stopped every Windows build of
+   --  this crate, and of everything that pins it, until somebody read the
+   --  runner's log.
+   --
+   --  The compiler is asked for a syntax check only (-gnats), so this needs
+   --  no target, no runtime and no dependencies of the unit: it answers the
+   --  one question a foreign body can be asked from here, and answers it in
+   --  about a second.
+   procedure Require_Every_Host_Body_Parses is
+      --  Spawn does not search the path, so the compiler is located once.
+      --  A host without one is a host that cannot answer this question, and
+      --  saying so is better than reporting that nothing parses.
+      Compiler : constant String :=
+        Project_Tools.Processes.Locate_Command ("gcc");
+
+      Hosts : constant array (1 .. 4) of Unbounded_String :=
+        [To_Unbounded_String ("linux"),
+         To_Unbounded_String ("macos"),
+         To_Unbounded_String ("windows"),
+         To_Unbounded_String ("unsupported")];
+   begin
+      Put_Line ("");
+      Put_Line ("==> syntax-check every host body");
+
+      if Compiler = "" then
+         Error ("no gcc on the path, so no host body could be parsed");
+         return;
+      end if;
+
+      for Host of Hosts loop
+         declare
+            Where  : constant String :=
+              Root & "/src/platform/" & To_String (Host);
+            Search : Ada.Directories.Search_Type;
+            Item   : Ada.Directories.Directory_Entry_Type;
+         begin
+            if Ada.Directories.Exists (Where) then
+               Ada.Directories.Start_Search (Search, Where, "*.ad[sb]");
+
+               while Ada.Directories.More_Entries (Search) loop
+                  Ada.Directories.Get_Next_Entry (Search, Item);
+
+                  declare
+                     Name : constant String :=
+                       Ada.Directories.Simple_Name (Item);
+                     Args : Project_Tools.Processes.Argument_Vectors.Vector;
+                  begin
+                     Args.Append (To_Unbounded_String ("-c"));
+                     Args.Append (To_Unbounded_String ("-gnats"));
+                     Args.Append (To_Unbounded_String ("-gnat2022"));
+                     Args.Append (To_Unbounded_String ("-x"));
+                     Args.Append (To_Unbounded_String ("ada"));
+                     Args.Append
+                       (To_Unbounded_String
+                          (Where & "/" & Name));
+
+                     if Project_Tools.Processes.Run_Status
+                          (Label   => "syntax check " & To_String (Host)
+                                      & "/" & Name,
+                           Dir     => Root,
+                           Program => Compiler,
+                           Args    => Args,
+                           Quiet   => True) /= 0
+                     then
+                        Error
+                          ("src/platform/" & To_String (Host) & "/" & Name
+                           & " does not parse; it would fail on that host's "
+                           & "runner and nowhere else");
+                     end if;
+                  end;
+               end loop;
+
+               Ada.Directories.End_Search (Search);
+            end if;
+         end;
+      end loop;
+   end Require_Every_Host_Body_Parses;
+
    procedure Check_Generated_Artifacts is
       Hygiene_Errors : Natural := 0;
    begin
@@ -185,6 +270,7 @@ begin
       "AGENTS.md must carry the ""cannot tell is not fine"" contract");
 
    Require_A_Body_Per_Host;
+   Require_Every_Host_Body_Parses;
 
    --  The host calls, per body. Grouped by what they are for rather than by
    --  host, because the point of each row is that the same question is answered
