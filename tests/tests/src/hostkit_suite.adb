@@ -13,6 +13,7 @@ with Interfaces.C.Strings;
 with Ada.Strings.Unbounded;
 
 with Hostkit;
+with Hostkit_Shell_Cases;
 with Hostkit.Filesystem_Rules;
 with Hostkit.Fs;
 with Hostkit.FS;
@@ -1445,6 +1446,12 @@ package body Hostkit_Suite is
       Result : constant AUnit.Test_Suites.Access_Test_Suite := new AUnit.Test_Suites.Test_Suite;
    begin
       Result.Add_Test (AUnit.Test_Cases.Test_Case_Access'(new Hostkit_Test_Case));
+
+      --  The shell primitives are a separate case rather than more routines in
+      --  the one above: that case is already long, and these have their own
+      --  fixtures and their own reasons.
+      Result.Add_Test
+        (AUnit.Test_Cases.Test_Case_Access'(new Hostkit_Shell_Cases.Case_Type));
       return Result;
    end Suite;
 

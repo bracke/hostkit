@@ -113,10 +113,17 @@ package body Hostkit.Native is
       procedure Underscore_Exit (Status : C_Int)
         with Import => True, Convention => C, External_Name => "_exit";
 
-      O_Rdonly : constant C_Int := 0;
-      O_Wronly : constant C_Int := 1;
-      O_Creat  : constant C_Int := 64;
-      O_Trunc  : constant C_Int := 512;
+      --  macOS values, from sys/fcntl.h. These were previously the Linux
+      --  numbers -- O_CREAT 64, O_TRUNC 512 -- which on macOS mean O_ASYNC and
+      --  O_CREAT. The effect was that a capture file was opened without
+      --  O_TRUNC and never truncated, so output from an earlier run survived
+      --  underneath a shorter later one, and O_ASYNC was set on it for no
+      --  reason. Nothing failed; the file was simply wrong, which is the class
+      --  of bug this crate exists to prevent.
+      O_Rdonly : constant C_Int := 16#0000#;
+      O_Wronly : constant C_Int := 16#0001#;
+      O_Creat  : constant C_Int := 16#0200#;
+      O_Trunc  : constant C_Int := 16#0400#;
       Sigterm  : constant C_Int := 15;
       Sigkill  : constant C_Int := 9;
 

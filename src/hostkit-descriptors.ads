@@ -224,20 +224,34 @@ package Hostkit.Descriptors is
    --  @return True when Item is a terminal.
    function Is_Terminal (Item : Descriptor) return Boolean;
 
-   --  Which of a child's three standard streams a descriptor is to become.
+   --  Which of the three standard streams a descriptor is to become.
    type Standard_Stream is (Stream_Input, Stream_Output, Stream_Error);
 
-   --  Put Item where a child will look for one of its standard streams.
+   --  Put Item where one of the standard streams is looked for.
    --
-   --  Called in the child, between fork and exec. It is here rather than in
+   --  Two callers, and the second was using it on the first's documentation.
+   --
+   --  A child, between fork and exec: this is here rather than in
    --  Hostkit.Spawn so that the knowledge of how a host attaches a stream --
    --  dup2 and the close-on-exec flag it clears on POSIX, SetStdHandle and the
    --  STARTUPINFO fields on Windows -- stays with the descriptors, and so that
    --  Hostkit.Spawn never needs to see the host value behind one.
    --
+   --  This process, to redirect a stream and put it back. Save the stream
+   --  first with Duplicate, assign the new descriptor, and assign the saved
+   --  one when finished; the redirection is a property of the process, so
+   --  anything written through a language runtime's own standard-output
+   --  object follows it, which is the point -- that object cannot be
+   --  redirected from inside the language when the writer holds the raw
+   --  stream. One at a time: the state being changed is process-wide, so a
+   --  second redirection taken before the first is put back loses the
+   --  descriptor that would have restored it.
+   --
    --  The assignment survives exec: whatever this package's usual
    --  non-inheritable default was, the assigned stream is inherited, because a
-   --  child with no standard output is not what any caller meant.
+   --  child with no standard output is not what any caller meant. In-process
+   --  that costs nothing -- a standard stream is inheritable already -- and it
+   --  is stated because it is a change to process state either way.
    --
    --  @param Item Descriptor to install.
    --  @param To Which stream it becomes.
