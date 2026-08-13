@@ -68,6 +68,12 @@ package body Hostkit.Fs is
       return False;
    end Create_FIFO;
 
+   function Create_Socket (Path : String; Mode : Natural) return Boolean is
+      pragma Unreferenced (Path, Mode);
+   begin
+      return False;
+   end Create_Socket;
+
    function Special_File_Info_Of (Path : String) return Special_File_Info is
       pragma Unreferenced (Path);
    begin

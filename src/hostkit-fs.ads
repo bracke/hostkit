@@ -105,6 +105,13 @@ package Hostkit.Fs is
    --  @return True when the host created one
    function Create_FIFO (Path : String; Mode : Natural) return Boolean;
 
+   --  Create a Unix-domain socket node in the filesystem at Path.
+   --
+   --  Windows named pipes and Winsock sockets do not create a POSIX pathname
+   --  socket, so Windows declines.
+   --  @return True when the host created one
+   function Create_Socket (Path : String; Mode : Natural) return Boolean;
+
    type Device_Kind is (Character_Device, Block_Device);
 
    type Special_File_Kind is
@@ -112,6 +119,7 @@ package Hostkit.Fs is
       FIFO,
       Character_Device,
       Block_Device,
+      Socket,
       Other_Special);
 
    type Special_File_Info is record
