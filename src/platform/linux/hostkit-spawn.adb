@@ -11,7 +11,6 @@ package body Hostkit.Spawn is
    use type Interfaces.C.int;
    use type Interfaces.C.long;
    use type Interfaces.C.Strings.chars_ptr;
-   use type Interfaces.Integer_64;
    use type Hostkit.Descriptors.Descriptor;
    use type Hostkit.Signals.Signal;
 

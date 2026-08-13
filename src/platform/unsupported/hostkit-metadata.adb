@@ -11,6 +11,17 @@ package body Hostkit.Metadata is
       return Ada.Calendar.Time_Of (1901, 1, 1);
    end File_Creation_Time;
 
+   function File_Access_Time
+     (Path      : String;
+      Available : out Boolean)
+      return Ada.Calendar.Time
+   is
+      pragma Unreferenced (Path);
+   begin
+      Available := False;
+      return Ada.Calendar.Time_Of (1901, 1, 1);
+   end File_Access_Time;
+
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
       pragma Unreferenced (Path);
    begin
@@ -37,6 +48,17 @@ package body Hostkit.Metadata is
    begin
       return False;
    end Set_Permissions;
+
+   function Set_File_Times
+     (Path          : String;
+      Access_Time   : Long_Long_Integer;
+      Modified_Time : Long_Long_Integer)
+      return Boolean
+   is
+      pragma Unreferenced (Path, Access_Time, Modified_Time);
+   begin
+      return False;
+   end Set_File_Times;
 
    function Permissions_Supported return Boolean is
    begin
@@ -72,6 +94,17 @@ package body Hostkit.Metadata is
    begin
       return Left /= "" and then Left = Right;
    end Same_File;
+
+   function Device_Id
+     (Path      : String;
+      Available : out Boolean)
+      return Long_Long_Integer
+   is
+      pragma Unreferenced (Path);
+   begin
+      Available := False;
+      return 0;
+   end Device_Id;
 
    function User_Id_For_Name
      (Name  : String;

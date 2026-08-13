@@ -31,7 +31,6 @@ package body Hostkit.Host is
      (Object : System.Address)
      with Import, Convention => C, External_Name => "CFRelease";
 
-
    function Current return Kind is
    begin
       return MacOS;
@@ -88,7 +87,6 @@ package body Hostkit.Host is
 
          return "";
    end Native_Locale;
-
 
    ------------------------
    -- Executable_Path --
@@ -148,5 +146,17 @@ package body Hostkit.Host is
       when others =>
          return False;
    end Is_Terminal;
+
+   function C_Getpid return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "getpid";
+
+   ---------------------
+   -- Own_Process_Id --
+   ---------------------
+
+   function Own_Process_Id return Integer is
+   begin
+      return Integer (C_Getpid);
+   end Own_Process_Id;
 
 end Hostkit.Host;

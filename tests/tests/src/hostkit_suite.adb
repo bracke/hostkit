@@ -16,7 +16,6 @@ with Hostkit;
 with Hostkit_Shell_Cases;
 with Hostkit.Filesystem_Rules;
 with Hostkit.Fs;
-with Hostkit.FS;
 with Hostkit.Host;
 with Hostkit.Metadata;
 with Hostkit.Process;
@@ -311,6 +310,41 @@ package body Hostkit_Suite is
         (not Hostkit.Process.Launch ("", Empty),
          "a launch with no program to run does not claim to have started");
    end Test_Launch_Does_Not_Wait;
+
+   procedure Test_Environment_Value (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Name  : constant String := "HOSTKIT_TEST_ENVIRONMENT_VALUE";
+      Value : Hostkit.UString;
+   begin
+      if Ada.Environment_Variables.Exists (Name) then
+         Ada.Environment_Variables.Clear (Name);
+      end if;
+
+      Assert
+        (not Hostkit.Process.Environment_Value (Name, Value),
+         "a missing environment variable is reported as absent");
+      Assert
+        (To_String (Value) = "",
+         "a missing environment variable leaves no stale value");
+
+      Ada.Environment_Variables.Set (Name, "");
+      Assert
+        (Hostkit.Process.Environment_Value (Name, Value),
+         "a present empty environment variable is still present");
+      Assert
+        (To_String (Value) = "",
+         "a present empty environment variable returns an empty value");
+
+      Ada.Environment_Variables.Set (Name, "hostkit-value");
+      Assert
+        (Hostkit.Process.Environment_Value (Name, Value),
+         "a present environment variable is reported as present");
+      Assert
+        (To_String (Value) = "hostkit-value",
+         "the environment value is returned without consumer-side probing");
+
+      Ada.Environment_Variables.Clear (Name);
+   end Test_Environment_Value;
 
    procedure Test_Shell_Quoting_Holds (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -916,31 +950,31 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      Slash : constant Character := Hostkit.FS.Separator;
+      Slash : constant Character := Hostkit.Fs.Separator;
    begin
-      Assert (Hostkit.FS.Join ("a", "b") = "a" & Slash & "b",
+      Assert (Hostkit.Fs.Join ("a", "b") = "a" & Slash & "b",
               "two segments were not joined by one separator: "
-              & Hostkit.FS.Join ("a", "b"));
+              & Hostkit.Fs.Join ("a", "b"));
 
       --  A base that already ends in a separator does not get another, and
       --  either spelling counts as one: a path may have come from somewhere
       --  that writes them the other way.
-      Assert (Hostkit.FS.Join ("a/", "b") = "a/b",
+      Assert (Hostkit.Fs.Join ("a/", "b") = "a/b",
               "a trailing slash gained a second separator: "
-              & Hostkit.FS.Join ("a/", "b"));
-      Assert (Hostkit.FS.Join ("a\", "b") = "a\b",
+              & Hostkit.Fs.Join ("a/", "b"));
+      Assert (Hostkit.Fs.Join ("a\", "b") = "a\b",
               "a trailing backslash gained a second separator: "
-              & Hostkit.FS.Join ("a\", "b"));
+              & Hostkit.Fs.Join ("a\", "b"));
 
       --  An empty side is the other side, so a caller need not test for it
       --  before every join.
-      Assert (Hostkit.FS.Join ("", "b") = "b", "an empty base changed the part");
-      Assert (Hostkit.FS.Join ("a", "") = "a", "an empty part changed the base");
-      Assert (Hostkit.FS.Join ("", "") = "", "two empty sides produced something");
+      Assert (Hostkit.Fs.Join ("", "b") = "b", "an empty base changed the part");
+      Assert (Hostkit.Fs.Join ("a", "") = "a", "an empty part changed the base");
+      Assert (Hostkit.Fs.Join ("", "") = "", "two empty sides produced something");
 
       --  Chaining is how a multi-segment tail is built, since that is what
       --  Compose cannot do.
-      Assert (Hostkit.FS.Join (Hostkit.FS.Join ("a", "b"), "c")
+      Assert (Hostkit.Fs.Join (Hostkit.Fs.Join ("a", "b"), "c")
               = "a" & Slash & "b" & Slash & "c",
               "chaining did not build a three-segment path");
 
@@ -1160,6 +1194,51 @@ package body Hostkit_Suite is
       Ada.Directories.Delete_File (Other);
    end Test_Same_File_Sees_Through_A_Second_Name;
 
+   procedure Test_Device_Id_Reports_A_Comparable_Volume
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      First            : constant String := Ada.Directories.Compose (Scratch, "hk-device-first");
+      Second           : constant String := Ada.Directories.Compose (Scratch, "hk-device-second");
+      Missing          : constant String := Ada.Directories.Compose (Scratch, "hk-device-missing");
+      First_Available  : Boolean;
+      Second_Available : Boolean;
+      Missing_Available : Boolean;
+      First_Device     : Long_Long_Integer;
+      Second_Device    : Long_Long_Integer;
+      Missing_Device   : Long_Long_Integer;
+      pragma Unreferenced (Missing_Device);
+
+      procedure Remove (Path : String) is
+      begin
+         if Ada.Directories.Exists (Path) then
+            Ada.Directories.Delete_File (Path);
+         end if;
+      end Remove;
+   begin
+      Remove (First);
+      Remove (Second);
+      Remove (Missing);
+
+      Write_File (First, "first");
+      Write_File (Second, "second");
+
+      First_Device := Hostkit.Metadata.Device_Id (First, First_Available);
+      Second_Device := Hostkit.Metadata.Device_Id (Second, Second_Available);
+      Missing_Device := Hostkit.Metadata.Device_Id (Missing, Missing_Available);
+
+      Assert (not Missing_Available, "a missing file has no device id to report");
+
+      if First_Available or else Second_Available then
+         Assert (First_Available, "device id availability is stable for sibling files");
+         Assert (Second_Available, "device id availability is stable for sibling files");
+         Assert (First_Device = Second_Device, "sibling files report the same device id");
+      end if;
+
+      Ada.Directories.Delete_File (First);
+      Ada.Directories.Delete_File (Second);
+   end Test_Device_Id_Reports_A_Comparable_Volume;
+
    procedure Test_A_Name_Round_Trips_Through_Its_Id
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1364,6 +1443,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Launch_Does_Not_Wait'Access, "process : Launch starts and does not wait");
       Register_Routine
+        (T, Test_Environment_Value'Access,
+         "process : environment values are read through hostkit");
+      Register_Routine
         (T, Test_Shell_Quoting_Holds'Access, "shell : an argument cannot become a second command");
       Register_Routine
         (T, Test_A_Directory_Is_Not_Executable'Access, "fs : a directory is not executable");
@@ -1418,7 +1500,8 @@ package body Hostkit_Suite is
 
       Register_Routine
         (T, Test_The_Executable_Path_Locates_This_Program'Access,
-         "the host names the running executable, resolved");      Register_Routine
+         "the host names the running executable, resolved");
+      Register_Routine
         (T, Test_Metadata_Reports_What_It_Could_Not_Get'Access,
          "metadata : what the host could not answer is reported, not invented");
       Register_Routine
@@ -1427,6 +1510,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Same_File_Sees_Through_A_Second_Name'Access,
          "metadata : two names for one file are recognised as the same file");
+      Register_Routine
+        (T, Test_Device_Id_Reports_A_Comparable_Volume'Access,
+         "metadata : device ids identify the volume when the host reports them");
       Register_Routine
         (T, Test_A_Name_Round_Trips_Through_Its_Id'Access,
          "metadata : an owner name round-trips through its numeric id");

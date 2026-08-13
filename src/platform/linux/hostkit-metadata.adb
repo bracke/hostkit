@@ -24,6 +24,7 @@ package body Hostkit.Metadata is
    At_FDCWD : constant C_Int := -100;
    At_Symlink_Nofollow : constant C_Unsigned := 16#100#;
    Statx_Btime : constant C_Unsigned := 16#800#;
+   Statx_Atime : constant C_Unsigned := 16#20#;
    Statvfs_Read_Only : constant C_ULong := 1;
 
    type U16_Array is array (Positive range <>) of C_U16
@@ -111,6 +112,21 @@ package body Hostkit.Metadata is
       return C_Int
      with Import, Convention => C, External_Name => "chmod";
 
+   type Timeval is record
+      Seconds      : C_S64;
+      Microseconds : C_S64;
+   end record
+     with Convention => C;
+
+   type Timeval_Array is array (Positive range 1 .. 2) of Timeval
+     with Convention => C;
+
+   function Utimes
+     (Pathname : Interfaces.C.Strings.chars_ptr;
+      Times    : access Timeval_Array)
+      return C_Int
+     with Import, Convention => C, External_Name => "utimes";
+
    --  Front of the C "struct passwd": we only read pw_uid, which follows the
    --  pw_name and pw_passwd pointers. Trailing members are omitted because the
    --  imported pointer refers to the library's full record.
@@ -193,6 +209,33 @@ package body Hostkit.Metadata is
          Available := False;
          return Ada.Calendar.Time_Of (1901, 1, 1);
    end File_Creation_Time;
+
+   function File_Access_Time
+     (Path      : String;
+      Available : out Boolean)
+      return Ada.Calendar.Time
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Status : C_Int;
+      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+   begin
+      Available := False;
+      Status := Statx (At_FDCWD, C_Path, 0, Statx_Atime, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+
+      if Status = 0 and then (Info.Mask and Statx_Atime) /= 0 and then Info.Access_Time.Seconds >= 0 then
+         Available := True;
+         return Epoch + Duration (Info.Access_Time.Seconds) + Duration (Info.Access_Time.Nanoseconds) / 1_000_000_000.0;
+      end if;
+
+      return Ada.Calendar.Time_Of (1901, 1, 1);
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         Available := False;
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+   end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
       function Saturating_Natural (Value : C_ULong) return Natural is
@@ -305,6 +348,29 @@ package body Hostkit.Metadata is
          return False;
    end Set_Permissions;
 
+   function Set_File_Times
+     (Path          : String;
+      Access_Time   : Long_Long_Integer;
+      Modified_Time : Long_Long_Integer)
+      return Boolean
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Times  : aliased Timeval_Array :=
+        [1 => (Seconds      => C_S64 (Access_Time),
+               Microseconds => 0),
+         2 => (Seconds      => C_S64 (Modified_Time),
+               Microseconds => 0)];
+      Status : C_Int;
+   begin
+      Status := Utimes (C_Path, Times'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0;
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return False;
+   end Set_File_Times;
+
    function Permissions_Supported return Boolean is
    begin
       return True;
@@ -367,6 +433,32 @@ package body Hostkit.Metadata is
          Safe_Free (R_Path);
          return False;
    end Same_File;
+
+   function Device_Id
+     (Path      : String;
+      Available : out Boolean)
+      return Long_Long_Integer
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Status : C_Int;
+   begin
+      Available := False;
+      Status := Statx (At_FDCWD, C_Path, 0, Statx_Ino, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         return 0;
+      end if;
+
+      Available := True;
+      return Long_Long_Integer (Info.Device_Major) * 4_294_967_296
+        + Long_Long_Integer (Info.Device_Minor);
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         Available := False;
+         return 0;
+   end Device_Id;
 
    procedure File_Mode_And_Ownership
      (Path                : String;

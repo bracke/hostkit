@@ -145,9 +145,24 @@ package Hostkit.Signals is
       --  Whatever the host does by default -- for most of these, die.
       Disposition_Default,
 
-      --  Discard it. The shell's answer for SIGINT, SIGQUIT, SIGTSTP, SIGTTOU
-      --  and, above all, SIGPIPE.
-      Disposition_Ignore);
+      --  Discard it. The shell's answer for SIGQUIT, SIGTSTP, SIGTTOU and,
+      --  above all, SIGPIPE.
+      Disposition_Ignore,
+
+      --  Record that it arrived, and carry on.
+      --
+      --  A handler may do almost nothing: it interrupts the program between
+      --  any two machine instructions, so anything it touches must be safe to
+      --  touch halfway through. Setting one flag is safe; allocating, locking,
+      --  or writing to a stream is not, and doing so is the classic way a
+      --  program deadlocks once a week and never in a test.
+      --
+      --  So the handler records the arrival and nothing else, and the program
+      --  finds out by asking Arrived at a moment of its own choosing. A shell
+      --  wants this for SIGINT: Ctrl-C has to stop what is running without
+      --  killing the shell, and "stop what is running" is not something a
+      --  handler can do.
+      Disposition_Record);
 
    --  Set what this process does about a signal.
    --
@@ -170,5 +185,41 @@ package Hostkit.Signals is
    --  @param To The current disposition, meaningful only when this returns True.
    --  @return True when the host could answer.
    function Current_Disposition (Item : Signal; To : out Disposition) return Boolean;
+
+   --  Whether this host can tell a program that a signal arrived.
+   --
+   --  A different question from Is_Supported, and deliberately separate. That
+   --  one asks whether the host *has* the signal -- whether it can be numbered,
+   --  sent, and given a disposition. This asks only whether the host can report
+   --  an arrival, which is the narrower thing a shell needs for Ctrl-C.
+   --
+   --  On POSIX the two coincide, except for the two signals no handler may
+   --  catch. On Windows they do not: it has no signals at all, and Is_Supported
+   --  says so, yet a console can still tell a program that the user asked to
+   --  interrupt. Folding that into Is_Supported would make callers believe the
+   --  signal could also be sent and numbered, which it cannot.
+   --
+   --  @param Item Signal to ask about.
+   --  @return True when Set_Disposition with Disposition_Record would work.
+   function Can_Record (Item : Signal) return Boolean;
+
+   --  Whether a recorded signal has arrived since it was last cleared.
+   --
+   --  Only meaningful for a signal set to Disposition_Record. False for every
+   --  other, which is the honest answer: nothing was recorded.
+   --
+   --  @param Item Signal to ask about.
+   --  @return True when at least one has arrived. How many is not counted:
+   --          signals coalesce, so a count would be a number nobody can rely
+   --          on. Two interrupts a millisecond apart are one interruption.
+   function Arrived (Item : Signal) return Boolean;
+
+   --  Forget that a recorded signal arrived.
+   --
+   --  Called once whatever the arrival meant has been dealt with. A caller
+   --  that forgets leaves the next thing it runs looking already-interrupted.
+   --
+   --  @param Item Signal to clear.
+   procedure Clear (Item : Signal);
 
 end Hostkit.Signals;

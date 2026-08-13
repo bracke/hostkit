@@ -167,6 +167,71 @@ package body Hostkit.Signals is
       return C_Kill (-C_Int (Group_Id), To_Number (Item)) = 0;
    end Send_To_Group;
 
+   ------------------------------------------------------------------
+   --  Recorded signals.
+   --
+   --  One flag per signal, written by the handler and read by the program.
+   --  Volatile because the handler runs between any two instructions of the
+   --  program and the compiler must not keep the value in a register across
+   --  the point where it changes; Atomic because a partially written flag
+   --  would be a value neither side wrote.
+   ------------------------------------------------------------------
+   type Arrival_Flags is array (Signal) of Boolean;
+   pragma Atomic_Components (Arrival_Flags);
+   pragma Volatile (Arrival_Flags);
+
+   Arrivals : Arrival_Flags := [others => False];
+
+   procedure Record_Arrival (Number : C_Int)
+     with Convention => C;
+
+   ----------------------
+   -- Record_Arrival --
+   ----------------------
+
+   procedure Record_Arrival (Number : C_Int) is
+      Which : Signal;
+   begin
+      --  Everything this does must be safe to do halfway through anything
+      --  else, so it does one thing: set a flag. No allocation, no lock, no
+      --  output -- and no re-arming either, because the host keeps the
+      --  handler installed and re-arming from inside it is a race with the
+      --  next signal.
+      if From_Number (Integer (Number), Which) then
+         Arrivals (Which) := True;
+      end if;
+   end Record_Arrival;
+
+   -----------------
+   -- Can_Record --
+   -----------------
+
+   function Can_Record (Item : Signal) return Boolean is
+   begin
+      --  Every signal this host has, except the two POSIX makes uncatchable.
+      return Is_Supported (Item)
+        and then Item /= Signal_Kill
+        and then Item /= Signal_Stop;
+   end Can_Record;
+
+   --------------
+   -- Arrived --
+   --------------
+
+   function Arrived (Item : Signal) return Boolean is
+   begin
+      return Arrivals (Item);
+   end Arrived;
+
+   -----------
+   -- Clear --
+   -----------
+
+   procedure Clear (Item : Signal) is
+   begin
+      Arrivals (Item) := False;
+   end Clear;
+
    ---------------------
    -- Set_Disposition --
    ---------------------
@@ -175,13 +240,20 @@ package body Hostkit.Signals is
       Handler  : constant System.Address :=
         (case To is
             when Disposition_Default => SIG_DFL,
-            when Disposition_Ignore  => SIG_IGN);
+            when Disposition_Ignore  => SIG_IGN,
+            when Disposition_Record  => Record_Arrival'Address);
       Previous : System.Address;
    begin
       --  POSIX makes these two unchangeable, and signal(2) reports EINVAL. Said
       --  here as well so the refusal does not depend on the C library agreeing.
       if Item = Signal_Kill or else Item = Signal_Stop then
          return False;
+      end if;
+
+      if To = Disposition_Record then
+         --  Cleared as it is installed, so a signal that arrived before
+         --  anybody was listening is not reported to whoever just started.
+         Clear (Item);
       end if;
 
       Previous := C_Signal (To_Number (Item), Handler);

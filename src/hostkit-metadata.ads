@@ -63,6 +63,17 @@ package Hostkit.Metadata is
       Available : out Boolean)
       return Ada.Calendar.Time;
 
+   --  The last access time of Path.
+   --
+   --  @param Path Path to inspect.
+   --  @param Available True when an access time was obtained.
+   --  @return The access time when Available; otherwise a sentinel past date that
+   --          is not a fact about the file.
+   function File_Access_Time
+     (Path      : String;
+      Available : out Boolean)
+      return Ada.Calendar.Time;
+
    --  The POSIX permission bits of Path: the low 12 mode bits -- setuid, setgid,
    --  sticky, and the nine rwxrwxrwx bits.
    --
@@ -86,6 +97,18 @@ package Hostkit.Metadata is
    function Set_Permissions
      (Path : String;
       Mode : Natural)
+      return Boolean;
+
+   --  Set Path's access and modification timestamps independently.
+   --
+   --  @param Path Path whose timestamps are changed.
+   --  @param Access_Time New access timestamp.
+   --  @param Modified_Time New modification timestamp.
+   --  @return True when the host applied both timestamps.
+   function Set_File_Times
+     (Path          : String;
+      Access_Time   : Long_Long_Integer;
+      Modified_Time : Long_Long_Integer)
       return Boolean;
 
    --  Does this host have POSIX permission bits to read and set at all? Ask once,
@@ -188,6 +211,16 @@ package Hostkit.Metadata is
    --  @param Right Second path.
    --  @return True when both exist and are the same file.
    function Same_File (Left : String; Right : String) return Boolean;
+
+   --  The filesystem device identifier that contains Path.
+   --
+   --  POSIX find -xdev needs to compare the device id of a starting point with
+   --  each candidate before descending. Available is False where the host cannot
+   --  provide a stable comparable id.
+   function Device_Id
+     (Path      : String;
+      Available : out Boolean)
+      return Long_Long_Integer;
 
    --  A user name to its numeric id -- getpwnam(3) and its equivalents.
    --

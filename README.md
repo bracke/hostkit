@@ -46,6 +46,7 @@ interface. The question to ask of a new subprogram is:
 |---|---|
 | `Hostkit.Host` | Which host is this program running on? (from the body the build chose, which no environment can spoof) |
 | `Hostkit.Fs` | Facts about a path the host answers differently — and that GNAT gets wrong on Windows |
+| `Hostkit.Signals` | Signals, and — separately — whether the host can report that one arrived |
 | `Hostkit.Process` | Starting other programs |
 | `Hostkit.Native` | The parts of starting a program that only the host can answer (one body per OS) |
 | `Hostkit.Shell` | Running a command line through the host's shell |

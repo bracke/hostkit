@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Hostkit.Process;
 
 --  A byte channel to a local endpoint named by a path.
 --
@@ -15,7 +16,22 @@ package Hostkit.Local_Channel is
    --  Windows it is a named pipe. False when the endpoint is absent or refuses.
    function Connect (Path : String; Item : out Channel) return Boolean;
 
+   --  Connect to a Linux abstract Unix-domain socket name. Other hosts return False.
+   --  The name is the bytes after "abstract=" in a D-Bus address and does not include
+   --  the leading NUL byte used by sockaddr_un.
+   function Connect_Abstract (Name : String; Item : out Channel) return Boolean;
+
    function Is_Open (Item : Channel) return Boolean;
+
+   function Wait_Readable
+     (Item       : Channel;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome;
+
+   function Wait_Writable
+     (Item       : Channel;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome;
 
    --  Send every byte of Data. False if the whole of it could not be written.
    function Send
@@ -29,6 +45,13 @@ package Hostkit.Local_Channel is
      (Item : in out Channel;
       Data : out Ada.Streams.Stream_Element_Array)
       return Boolean;
+
+   --  Read up to Data'Length bytes into Data and return the number of bytes
+   --  actually read. Zero means the channel is closed or broken.
+   function Receive_Some
+     (Item : in out Channel;
+      Data : out Ada.Streams.Stream_Element_Array)
+      return Natural;
 
    procedure Close (Item : in out Channel);
 

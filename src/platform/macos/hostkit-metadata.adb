@@ -145,6 +145,20 @@ package body Hostkit.Metadata is
       Mode : C_U16) return C_Int
      with Import, Convention => C, External_Name => "chmod";
 
+   type Timeval is record
+      Seconds      : C_S64;
+      Microseconds : C_S64;
+   end record
+     with Convention => C;
+
+   type Timeval_Array is array (Positive range 1 .. 2) of Timeval
+     with Convention => C;
+
+   function C_Utimes
+     (Path  : Interfaces.C.Strings.chars_ptr;
+      Times : access Timeval_Array) return C_Int
+     with Import, Convention => C, External_Name => "utimes";
+
    function C_Chown
      (Path     : Interfaces.C.Strings.chars_ptr;
       User_Id  : C_U32;
@@ -219,6 +233,32 @@ package body Hostkit.Metadata is
          Available := False;
          return Ada.Calendar.Time_Of (1901, 1, 1);
    end File_Creation_Time;
+
+   function File_Access_Time
+     (Path      : String;
+      Available : out Boolean) return Ada.Calendar.Time
+   is
+      Buffer : aliased Stat_Record;
+      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+   begin
+      Available := False;
+
+      if not Stat_Of (Path, Buffer'Access) then
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+      end if;
+
+      if Buffer.Access_Time.Seconds < 0 then
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+      end if;
+
+      Available := True;
+      return Epoch + Duration (Buffer.Access_Time.Seconds);
+
+   exception
+      when others =>
+         Available := False;
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+   end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
       C_Path : Interfaces.C.Strings.chars_ptr :=
@@ -301,6 +341,31 @@ package body Hostkit.Metadata is
          return False;
    end Set_Permissions;
 
+   function Set_File_Times
+     (Path          : String;
+      Access_Time   : Long_Long_Integer;
+      Modified_Time : Long_Long_Integer)
+      return Boolean
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Times  : aliased Timeval_Array :=
+        [1 => (Seconds      => C_S64 (Access_Time),
+               Microseconds => 0),
+         2 => (Seconds      => C_S64 (Modified_Time),
+               Microseconds => 0)];
+      Result : C_Int;
+   begin
+      Result := C_Utimes (C_Path, Times'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      return Result = 0;
+
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return False;
+   end Set_File_Times;
+
    function Permissions_Supported return Boolean is
    begin
       return True;
@@ -360,6 +425,26 @@ package body Hostkit.Metadata is
       when others =>
          return False;
    end Same_File;
+
+   function Device_Id
+     (Path      : String;
+      Available : out Boolean)
+      return Long_Long_Integer
+   is
+      Buffer : aliased Stat_Record;
+   begin
+      if not Stat_Of (Path, Buffer'Access) then
+         Available := False;
+         return 0;
+      end if;
+
+      Available := True;
+      return Long_Long_Integer (Buffer.Device);
+   exception
+      when others =>
+         Available := False;
+         return 0;
+   end Device_Id;
 
    function User_Id_For_Name
      (Name  : String;

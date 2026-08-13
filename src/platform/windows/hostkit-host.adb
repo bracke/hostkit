@@ -98,7 +98,6 @@ package body Hostkit.Host is
          return "";
    end Native_Locale;
 
-
    ------------------------
    -- Executable_Path --
    ------------------------
@@ -166,5 +165,18 @@ package body Hostkit.Host is
       when others =>
          return False;
    end Is_Terminal;
+
+   function C_Get_Current_Process_Id return Interfaces.C.unsigned_long
+     with Import => True, Convention => Stdcall,
+          External_Name => "GetCurrentProcessId";
+
+   ---------------------
+   -- Own_Process_Id --
+   ---------------------
+
+   function Own_Process_Id return Integer is
+   begin
+      return Integer (C_Get_Current_Process_Id);
+   end Own_Process_Id;
 
 end Hostkit.Host;

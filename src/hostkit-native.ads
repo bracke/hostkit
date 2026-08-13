@@ -57,6 +57,9 @@ private package Hostkit.Native is
    --  Which body this is.
    function Native_Backend_Label return String;
 
+   --  The host process user id, when the host has a uid-style identity.
+   function Current_User_Id (User_Id : out Natural) return Boolean;
+
    --  Start whatever the host thinks Path is, the way a double-click would.
    function Open_Native (Path : String) return Boolean;
 

@@ -1,4 +1,5 @@
 with Ada.Streams.Stream_IO;
+with Ada.Environment_Variables;
 with Ada.Strings.Unbounded;
 
 with GNAT.OS_Lib;
@@ -249,6 +250,35 @@ package body Hostkit.Process is
    begin
       return Hostkit.Native.Native_Backend_Label;
    end Native_Backend_Label;
+
+   function Current_User_Id (User_Id : out Natural) return Boolean is
+   begin
+      return Hostkit.Native.Current_User_Id (User_Id);
+   exception
+      when others =>
+         User_Id := 0;
+         return False;
+   end Current_User_Id;
+
+   function Environment_Value
+     (Name  : String;
+      Value : out UString)
+      return Boolean
+   is
+   begin
+      Value := Null_Unbounded_String;
+
+      if Name = "" or else not Ada.Environment_Variables.Exists (Name) then
+         return False;
+      end if;
+
+      Value := To_Unbounded_String (Ada.Environment_Variables.Value (Name));
+      return True;
+   exception
+      when others =>
+         Value := Null_Unbounded_String;
+         return False;
+   end Environment_Value;
 
    function Open_Native (Path : String) return Boolean is
    begin

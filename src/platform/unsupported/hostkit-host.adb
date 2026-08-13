@@ -20,7 +20,6 @@ package body Hostkit.Host is
       return "";
    end Native_Locale;
 
-
    ------------------------
    -- Executable_Path --
    ------------------------
@@ -39,5 +38,12 @@ package body Hostkit.Host is
    begin
       return False;
    end Is_Terminal;
+
+   function Own_Process_Id return Integer is
+   begin
+      --  A host this build does not know. -1 rather than 0, which is a real
+      --  process id on POSIX and would be believed.
+      return -1;
+   end Own_Process_Id;
 
 end Hostkit.Host;

@@ -61,6 +61,17 @@ package Hostkit.Host is
    --  should fall back to the command name rather than treat it as a failure.
    function Executable_Path return String;
 
+   --  Which process this is.
+   --
+   --  Wanted whenever a program has to name itself to something that takes a
+   --  process id: sending itself a signal, writing a lock or pid file, telling
+   --  a supervisor what to watch.
+   --
+   --  @return This process's identifier, or -1 on a host that cannot say. A
+   --          refusal rather than zero, which is a real process id on POSIX
+   --          and would be believed.
+   function Own_Process_Id return Integer;
+
    --  A standard stream a program may be sharing with a person.
    type Stream_Kind is (Standard_Input, Standard_Output, Standard_Error);
 

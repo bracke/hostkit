@@ -5,6 +5,7 @@ with Ada.Containers.Vectors;
 
 with Interfaces.C.Strings;
 with System;
+with System.Storage_Elements;
 
 package body Hostkit.Metadata is
    use Ada.Strings.Unbounded;
@@ -31,6 +32,8 @@ package body Hostkit.Metadata is
    --  remembered so a name can be recovered from that number later.
 
    Success : constant C_DWord := 0;
+   Invalid_Handle_Value : constant System.Address :=
+     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);
 
    Se_File_Object : constant C_Int := 1;
 
@@ -61,6 +64,14 @@ package body Hostkit.Metadata is
    --  WinWorldSid: the "Everyone" group, which stands in for the POSIX "other".
 
    Read_Only_Volume : constant C_DWord := 16#0008_0000#;
+   File_Read_Attributes  : constant C_DWord := 16#0000_0080#;
+   File_Write_Attributes : constant C_DWord := 16#0000_0100#;
+   File_Share_Read       : constant C_DWord := 16#0000_0001#;
+   File_Share_Write      : constant C_DWord := 16#0000_0002#;
+   File_Share_Delete     : constant C_DWord := 16#0000_0004#;
+   Open_Existing         : constant C_DWord := 3;
+   File_Attribute_Normal : constant C_DWord := 16#0000_0080#;
+   File_Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
 
    type Trustee_Record is record
       Multiple_Trustee : System.Address := System.Null_Address;
@@ -257,6 +268,13 @@ package body Hostkit.Metadata is
 
    function Close_Handle (Item : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "CloseHandle";
+
+   function Set_File_Time
+     (File          : System.Address;
+      Creation_Time : System.Address;
+      Access_Time   : access Filetime;
+      Modified_Time : access Filetime) return C_Int
+     with Import, Convention => Stdcall, External_Name => "SetFileTime";
 
    --------------------------------------------------------------------------
    --  SID identity
@@ -525,6 +543,46 @@ package body Hostkit.Metadata is
          Available := False;
          return Ada.Calendar.Time_Of (1901, 1, 1);
    end File_Creation_Time;
+
+   function File_Access_Time
+     (Path      : String;
+      Available : out Boolean) return Ada.Calendar.Time
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Data   : aliased Attribute_Data;
+      Result : C_Int;
+      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+   begin
+      Available := False;
+
+      Result := Get_File_Attributes_Ex (C_Path, 0, Data'Access);
+      Interfaces.C.Strings.Free (C_Path);
+
+      if Result = 0 then
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+      end if;
+
+      declare
+         Ticks : constant C_U64 :=
+           C_U64 (Data.Access_Time.High) * 2 ** 32
+           + C_U64 (Data.Access_Time.Low);
+         Unix  : constant Long_Long_Integer :=
+           Long_Long_Integer (Ticks / 10_000_000) - 11_644_473_600;
+      begin
+         if Unix <= 0 then
+            return Ada.Calendar.Time_Of (1901, 1, 1);
+         end if;
+
+         Available := True;
+         return Epoch + Duration (Unix);
+      end;
+
+   exception
+      when others =>
+         Available := False;
+         return Ada.Calendar.Time_Of (1901, 1, 1);
+   end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
       C_Path : Interfaces.C.Strings.chars_ptr :=
@@ -808,6 +866,70 @@ package body Hostkit.Metadata is
          return False;
    end Set_Permissions;
 
+   function Set_File_Times
+     (Path          : String;
+      Access_Time   : Long_Long_Integer;
+      Modified_Time : Long_Long_Integer)
+      return Boolean
+   is
+      function To_Filetime (Seconds : Long_Long_Integer) return Filetime is
+         Ticks : constant C_U64 := C_U64 (Seconds + 11_644_473_600) * 10_000_000;
+      begin
+         return
+           (Low  => C_DWord (Ticks mod 2 ** 32),
+            High => C_DWord (Ticks / 2 ** 32));
+      end To_Filetime;
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      File   : System.Address := System.Null_Address;
+      Access_Filetime   : aliased Filetime := To_Filetime (Access_Time);
+      Modified_Filetime : aliased Filetime := To_Filetime (Modified_Time);
+      Result : C_Int;
+   begin
+      File :=
+        Create_File
+          (C_Path,
+           File_Read_Attributes or File_Write_Attributes,
+           File_Share_Read or File_Share_Write or File_Share_Delete,
+           System.Null_Address,
+           Open_Existing,
+           File_Attribute_Normal or File_Flag_Backup_Semantics,
+           System.Null_Address);
+      Interfaces.C.Strings.Free (C_Path);
+
+      if File = System.Null_Address or else File = Invalid_Handle_Value then
+         return False;
+      end if;
+
+      Result :=
+        Set_File_Time
+          (File,
+           System.Null_Address,
+           Access_Filetime'Access,
+           Modified_Filetime'Access);
+      declare
+         Ignored : constant C_Int := Close_Handle (File);
+      begin
+         null;
+      end;
+      return Result /= 0;
+
+   exception
+      when others =>
+         if File /= System.Null_Address and then File /= Invalid_Handle_Value then
+            declare
+               Ignored : constant C_Int := Close_Handle (File);
+            begin
+               null;
+            end;
+         end if;
+         if C_Path /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (C_Path);
+         end if;
+         return False;
+   end Set_File_Times;
+
    function Permissions_Supported return Boolean is
    begin
       return True;
@@ -894,6 +1016,54 @@ package body Hostkit.Metadata is
       when others =>
          return False;
    end Same_File;
+
+   function Device_Id
+     (Path      : String;
+      Available : out Boolean)
+      return Long_Long_Integer
+   is
+      Full : constant String := Ada.Characters.Handling.To_Lower (Ada.Directories.Full_Name (Path));
+      Last : Natural := Full'First - 1;
+      Hash : C_U64 := 14_695_981_039_346_656;
+   begin
+      Available := Ada.Directories.Exists (Path);
+      if not Available then
+         return 0;
+      end if;
+
+      if Full'Length >= 3
+        and then Full (Full'First + 1) = ':'
+        and then Full (Full'First + 2) in '\' | '/'
+      then
+         Last := Full'First + 1;
+      elsif Full'Length >= 5
+        and then Full (Full'First) in '\' | '/'
+        and then Full (Full'First + 1) in '\' | '/'
+      then
+         Last := Full'First + 1;
+         for I in Full'First + 2 .. Full'Last loop
+            Last := I;
+            exit when Full (I) in '\' | '/';
+         end loop;
+         if Last < Full'Last then
+            for I in Last + 1 .. Full'Last loop
+               Last := I;
+               exit when Full (I) in '\' | '/';
+            end loop;
+         end if;
+      else
+         Last := Full'Last;
+      end if;
+
+      for I in Full'First .. Last loop
+         Hash := (Hash xor C_U64 (Character'Pos (Full (I)))) * 1_099_511_628_211;
+      end loop;
+      return Long_Long_Integer (Hash mod C_U64 (Long_Long_Integer'Last));
+   exception
+      when others =>
+         Available := False;
+         return 0;
+   end Device_Id;
 
    function Lookup_Identity
      (Name  : String;

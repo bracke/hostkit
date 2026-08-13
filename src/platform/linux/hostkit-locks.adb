@@ -6,7 +6,6 @@ with System;
 package body Hostkit.Locks is
 
    use type Interfaces.C.int;
-   use type Interfaces.Integer_64;
 
    subtype C_Int is Interfaces.C.int;
 

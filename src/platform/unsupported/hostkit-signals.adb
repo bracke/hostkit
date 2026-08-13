@@ -72,4 +72,33 @@ package body Hostkit.Signals is
       return False;
    end Current_Disposition;
 
+   function Can_Record (Item : Signal) return Boolean is
+      pragma Unreferenced (Item);
+   begin
+      return False;
+   end Can_Record;
+
+   --------------
+   -- Arrived --
+   --------------
+
+   function Arrived (Item : Signal) return Boolean is
+      pragma Unreferenced (Item);
+   begin
+      --  Nothing can be recorded because nothing can be installed. False is
+      --  the honest answer rather than a flag nobody ever sets, which would
+      --  look like a working mechanism that simply never fires.
+      return False;
+   end Arrived;
+
+   -----------
+   -- Clear --
+   -----------
+
+   procedure Clear (Item : Signal) is
+      pragma Unreferenced (Item);
+   begin
+      null;
+   end Clear;
+
 end Hostkit.Signals;

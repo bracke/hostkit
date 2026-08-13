@@ -9,6 +9,7 @@ with Hostkit;
 with Hostkit.Descriptors;
 with Hostkit.Locks;
 with Hostkit.Pty;
+with Hostkit.Host;
 with Hostkit.Signals;
 with Hostkit.Spawn;
 with Hostkit.Terminal_Control;
@@ -150,6 +151,8 @@ package body Hostkit_Shell_Cases is
         Ada.Directories.Compose (Ada.Directories.Current_Directory,
                                  "hostkit-descriptor-roundtrip.tmp");
       Item   : D.Descriptor;
+      --  Set by a call this test requires to refuse, so it is never read.
+      pragma Warnings (Off, Item);
       Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 3) := [97, 98, 99];
       Buffer : Ada.Streams.Stream_Element_Array (1 .. 8);
       Last   : Ada.Streams.Stream_Element_Offset;
@@ -272,6 +275,8 @@ package body Hostkit_Shell_Cases is
       pragma Unreferenced (T);
       Options : Hostkit.Spawn.Options;
       Child   : Hostkit.Spawn.Process_Handle;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Child);
       No_Args : Hostkit.String_Vectors.Vector;
       Outcome : Hostkit.Spawn.Spawn_Outcome;
    begin
@@ -293,6 +298,8 @@ package body Hostkit_Shell_Cases is
       Options : Hostkit.Spawn.Options;
       Child   : Hostkit.Spawn.Process_Handle;
       Result  : Hostkit.Spawn.Status;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Result);
       No_Args : Hostkit.String_Vectors.Vector;
    begin
       if not Hostkit.Signals.Is_Supported (Hostkit.Signals.Signal_Terminate) then
@@ -362,10 +369,14 @@ package body Hostkit_Shell_Cases is
       Options    : Hostkit.Spawn.Options;
       Child      : Hostkit.Spawn.Process_Handle;
       Result     : Hostkit.Spawn.Status;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Result);
       No_Args    : Hostkit.String_Vectors.Vector;
       Line       : constant Ada.Streams.Stream_Element_Array (1 .. 7) :=
         [104, 101, 108, 108, 111, 10, 10];
       Last       : Ada.Streams.Stream_Element_Offset;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Last);
    begin
       Assert (D.Create_Pipe (To_Child), "could not create the input pipe");
       Assert (D.Create_Pipe (From_Child), "could not create the output pipe");
@@ -410,6 +421,8 @@ package body Hostkit_Shell_Cases is
       Options : Hostkit.Spawn.Options;
       Child   : Hostkit.Spawn.Process_Handle;
       Result  : Hostkit.Spawn.Status;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Result);
       Args    : Hostkit.String_Vectors.Vector;
    begin
       Args.Append (To_Unbounded_String ("--hang"));
@@ -478,6 +491,8 @@ package body Hostkit_Shell_Cases is
    is
       pragma Unreferenced (T);
       Decoded : Hostkit.Signals.Signal;
+      --  Set by a call this test requires to refuse, so it is never read.
+      pragma Warnings (Off, Decoded);
    begin
       --  A signal this enumeration does not name must come back as unknown,
       --  not as whichever literal happens to be first. A job that died of
@@ -550,7 +565,6 @@ package body Hostkit_Shell_Cases is
               "signalling group 0 was allowed");
    end Test_Signalling_Nothing_Is_Refused;
 
-
    -----------------------------------------------------------------------
    --  Terminal control and pseudo-terminals
    -----------------------------------------------------------------------
@@ -561,8 +575,12 @@ package body Hostkit_Shell_Cases is
       pragma Unreferenced (T);
       Ends  : D.Pipe_Ends;
       Size  : Hostkit.Terminal_Control.Window_Size;
+      --  Set by a call this test requires to refuse, so it is never read.
+      pragma Warnings (Off, Size);
       Group : Integer;
       Saved : Hostkit.Terminal_Control.Mode;
+      --  Set by a call this test requires to refuse, so it is never read.
+      pragma Warnings (Off, Saved);
    begin
       Assert (D.Create_Pipe (Ends), "could not create a pipe");
 
@@ -623,6 +641,8 @@ package body Hostkit_Shell_Cases is
       pragma Unreferenced (T);
       Item : Hostkit.Pty.Pair;
       Size : Hostkit.Terminal_Control.Window_Size;
+      --  Set by a call this test requires to refuse, so it is never read.
+      pragma Warnings (Off, Size);
    begin
       if not Hostkit.Pty.Is_Supported then
          return;
@@ -647,6 +667,123 @@ package body Hostkit_Shell_Cases is
 
       Hostkit.Pty.Close (Item);
    end Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set;
+
+   procedure Test_A_Recorded_Signal_Is_Remembered
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+   begin
+      if not Hostkit.Signals.Can_Record (Hostkit.Signals.Signal_Window_Change) then
+         --  A host that cannot record this signal says so rather than
+         --  appearing to. Can_Record rather than Is_Supported: recording is
+         --  the narrower capability, and this test is about recording.
+         Assert (not Hostkit.Signals.Set_Disposition
+                   (Hostkit.Signals.Signal_Window_Change,
+                    Hostkit.Signals.Disposition_Record),
+                 "a host without the signal accepted a disposition for it");
+         return;
+      end if;
+
+      --  Window_Change rather than Interrupt: a test that arranged to be
+      --  interrupted would be one that kills the suite if the disposition does
+      --  not take, and this one is harmless whatever happens to it.
+      Assert (Hostkit.Signals.Set_Disposition
+                (Hostkit.Signals.Signal_Window_Change,
+                 Hostkit.Signals.Disposition_Record),
+              "the recording disposition was refused");
+
+      --  Nothing yet: installing clears, so a signal that arrived before
+      --  anybody was listening is not reported to whoever just started.
+      Assert (not Hostkit.Signals.Arrived (Hostkit.Signals.Signal_Window_Change),
+              "a freshly installed recorder already reported an arrival");
+
+      Assert (Hostkit.Signals.Send_To_Process
+                (Hostkit.Host.Own_Process_Id, Hostkit.Signals.Signal_Window_Change),
+              "the signal could not be sent to this process");
+
+      --  The handler runs between two instructions of this program, so by the
+      --  time the send has returned the flag is set. This is the whole
+      --  mechanism: a handler may do almost nothing, so it records and the
+      --  program asks at a moment of its own choosing.
+      Assert (Hostkit.Signals.Arrived (Hostkit.Signals.Signal_Window_Change),
+              "a signal that was sent was not recorded");
+
+      --  And it stays recorded until acknowledged: a program that asks twice
+      --  must get the same answer, or whether it stops depends on how often
+      --  it happened to look.
+      Assert (Hostkit.Signals.Arrived (Hostkit.Signals.Signal_Window_Change),
+              "asking twice consumed the arrival");
+
+      Hostkit.Signals.Clear (Hostkit.Signals.Signal_Window_Change);
+      Assert (not Hostkit.Signals.Arrived (Hostkit.Signals.Signal_Window_Change),
+              "clearing did not forget the arrival");
+
+      --  A signal nobody recorded never arrives, whatever happens to it.
+      Assert (not Hostkit.Signals.Arrived (Hostkit.Signals.Signal_Terminate),
+              "a signal with no recorder reported an arrival");
+
+      declare
+         Ignored : constant Boolean :=
+           Hostkit.Signals.Set_Disposition
+             (Hostkit.Signals.Signal_Window_Change,
+              Hostkit.Signals.Disposition_Default);
+      begin
+         Assert (Ignored or else not Ignored, "unreachable");
+      end;
+   end Test_A_Recorded_Signal_Is_Remembered;
+
+   procedure Test_Can_Record_Agrees_With_Set_Disposition
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+   begin
+      --  Can_Record is a promise, and this is the test that it is kept. A
+      --  caller decides whether to offer Ctrl-C on the strength of it, so a
+      --  host answering yes and then refusing the disposition would send that
+      --  caller down a path with no way back.
+      --
+      --  Both directions matter. Answering yes and refusing strands the
+      --  caller; answering no and succeeding hides a capability the host has,
+      --  which is how a platform ends up permanently poorer than it needs to
+      --  be because nobody rechecked.
+      for Item in Hostkit.Signals.Signal loop
+         declare
+            Claimed : constant Boolean := Hostkit.Signals.Can_Record (Item);
+            Actual  : constant Boolean :=
+              Hostkit.Signals.Set_Disposition (Item, Hostkit.Signals.Disposition_Record);
+         begin
+            Assert (Claimed = Actual,
+                    "Can_Record and Set_Disposition disagree about "
+                    & Hostkit.Signals.Name (Item)
+                    & ": claimed " & Boolean'Image (Claimed)
+                    & ", got " & Boolean'Image (Actual));
+
+            --  Put it back before the next case. Left installed, a recorder on
+            --  SIGPIPE or SIGCHLD would change how every later test in this
+            --  suite behaves, and the failure would land somewhere else.
+            if Actual then
+               declare
+                  Restored : constant Boolean :=
+                    Hostkit.Signals.Set_Disposition
+                      (Item, Hostkit.Signals.Disposition_Default);
+               begin
+                  Assert (Restored,
+                          "a signal that accepted a recorder would not go back "
+                          & "to its default: " & Hostkit.Signals.Name (Item));
+               end;
+               Hostkit.Signals.Clear (Item);
+            end if;
+         end;
+      end loop;
+
+      --  The two signals POSIX will not let anyone catch. Named rather than
+      --  left to the loop above, because "no host claims these" is the part
+      --  that would be wrong to quietly start claiming.
+      Assert (not Hostkit.Signals.Can_Record (Hostkit.Signals.Signal_Kill),
+              "a host claimed it could record KILL");
+      Assert (not Hostkit.Signals.Can_Record (Hostkit.Signals.Signal_Stop),
+              "a host claimed it could record STOP");
+   end Test_Can_Record_Agrees_With_Set_Disposition;
 
    procedure Test_Cursor_Control_Refuses_A_Pipe
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -867,6 +1004,8 @@ package body Hostkit_Shell_Cases is
       Item   : D.Descriptor;
       Sent   : constant Ada.Streams.Stream_Element_Array (1 .. 4) := [100, 97, 116, 97];
       Last   : Ada.Streams.Stream_Element_Offset;
+      --  Set by a call whose success is what is asserted, not its result.
+      pragma Warnings (Off, Last);
       Held   : Hostkit.Locks.Lock;
       Taken  : Hostkit.Locks.Lock_Outcome;
    begin
@@ -966,6 +1105,12 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set'Access,
          "pty : a fresh pseudo-terminal has no size until it is given one");
+      Register_Routine
+        (T, Test_A_Recorded_Signal_Is_Remembered'Access,
+         "signals : a recorded signal is remembered until it is acknowledged");
+      Register_Routine
+        (T, Test_Can_Record_Agrees_With_Set_Disposition'Access,
+         "Can_Record agrees with what Set_Disposition does");
       Register_Routine
         (T, Test_Cursor_Control_Refuses_A_Pipe'Access,
          "terminal : cursor control refuses anything that is not a terminal");

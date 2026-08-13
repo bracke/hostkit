@@ -1,5 +1,6 @@
 with Interfaces.C;
 
+with Hostkit.Process;
 
 with System;
 
@@ -78,10 +79,52 @@ package body Hostkit.Local_Channel is
          return False;
    end Connect;
 
+   function Connect_Abstract (Name : String; Item : out Channel) return Boolean is
+      pragma Unreferenced (Name);
+   begin
+      Item.Open := False;
+      Item.Native := Invalid;
+      return False;
+   end Connect_Abstract;
+
    function Is_Open (Item : Channel) return Boolean is
    begin
       return Item.Open;
    end Is_Open;
+
+   function Wait_Readable
+     (Item       : Channel;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome
+   is
+   begin
+      if not Item.Open then
+         return Hostkit.Process.Wait_Error;
+      end if;
+
+      return Hostkit.Process.Wait_FD
+        (Integer (Item.Native), For_Write => False, Timeout_MS => Timeout_MS);
+   exception
+      when others =>
+         return Hostkit.Process.Wait_Error;
+   end Wait_Readable;
+
+   function Wait_Writable
+     (Item       : Channel;
+      Timeout_MS : Integer)
+      return Hostkit.Process.Wait_Outcome
+   is
+   begin
+      if not Item.Open then
+         return Hostkit.Process.Wait_Error;
+      end if;
+
+      return Hostkit.Process.Wait_FD
+        (Integer (Item.Native), For_Write => True, Timeout_MS => Timeout_MS);
+   exception
+      when others =>
+         return Hostkit.Process.Wait_Error;
+   end Wait_Writable;
 
    function Send
      (Item : in out Channel;
@@ -143,6 +186,32 @@ package body Hostkit.Local_Channel is
       when others =>
          return False;
    end Receive;
+
+   function Receive_Some
+     (Item : in out Channel;
+      Data : out Ada.Streams.Stream_Element_Array)
+      return Natural
+   is
+      FD  : constant C_Int := C_Int (Item.Native);
+      Got : Interfaces.C.long;
+   begin
+      Data := [Data'Range => 0];
+
+      if not Item.Open or else Data'Length = 0 then
+         return 0;
+      end if;
+
+      Got := C_Recv (FD, Data (Data'First)'Address,
+                     Interfaces.C.size_t (Data'Length), 0);
+      if Got <= 0 then
+         return 0;
+      end if;
+
+      return Natural (Got);
+   exception
+      when others =>
+         return 0;
+   end Receive_Some;
 
    procedure Close (Item : in out Channel) is
    begin

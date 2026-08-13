@@ -13,7 +13,6 @@ package body Hostkit.Spawn is
    use Ada.Strings.Unbounded;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
-   use type Interfaces.Integer_64;
    use type System.Address;
    use type Hostkit.Descriptors.Descriptor;
 

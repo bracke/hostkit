@@ -95,6 +95,19 @@ package Hostkit.Process is
    --  because it is the one thing with a body per host.
    function Native_Backend_Label return String;
 
+   --  The numeric user id for the current process when the host exposes one.
+   --  POSIX returns getuid(); hosts without a uid concept return False.
+   function Current_User_Id (User_Id : out Natural) return Boolean;
+
+   --  Read one inherited environment value from the host process. Missing
+   --  variables return False; present empty variables return True with an empty
+   --  value. Hostkit owns this so consumers do not probe process environment
+   --  directly for host integration.
+   function Environment_Value
+     (Name  : String;
+      Value : out UString)
+      return Boolean;
+
    --  What became of a process we ran and waited for.
    type Process_Outcome is record
       Started     : Boolean := False;
