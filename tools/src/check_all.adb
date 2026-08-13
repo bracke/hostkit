@@ -4,6 +4,8 @@ with Ada.Exceptions;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
 
+with GNAT.OS_Lib;
+
 with Project_Tools.Processes;
 with Project_Tools.Release_Checks;
 with Project_Tools.Text;
@@ -38,7 +40,11 @@ procedure Check_All is
           ("verify Alire-selected GNAT 15 toolchain",
            Root,
            Alr,
-           [new String'("exec"), new String'("--"), new String'("gnatls"), new String'("--version")],
+           Project_Tools.Processes.Arguments
+             ([Project_Tools.Processes.Argument ("exec"),
+               Project_Tools.Processes.Argument ("--"),
+               Project_Tools.Processes.Argument ("gnatls"),
+               Project_Tools.Processes.Argument ("--version")]),
            Output,
            Quiet => False);
 
@@ -71,9 +77,15 @@ begin
    Project_Tools.Release_Checks.Require_File (Checks, "tools/hostkit_check_all.gpr");
 
    Project_Tools.Release_Checks.Run
-     ("build check_hostkit", Root & "/check_hostkit", Alr, [1 => new String'("build")]);
+     ("build check_hostkit",
+      Root & "/check_hostkit",
+      Alr,
+      GNAT.OS_Lib.Argument_List'([1 => new String'("build")]));
    Project_Tools.Release_Checks.Run
-     ("hostkit release check", Root & "/check_hostkit", "./bin/check_hostkit", []);
+     ("hostkit release check",
+      Root & "/check_hostkit",
+      "./bin/check_hostkit",
+      GNAT.OS_Lib.Argument_List'([]));
 
    Project_Tools.Tree_Checks.Require_No_Nonempty_Stderr (Root & "/check_hostkit/obj");
    Project_Tools.Tree_Checks.Require_No_Nonempty_Stderr (Root & "/tools/obj");

@@ -37,7 +37,11 @@ begin
    Ada.Directories.Create_Directory (Bad_Root);
 
    Bad_Status := Project_Tools.Processes.Run_Status
-     ("check_all rejects invalid working directory", Bad_Root, Check_All, [], Quiet => True);
+     ("check_all rejects invalid working directory",
+      Bad_Root,
+      Check_All,
+      Project_Tools.Processes.No_Arguments,
+      Quiet => True);
 
    if Bad_Status = 0 then
       Put_Line (Standard_Error, "check_all unexpectedly accepted an invalid working directory");
