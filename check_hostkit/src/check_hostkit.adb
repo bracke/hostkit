@@ -150,11 +150,8 @@ procedure Check_Hostkit is
    --  one question a foreign body can be asked from here, and answers it in
    --  about a second.
    procedure Require_Every_Host_Body_Parses is
-      --  Spawn does not search the path, so the compiler is located once.
-      --  A host without one is a host that cannot answer this question, and
-      --  saying so is better than reporting that nothing parses.
-      Compiler : constant String :=
-        Project_Tools.Processes.Locate_Command ("gcc");
+      Alr : constant String :=
+        Project_Tools.Processes.Locate_Command ("alr");
 
       Hosts : constant array (1 .. 4) of Unbounded_String :=
         [To_Unbounded_String ("linux"),
@@ -165,8 +162,8 @@ procedure Check_Hostkit is
       Put_Line ("");
       Put_Line ("==> syntax-check every host body");
 
-      if Compiler = "" then
-         Error ("no gcc on the path, so no host body could be parsed");
+      if Alr = "" then
+         Error ("no alr on the path, so no host body could be parsed");
          return;
       end if;
 
@@ -188,6 +185,9 @@ procedure Check_Hostkit is
                        Ada.Directories.Simple_Name (Item);
                      Args : Project_Tools.Processes.Argument_Vectors.Vector;
                   begin
+                     Args.Append (To_Unbounded_String ("exec"));
+                     Args.Append (To_Unbounded_String ("--"));
+                     Args.Append (To_Unbounded_String ("gcc"));
                      Args.Append (To_Unbounded_String ("-c"));
                      Args.Append (To_Unbounded_String ("-gnats"));
                      Args.Append (To_Unbounded_String ("-gnat2022"));
@@ -198,10 +198,10 @@ procedure Check_Hostkit is
                           (Where & "/" & Name));
 
                      if Project_Tools.Processes.Run_Status
-                          (Label   => "syntax check " & To_String (Host)
+                           (Label   => "syntax check " & To_String (Host)
                                       & "/" & Name,
                            Dir     => Root,
-                           Program => Compiler,
+                           Program => Alr,
                            Args    => Args,
                            Quiet   => True) /= 0
                      then
