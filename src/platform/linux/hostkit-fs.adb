@@ -15,6 +15,73 @@ with Hostkit.Filesystem_Rules;
 package body Hostkit.Fs is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
+   use type Interfaces.C.unsigned_short;
+   use type Interfaces.C.unsigned_long;
+
+   subtype C_Int is Interfaces.C.int;
+   subtype C_Unsigned is Interfaces.C.unsigned;
+   subtype C_U16 is Interfaces.C.unsigned_short;
+   subtype C_U32 is Interfaces.C.unsigned;
+   subtype C_U64 is Interfaces.C.unsigned_long;
+   subtype C_S64 is Interfaces.C.long;
+
+   type U16_Array is array (Positive range <>) of C_U16
+     with Convention => C;
+
+   type U64_Array is array (Positive range <>) of C_U64
+     with Convention => C;
+
+   type Statx_Timestamp is record
+      Seconds     : C_S64;
+      Nanoseconds : C_U32;
+      Reserved    : C_U32;
+   end record
+     with Convention => C;
+
+   type Statx_Record is record
+      Mask            : C_U32;
+      Block_Size      : C_U32;
+      Attributes      : C_U64;
+      Link_Count      : C_U32;
+      User_Id         : C_U32;
+      Group_Id        : C_U32;
+      Mode            : C_U16;
+      Spare_0         : U16_Array (1 .. 1);
+      Inode           : C_U64;
+      Size            : C_U64;
+      Blocks          : C_U64;
+      Attributes_Mask : C_U64;
+      Access_Time     : Statx_Timestamp;
+      Birth_Time      : Statx_Timestamp;
+      Change_Time     : Statx_Timestamp;
+      Modified_Time   : Statx_Timestamp;
+      Device_Major    : C_U32;
+      Device_Minor    : C_U32;
+      File_Major      : C_U32;
+      File_Minor      : C_U32;
+      Mount_Id        : C_U64;
+      Direct_Io_Memory_Align : C_U32;
+      Direct_Io_Offset_Align : C_U32;
+      Spare_3         : U64_Array (1 .. 12);
+   end record
+     with Convention => C;
+
+   function Statx
+     (Directory_Fd : C_Int;
+      Pathname     : Interfaces.C.Strings.chars_ptr;
+      Flags        : C_Unsigned;
+      Mask         : C_Unsigned;
+      Buffer       : access Statx_Record)
+      return C_Int
+     with Import, Convention => C, External_Name => "statx";
+
+   At_FDCWD        : constant C_Int := -100;
+   Statx_Mode      : constant C_Unsigned := 16#2#;
+   Permission_Mask : constant C_U16 := 8#7777#;
+   File_Type_Mask  : constant C_U16 := 8#170000#;
+   S_IFIFO         : constant C_U16 := 8#010000#;
+   S_IFCHR         : constant C_U16 := 8#020000#;
+   S_IFBLK         : constant C_U16 := 8#060000#;
 
    function Symlink
      (Target : Interfaces.C.Strings.chars_ptr;
@@ -73,6 +140,60 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Is_Executable;
+
+   function Linux_Device_Number (Major, Minor : C_U32) return Interfaces.Unsigned_64 is
+      use type Interfaces.Unsigned_64;
+      Major_Value : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Major);
+      Minor_Value : constant Interfaces.Unsigned_64 := Interfaces.Unsigned_64 (Minor);
+   begin
+      return ((Major_Value and 16#00000FFF#) * 2 ** 8)
+        or (Minor_Value and 16#000000FF#)
+        or ((Minor_Value and not 16#000000FF#) * 2 ** 12)
+        or ((Major_Value and not 16#00000FFF#) * 2 ** 32);
+   end Linux_Device_Number;
+
+   function Special_File_Info_Of (Path : String) return Special_File_Info is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Status : C_Int;
+      Mode   : C_U16;
+   begin
+      Status := Statx (At_FDCWD, C_Path, 0, Statx_Mode, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
+      end if;
+
+      Mode := Info.Mode and File_Type_Mask;
+      if Mode = S_IFIFO then
+         return
+           (Available => True,
+            Kind      => FIFO,
+            Device    => 0,
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      elsif Mode = S_IFCHR then
+         return
+           (Available => True,
+            Kind      => Special_File_Kind'(Character_Device),
+            Device    => Linux_Device_Number (Info.File_Major, Info.File_Minor),
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      elsif Mode = S_IFBLK then
+         return
+           (Available => True,
+            Kind      => Special_File_Kind'(Block_Device),
+            Device    => Linux_Device_Number (Info.File_Major, Info.File_Minor),
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      else
+         return
+           (Available => True,
+            Kind      => Other_Special,
+            Device    => 0,
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      end if;
+   exception
+      when others =>
+         return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
+   end Special_File_Info_Of;
 
    --  Group or other having any permission at all: (st_mode and 8#077#) /= 0. Those six bits
    --  live in the lowest byte of st_mode, so this reads that one byte out of the stat buffer
@@ -595,7 +716,6 @@ package body Hostkit.Fs is
          end if;
          return False;
    end Uses_Dos_Filename_Rules;
-
 
    ---------------
    -- Separator --

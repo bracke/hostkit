@@ -107,6 +107,22 @@ package Hostkit.Fs is
 
    type Device_Kind is (Character_Device, Block_Device);
 
+   type Special_File_Kind is
+     (Not_Special,
+      FIFO,
+      Character_Device,
+      Block_Device,
+      Other_Special);
+
+   type Special_File_Info is record
+      Available : Boolean := False;
+      Kind      : Special_File_Kind := Not_Special;
+      Device    : Interfaces.Unsigned_64 := 0;
+      Mode      : Natural := 0;
+   end record;
+
+   function Special_File_Info_Of (Path : String) return Special_File_Info;
+
    --  Create a device node at Path.
    --
    --  Device is the host's own encoding of major and minor, which differs between

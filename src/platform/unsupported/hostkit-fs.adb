@@ -68,6 +68,12 @@ package body Hostkit.Fs is
       return False;
    end Create_FIFO;
 
+   function Special_File_Info_Of (Path : String) return Special_File_Info is
+      pragma Unreferenced (Path);
+   begin
+      return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
+   end Special_File_Info_Of;
+
    function Create_Device
      (Path   : String;
       Kind   : Device_Kind;
@@ -223,7 +229,6 @@ package body Hostkit.Fs is
       --  A host Hostkit has no body for: decline to guess a restriction.
       return False;
    end Uses_Dos_Filename_Rules;
-
 
    ---------------
    -- Separator --

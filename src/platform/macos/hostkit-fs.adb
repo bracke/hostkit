@@ -11,6 +11,52 @@ with Interfaces.C.Strings;
 package body Hostkit.Fs is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
+   use type Interfaces.C.unsigned_long;
+   use type Interfaces.C.unsigned_short;
+
+   subtype C_Int is Interfaces.C.int;
+   subtype C_U16 is Interfaces.C.unsigned_short;
+   subtype C_U32 is Interfaces.C.unsigned;
+   subtype C_S32 is Interfaces.C.int;
+   subtype C_S64 is Interfaces.C.long;
+
+   type Timespec is record
+      Seconds     : C_S64 := 0;
+      Nanoseconds : C_S64 := 0;
+   end record
+     with Convention => C;
+
+   type Spare_Array is array (1 .. 2) of C_S64
+     with Convention => C;
+
+   type Stat_Record is record
+      Device        : C_S32 := 0;
+      Mode          : C_U16 := 0;
+      Link_Count    : C_U16 := 0;
+      Inode         : Interfaces.C.unsigned_long := 0;
+      User_Id       : C_U32 := 0;
+      Group_Id      : C_U32 := 0;
+      Raw_Device    : C_S32 := 0;
+      Padding       : C_S32 := 0;
+      Access_Time   : Timespec;
+      Modified_Time : Timespec;
+      Change_Time   : Timespec;
+      Birth_Time    : Timespec;
+      Size          : C_S64 := 0;
+      Blocks        : C_S64 := 0;
+      Block_Size    : C_S32 := 0;
+      Flags         : C_U32 := 0;
+      Generation    : C_U32 := 0;
+      Long_Spare    : C_S32 := 0;
+      Quad_Spare    : Spare_Array := [others => 0];
+   end record
+     with Convention => C;
+
+   Permission_Mask : constant C_U16 := 8#7777#;
+   File_Type_Mask  : constant C_U16 := 8#170000#;
+   S_IFIFO         : constant C_U16 := 8#010000#;
+   S_IFCHR         : constant C_U16 := 8#020000#;
+   S_IFBLK         : constant C_U16 := 8#060000#;
 
    function Symlink
      (Target : Interfaces.C.Strings.chars_ptr;
@@ -69,6 +115,55 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Is_Executable;
+
+   function Special_File_Info_Of (Path : String) return Special_File_Info is
+      function C_Stat
+        (Path : Interfaces.C.Strings.chars_ptr;
+         Buf  : access Stat_Record)
+         return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "stat$INODE64";
+
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Stat_Record;
+      Status : C_Int;
+      Mode   : C_U16;
+   begin
+      Status := C_Stat (C_Path, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
+      end if;
+
+      Mode := Info.Mode and File_Type_Mask;
+      if Mode = S_IFIFO then
+         return
+           (Available => True,
+            Kind      => FIFO,
+            Device    => 0,
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      elsif Mode = S_IFCHR then
+         return
+           (Available => True,
+            Kind      => Special_File_Kind'(Character_Device),
+            Device    => Interfaces.Unsigned_64 (Info.Raw_Device),
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      elsif Mode = S_IFBLK then
+         return
+           (Available => True,
+            Kind      => Special_File_Kind'(Block_Device),
+            Device    => Interfaces.Unsigned_64 (Info.Raw_Device),
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      else
+         return
+           (Available => True,
+            Kind      => Other_Special,
+            Device    => 0,
+            Mode      => Natural (Info.Mode and Permission_Mask));
+      end if;
+   exception
+      when others =>
+         return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
+   end Special_File_Info_Of;
 
    --  Group or other having any permission at all: (st_mode and 8#077#) /= 0. Those six bits
    --  live in the lowest byte of st_mode, so this reads that one byte out of the stat buffer
@@ -572,7 +667,6 @@ package body Hostkit.Fs is
       --  declines to guess a restriction rather than binding statfs here.
       return False;
    end Uses_Dos_Filename_Rules;
-
 
    ---------------
    -- Separator --
