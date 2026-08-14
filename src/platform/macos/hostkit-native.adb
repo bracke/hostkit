@@ -367,7 +367,6 @@ package body Hostkit.Native is
          return Hostkit.Process.Wait_Error;
    end Wait_FD;
 
-
    function Native_Backend_Label return String is
    begin
       return "POSIX/fork-exec-waitpid-kill";
@@ -473,7 +472,7 @@ package body Hostkit.Native is
       with Import => True, Convention => C, External_Name => "getgrouplist";
 
       C_Name        : Interfaces.C.char_array := Interfaces.C.To_C (User_Name);
-      Entry         : constant access Passwd := Getpwnam (C_Name);
+      Passwd_Entry  : constant access Passwd := Getpwnam (C_Name);
       Native_Groups : aliased C_Group_Id_List (1 .. Groups'Length) := [others => 0];
       Count         : aliased Interfaces.C.int := Interfaces.C.int (Groups'Length);
       Found         : Natural := 0;
@@ -496,12 +495,14 @@ package body Hostkit.Native is
       end loop;
       Last := 0;
 
-      if User_Name = "" or else Entry = null then
+      if User_Name = "" or else Passwd_Entry = null then
          return False;
       end if;
 
-      Append_Group (Natural (Entry.Pw_Gid));
-      if Getgrouplist (C_Name, Entry.Pw_Gid, Native_Groups'Address, Count'Access) < 0 then
+      Append_Group (Natural (Passwd_Entry.Pw_Gid));
+      if Getgrouplist
+        (C_Name, Passwd_Entry.Pw_Gid, Native_Groups'Address, Count'Access) < 0
+      then
          Last := Found;
          return Found > 0;
       end if;
