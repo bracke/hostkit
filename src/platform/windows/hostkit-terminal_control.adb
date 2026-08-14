@@ -187,7 +187,22 @@ package body Hostkit.Terminal_Control is
          return False;
       end if;
 
-      return Set_Console_Mode (To_Handle (Terminal), Stored_Mode (From)) /= 0;
+      if Set_Console_Mode (To_Handle (Terminal), Stored_Mode (From)) = 0 then
+         return False;
+      end if;
+
+      --  Read back and compare, for the reason the POSIX bodies do: a console
+      --  that took the call and kept a flag of its own has not restored what
+      --  the caller saved, and True would be a lie the caller cannot check.
+      declare
+         Applied : Mode;
+      begin
+         if not Save_Mode (Terminal, Applied) then
+            return False;
+         end if;
+
+         return Applied = From;
+      end;
    end Restore_Mode;
 
    -------------

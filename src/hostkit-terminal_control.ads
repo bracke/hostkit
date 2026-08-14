@@ -98,7 +98,11 @@ package Hostkit.Terminal_Control is
    --
    --  @param Terminal A descriptor open on the terminal.
    --  @param From Settings previously recorded by Save_Mode.
-   --  @return True when the settings were applied.
+   --  @return True when the settings were applied *and* the terminal reads
+   --          back as the ones that were saved. A host that takes the call and
+   --          keeps a setting of its own answers False here rather than True:
+   --          a restore that did not restore is the optimistic default this
+   --          crate exists to refuse.
    function Restore_Mode
      (Terminal : Hostkit.Descriptors.Descriptor;
       From     : Mode) return Boolean;

@@ -5,6 +5,8 @@ with Ada.Directories;
 with Ada.Streams;
 with Ada.Strings.Unbounded;
 
+with Interfaces;
+
 with Hostkit;
 with Hostkit.Descriptors;
 with Hostkit.Locks;
@@ -13,6 +15,7 @@ with Hostkit.Host;
 with Hostkit.Signals;
 with Hostkit.Spawn;
 with Hostkit.Terminal_Control;
+with Hostkit.Terminal_Control.Differences;
 
 package body Hostkit_Shell_Cases is
 
@@ -935,6 +938,53 @@ package body Hostkit_Shell_Cases is
       Hostkit.Pty.Close (Item);
    end Test_Raw_Mode_Round_Trips;
 
+   --  What the host did not put back, byte by byte.
+   --
+   --  The round-trip tests say a restore did not restore; this says which byte
+   --  and what it became, which is the difference between a mystery and a bug
+   --  report. It ignores what Restore_Mode answers on purpose -- that now
+   --  refuses when the read-back disagrees, and the point here is to describe
+   --  the disagreement rather than to repeat that there is one.
+   procedure Test_What_A_Host_Does_Not_Put_Back
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Item   : Hostkit.Pty.Pair;
+      Before : Hostkit.Terminal_Control.Mode;
+      After  : Hostkit.Terminal_Control.Mode;
+
+      Was, Became : Interfaces.Unsigned_8;
+      Restored    : Boolean;
+      Where       : Natural;
+   begin
+      if not Hostkit.Pty.Is_Supported then
+         return;
+      end if;
+
+      Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
+
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Before),
+              "could not save the terminal settings");
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
+              "could not set raw mode");
+
+      Restored := Hostkit.Terminal_Control.Restore_Mode (Item.Device, Before);
+
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, After),
+              "could not re-read the terminal settings");
+
+      Where := Hostkit.Terminal_Control.Differences.First_Difference
+                 (Before, After, Was, Became);
+
+      Assert (Where = 0,
+              "byte" & Natural'Image (Where) & " of the saved settings was"
+              & Interfaces.Unsigned_8'Image (Was) & " and came back as"
+              & Interfaces.Unsigned_8'Image (Became)
+              & "; Restore_Mode answered " & Boolean'Image (Restored));
+
+      Hostkit.Pty.Close (Item);
+   end Test_What_A_Host_Does_Not_Put_Back;
+
    --  The same journey on the other side of the pair.
    --
    --  A pseudo-terminal has two descriptors and they are not the same kind of
@@ -1212,6 +1262,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips_On_The_Controller'Access,
          "terminal : and round-trips on the controller side too");
+      Register_Routine
+        (T, Test_What_A_Host_Does_Not_Put_Back'Access,
+         "terminal : and says which byte a host did not put back");
       Register_Routine
         (T, Test_An_Unsaved_Mode_Is_Not_Applied'Access,
          "terminal : a mode that was never saved is refused, not applied");
