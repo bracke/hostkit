@@ -1,3 +1,5 @@
+with Ada.Text_IO;
+
 with AUnit.Assertions;
 
 with Ada.Command_Line;
@@ -1301,6 +1303,18 @@ package body Hostkit_Shell_Cases is
    ----------
    -- Name --
    ----------
+
+   Started : Natural := 0;
+
+   overriding procedure Set_Up (T : in out Case_Type) is
+      pragma Unreferenced (T);
+   begin
+      Started := Started + 1;
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         "-> shell routine" & Natural'Image (Started));
+      Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
+   end Set_Up;
 
    overriding function Name (T : Case_Type) return AUnit.Message_String is
       pragma Unreferenced (T);

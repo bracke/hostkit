@@ -19,6 +19,16 @@ package Hostkit_Shell_Cases is
    --  @return Case name.
    overriding function Name (T : Case_Type) return AUnit.Message_String;
 
+   --  Says which routine is starting, on standard error, flushed.
+   --
+   --  AUnit reports when the whole suite ends, so a suite that hangs prints
+   --  nothing at all. Windows reached the end of the other case's routines and
+   --  stopped somewhere in these, which is all a killed run could say until
+   --  this existed.
+   --
+   --  @param T Test case instance.
+   overriding procedure Set_Up (T : in out Case_Type);
+
    --  Register the routines of this case.
    --
    --  @param T Test case instance.
