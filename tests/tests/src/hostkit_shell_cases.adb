@@ -852,6 +852,42 @@ package body Hostkit_Shell_Cases is
       Hostkit.Pty.Close (Item);
    end Test_Cursor_Control_Writes_To_A_Pseudo_Terminal;
 
+   --  Two saves of a terminal nobody touched in between.
+   --
+   --  Asked because the round-trip test compares saved settings for equality,
+   --  and that only means anything if a save is stable. A saved mode is an
+   --  opaque buffer handed back to the host, and a host whose structure has
+   --  padding in it can copy out whatever those bytes happened to hold -- in
+   --  which case two saves differ, the round-trip test fails, and the restore
+   --  it appears to accuse did its job perfectly. This tells the two apart:
+   --  if this fails, the comparison is at fault; if this passes and the
+   --  round-trip fails, the restore is.
+   procedure Test_A_Saved_Mode_Is_Stable
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Item   : Hostkit.Pty.Pair;
+      Once   : Hostkit.Terminal_Control.Mode;
+      Again  : Hostkit.Terminal_Control.Mode;
+   begin
+      if not Hostkit.Pty.Is_Supported then
+         return;
+      end if;
+
+      Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
+
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Once),
+              "could not save the terminal settings");
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Again),
+              "could not save the terminal settings a second time");
+
+      Assert (Once = Again,
+              "two saves of an untouched terminal did not agree, so what a "
+              & "saved mode holds is not only the settings");
+
+      Hostkit.Pty.Close (Item);
+   end Test_A_Saved_Mode_Is_Stable;
+
    procedure Test_Raw_Mode_Round_Trips
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1117,6 +1153,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Cursor_Control_Writes_To_A_Pseudo_Terminal'Access,
          "terminal : a cursor action reaches the terminal it is aimed at");
+      Register_Routine
+        (T, Test_A_Saved_Mode_Is_Stable'Access,
+         "terminal : two saves of an untouched terminal agree");
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips'Access,
          "terminal : raw mode round-trips and the settings come back");

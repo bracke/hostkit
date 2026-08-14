@@ -8,6 +8,14 @@ package body Hostkit.Host is
    use Ada.Strings.Unbounded;
    use type Interfaces.C.int;
 
+   --  The two C types this body compares and divides. A DWord is what every
+   --  field of the version record is, and NTSTATUS -- what RtlGetVersion
+   --  answers with -- is a long. Without these the operators are not directly
+   --  visible and the body does not compile, which is a thing only a Windows
+   --  build finds.
+   use type Interfaces.C.unsigned_long;
+   use type Interfaces.C.long;
+
    function GetUserDefaultLocaleName
      (Locale_Name : System.Address;
       Locale_Size : Interfaces.C.int)
@@ -86,7 +94,6 @@ package body Hostkit.Host is
    --  token unless it was elevated, so membership of the Administrators group
    --  is not the question -- whether this token is elevated is.
    function Is_Elevated return Boolean is
-      use type Interfaces.C.unsigned_long;
       use type System.Address;
 
       subtype C_DWord is Interfaces.C.unsigned_long;
@@ -174,8 +181,6 @@ package body Hostkit.Host is
          return Interfaces.C.unsigned_long
       with Import, Convention => Stdcall,
            External_Name => "GetModuleFileNameA";
-
-      use type Interfaces.C.unsigned_long;
 
       Buffer : aliased Interfaces.C.char_array (1 .. 4096) :=
         [others => Interfaces.C.nul];
