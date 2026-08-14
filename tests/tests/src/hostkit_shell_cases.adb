@@ -14,6 +14,7 @@ with Hostkit.Descriptors;
 with Hostkit.Locks;
 with Hostkit.Pty;
 with Hostkit.Host;
+with Hostkit.Process;
 with Hostkit.Signals;
 with Hostkit.Spawn;
 with Hostkit.Terminal_Control;
@@ -444,10 +445,21 @@ package body Hostkit_Shell_Cases is
               "a running child was not reported as running: "
               & Hostkit.Spawn.Wait_State'Image (Result.State));
 
+      --  Ended by whatever this host has. A signal where there are signals,
+      --  and Request_Stop where there are none -- which is what that call is
+      --  for: "Windows has no signal to send: it opens the process and
+      --  terminates it, which is the only way to say it there."
+      --
+      --  Without this the test killed nothing on Windows and then blocked for
+      --  ever reaping a child that hangs by design. It took the whole job's
+      --  budget with it, twice, and reported nothing either time.
       if Hostkit.Signals.Is_Supported (Hostkit.Signals.Signal_Kill) then
          Assert (Hostkit.Signals.Send_To_Process
                    (Hostkit.Spawn.Process_Id (Child), Hostkit.Signals.Signal_Kill),
                  "could not kill the hanging sleeper");
+      else
+         Assert (Hostkit.Process.Request_Stop (Hostkit.Spawn.Process_Id (Child)),
+                 "could not stop the hanging sleeper on a host without signals");
       end if;
 
       Assert (Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Block, Result),
