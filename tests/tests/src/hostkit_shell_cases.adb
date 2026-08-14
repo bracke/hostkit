@@ -892,21 +892,50 @@ package body Hostkit_Shell_Cases is
 
       D.Close (Ends.Write_End);
 
+      --  Waited for before anything is read, and not for ever. A test that
+      --  drains a pipe until end of file cannot fail on a host where the child
+      --  never runs: it blocks, the job reaches its limit, and what comes back
+      --  is a cancelled run that says nothing. This one gives the child a few
+      --  seconds and then reports what it found -- which is the difference
+      --  between an answer and thirty minutes of silence.
       declare
-         Output : constant String := Drain (Ends.Read_End);
+         Settled : Boolean := False;
       begin
-         Assert (Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Block, Result),
-                 "waiting for the child failed");
+         for Attempt in 1 .. 100 loop
+            if Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
+              and then Result.State /= Hostkit.Spawn.Wait_Running
+            then
+               Settled := True;
+               exit;
+            end if;
 
-         --  What it read, not merely that it ran: a child that started with no
-         --  environment at all would exit 4 and say "absent", which is the
-         --  failure this exists to catch.
-         Assert (Output'Length > 0 and then Output (Output'First .. Output'First + 5) = "value:",
-                 "the child did not see the variable it was given: [" & Output & "]");
+            delay 0.05;
+         end loop;
+
+         Assert (Settled,
+                 "the child was still running five seconds after it was "
+                 & "spawned with a replaced environment");
 
          Assert (Result.State = Hostkit.Spawn.Wait_Exited
                    and then Result.Exit_Code = 0,
-                 "the child did not exit cleanly");
+                 "the child did not exit cleanly: "
+                 & Hostkit.Spawn.Wait_State'Image (Result.State)
+                 & Integer'Image (Result.Exit_Code));
+
+         --  Only now, and only because the child is gone: whatever it wrote is
+         --  in the pipe and no read can block.
+         declare
+            Output : constant String := Drain (Ends.Read_End);
+         begin
+            --  What it read, not merely that it ran: a child that started with
+            --  no environment at all would exit 4 and say "absent", which is
+            --  the failure this exists to catch.
+            Assert (Output'Length > 5
+                      and then Output (Output'First .. Output'First + 5)
+                               = "value:",
+                    "the child did not see the variable it was given: ["
+                    & Output & "]");
+         end;
       end;
 
       D.Close (Ends.Read_End);
