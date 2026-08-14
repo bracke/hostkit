@@ -8,6 +8,7 @@ package body Hostkit.Descriptors is
    use type Interfaces.C.int;
    use type Interfaces.C.long;
    use type Interfaces.C.unsigned;
+   use type Interfaces.C.Strings.chars_ptr;
    use type Ada.Streams.Stream_Element_Offset;
 
    subtype C_Int is Interfaces.C.int;
@@ -75,6 +76,8 @@ package body Hostkit.Descriptors is
      with Import => True, Convention => C, External_Name => "write";
    function C_Isatty (Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "isatty";
+   function C_Ttyname (Fd : C_Int) return Interfaces.C.Strings.chars_ptr
+     with Import => True, Convention => C, External_Name => "ttyname";
    function C_Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "dup2";
 
@@ -441,6 +444,24 @@ package body Hostkit.Descriptors is
 
       return C_Isatty (To_Fd (Item)) = 1;
    end Is_Terminal;
+
+   function Terminal_Name (Item : Descriptor) return String is
+      Name : Interfaces.C.Strings.chars_ptr;
+   begin
+      if not Is_Terminal (Item) then
+         return "";
+      end if;
+
+      Name := C_Ttyname (To_Fd (Item));
+      if Name = Interfaces.C.Strings.Null_Ptr then
+         return "/dev/tty";
+      else
+         return Interfaces.C.Strings.Value (Name);
+      end if;
+   exception
+      when others =>
+         return "";
+   end Terminal_Name;
 
    ------------
    -- Assign --

@@ -100,6 +100,12 @@ package body Hostkit.Descriptors is
       return False;
    end Is_Terminal;
 
+   function Terminal_Name (Item : Descriptor) return String is
+      pragma Unreferenced (Item);
+   begin
+      return "";
+   end Terminal_Name;
+
    function Assign (Item : Descriptor; To : Standard_Stream) return Boolean is
       pragma Unreferenced (Item, To);
    begin

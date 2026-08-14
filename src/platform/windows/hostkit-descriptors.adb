@@ -460,6 +460,18 @@ package body Hostkit.Descriptors is
       return Get_Console_Mode (To_Handle (Item), Mode'Access) /= 0;
    end Is_Terminal;
 
+   function Terminal_Name (Item : Descriptor) return String is
+   begin
+      if Is_Terminal (Item) then
+         return "CON";
+      else
+         return "";
+      end if;
+   exception
+      when others =>
+         return "";
+   end Terminal_Name;
+
    ------------
    -- Assign --
    ------------
