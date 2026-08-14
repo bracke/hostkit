@@ -60,11 +60,29 @@ jobs:
           # line in the log, so nothing said which test was stuck. Killed here
           # instead, the step fails, the log survives, and the last test AUnit
           # printed names the one that did not finish.
+          #  A watchdog written out rather than `timeout`, which macOS does
+          #  not have: the suite runs in the background and is killed if it is
+          #  still there after five minutes.
           if [ -f ./bin/hostkit_tests.exe ]; then
-            timeout --signal=KILL 300 ./bin/hostkit_tests.exe
+            ./bin/hostkit_tests.exe &
           else
-            timeout --signal=KILL 300 ./bin/hostkit_tests
+            ./bin/hostkit_tests &
           fi
+
+          suite=$!
+          for _ in $(seq 1 300); do
+            kill -0 "$suite" 2>/dev/null || break
+            sleep 1
+          done
+
+          if kill -0 "$suite" 2>/dev/null; then
+            echo "the suite was still running after five minutes; killing it"
+            kill -9 "$suite" 2>/dev/null || true
+            wait "$suite" 2>/dev/null || true
+            exit 1
+          fi
+
+          wait "$suite"
 
   # The release checklist (tools/bin/check_all) drives the project_tools-based
   # check_hostkit checker: manifest pins, required docs, and a library+suite

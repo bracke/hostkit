@@ -1437,11 +1437,29 @@ package body Hostkit_Suite is
    overriding function Name (T : Hostkit_Test_Case) return AUnit.Message_String;
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case);
 
+   --  AUnit reports when the whole suite ends, so a suite that hangs prints
+   --  nothing at all -- which is what two thirty-minute Windows runs came back
+   --  with. This says which routine is starting, and flushes, so a run that is
+   --  killed still names the one that did not finish.
+   overriding procedure Set_Up (T : in out Hostkit_Test_Case);
+
    overriding function Name (T : Hostkit_Test_Case) return AUnit.Message_String is
       pragma Unreferenced (T);
    begin
       return AUnit.Format ("hostkit");
    end Name;
+
+   Started : Natural := 0;
+
+   overriding procedure Set_Up (T : in out Hostkit_Test_Case) is
+      pragma Unreferenced (T);
+   begin
+      Started := Started + 1;
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         "-> hostkit routine" & Natural'Image (Started));
+      Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
+   end Set_Up;
 
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is
       use AUnit.Test_Cases.Registration;
