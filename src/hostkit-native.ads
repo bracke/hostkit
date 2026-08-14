@@ -60,6 +60,15 @@ private package Hostkit.Native is
    --  The host process user id, when the host has a uid-style identity.
    function Current_User_Id (User_Id : out Natural) return Boolean;
 
+   --  The host process primary group id, when the host has a gid-style identity.
+   function Current_Group_Id (Group_Id : out Natural) return Boolean;
+
+   --  The host process supplementary group ids, when the host exposes them.
+   function Current_Supplementary_Group_Ids
+     (Groups : out Hostkit.Process.Group_Id_List;
+      Last   : out Natural)
+      return Boolean;
+
    --  Start whatever the host thinks Path is, the way a double-click would.
    function Open_Native (Path : String) return Boolean;
 

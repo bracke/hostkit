@@ -74,6 +74,25 @@ package body Hostkit.Native is
       return False;
    end Current_User_Id;
 
+   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+   begin
+      Group_Id := 0;
+      return False;
+   end Current_Group_Id;
+
+   function Current_Supplementary_Group_Ids
+     (Groups : out Hostkit.Process.Group_Id_List;
+      Last   : out Natural)
+      return Boolean
+   is
+   begin
+      for Index in Groups'Range loop
+         Groups (Index) := 0;
+      end loop;
+      Last := 0;
+      return False;
+   end Current_Supplementary_Group_Ids;
+
    function Open_Native (Path : String) return Boolean is
       pragma Unreferenced (Path);
    begin

@@ -6,6 +6,46 @@ package body Hostkit.Host is
    use type System.Address;
    use type Interfaces.C.int;
 
+   subtype Uts_Field is Interfaces.C.char_array (0 .. 255);
+
+   type Utsname is record
+      Sysname  : Uts_Field;
+      Nodename : Uts_Field;
+      Release  : Uts_Field;
+      Version  : Uts_Field;
+      Machine  : Uts_Field;
+   end record
+     with Convention => C;
+
+   function C_Uname (Name : access Utsname) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "uname";
+
+   function Uname_Field (Selector : Positive) return String is
+      Info : aliased Utsname;
+   begin
+      if C_Uname (Info'Access) /= 0 then
+         return "";
+      end if;
+
+      case Selector is
+         when 1 =>
+            return Interfaces.C.To_Ada (Info.Sysname);
+         when 2 =>
+            return Interfaces.C.To_Ada (Info.Nodename);
+         when 3 =>
+            return Interfaces.C.To_Ada (Info.Release);
+         when 4 =>
+            return Interfaces.C.To_Ada (Info.Version);
+         when 5 =>
+            return Interfaces.C.To_Ada (Info.Machine);
+         when others =>
+            return "";
+      end case;
+   exception
+      when others =>
+         return "";
+   end Uname_Field;
+
    type CF_Index is new Interfaces.C.long;
    type CF_String_Encoding is new Interfaces.C.unsigned;
 
@@ -158,5 +198,30 @@ package body Hostkit.Host is
    begin
       return Integer (C_Getpid);
    end Own_Process_Id;
+
+   function System_Name return String is
+   begin
+      return Uname_Field (1);
+   end System_Name;
+
+   function Node_Name return String is
+   begin
+      return Uname_Field (2);
+   end Node_Name;
+
+   function Release_Name return String is
+   begin
+      return Uname_Field (3);
+   end Release_Name;
+
+   function Version_Name return String is
+   begin
+      return Uname_Field (4);
+   end Version_Name;
+
+   function Machine_Name return String is
+   begin
+      return Uname_Field (5);
+   end Machine_Name;
 
 end Hostkit.Host;

@@ -72,6 +72,21 @@ package Hostkit.Host is
    --          and would be believed.
    function Own_Process_Id return Integer;
 
+   --  Operating-system name for uname-style reporting. Empty means unavailable.
+   function System_Name return String;
+
+   --  Network node name for uname-style reporting. Empty means unavailable.
+   function Node_Name return String;
+
+   --  Operating-system release for uname-style reporting. Empty means unavailable.
+   function Release_Name return String;
+
+   --  Operating-system version for uname-style reporting. Empty means unavailable.
+   function Version_Name return String;
+
+   --  Hardware or processor class for uname-style reporting. Empty means unavailable.
+   function Machine_Name return String;
+
    --  A standard stream a program may be sharing with a person.
    type Stream_Kind is (Standard_Input, Standard_Output, Standard_Error);
 

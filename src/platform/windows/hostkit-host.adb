@@ -1,4 +1,5 @@
 with Ada.Strings.Unbounded;
+with Ada.Environment_Variables;
 
 with Interfaces.C;
 with System;
@@ -178,5 +179,54 @@ package body Hostkit.Host is
    begin
       return Integer (C_Get_Current_Process_Id);
    end Own_Process_Id;
+
+   function System_Name return String is
+   begin
+      return "Windows";
+   end System_Name;
+
+   function Node_Name return String is
+      function Get_Computer_Name
+        (Buffer : System.Address;
+         Size   : access Interfaces.C.unsigned_long)
+         return Interfaces.C.int
+      with Import, Convention => Stdcall, External_Name => "GetComputerNameA";
+
+      Size   : aliased Interfaces.C.unsigned_long := 256;
+      Buffer : aliased Interfaces.C.char_array (1 .. 256) := [others => Interfaces.C.nul];
+   begin
+      if Get_Computer_Name (Buffer'Address, Size'Access) /= 0 then
+         return Interfaces.C.To_Ada (Buffer);
+      elsif Ada.Environment_Variables.Exists ("COMPUTERNAME") then
+         return Ada.Environment_Variables.Value ("COMPUTERNAME");
+      else
+         return "";
+      end if;
+   exception
+      when others =>
+         return "";
+   end Node_Name;
+
+   function Release_Name return String is
+   begin
+      return "";
+   end Release_Name;
+
+   function Version_Name return String is
+   begin
+      return "";
+   end Version_Name;
+
+   function Machine_Name return String is
+   begin
+      if Ada.Environment_Variables.Exists ("PROCESSOR_ARCHITECTURE") then
+         return Ada.Environment_Variables.Value ("PROCESSOR_ARCHITECTURE");
+      else
+         return "";
+      end if;
+   exception
+      when others =>
+         return "";
+   end Machine_Name;
 
 end Hostkit.Host;

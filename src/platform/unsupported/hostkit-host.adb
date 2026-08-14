@@ -46,4 +46,10 @@ package body Hostkit.Host is
       return -1;
    end Own_Process_Id;
 
+   function System_Name return String is ("");
+   function Node_Name return String is ("");
+   function Release_Name return String is ("");
+   function Version_Name return String is ("");
+   function Machine_Name return String is ("");
+
 end Hostkit.Host;

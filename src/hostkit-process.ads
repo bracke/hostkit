@@ -99,6 +99,19 @@ package Hostkit.Process is
    --  POSIX returns getuid(); hosts without a uid concept return False.
    function Current_User_Id (User_Id : out Natural) return Boolean;
 
+   type Group_Id_List is array (Positive range <>) of Natural;
+
+   --  The numeric primary group id for the current process when the host exposes one.
+   --  POSIX returns getgid(); hosts without a gid concept return False.
+   function Current_Group_Id (Group_Id : out Natural) return Boolean;
+
+   --  Supplementary group ids for the current process. Groups is caller-owned
+   --  bounded storage; Last is the number of entries written, or zero on failure.
+   function Current_Supplementary_Group_Ids
+     (Groups : out Group_Id_List;
+      Last   : out Natural)
+      return Boolean;
+
    --  Read one inherited environment value from the host process. Missing
    --  variables return False; present empty variables return True with an empty
    --  value. Hostkit owns this so consumers do not probe process environment

@@ -385,6 +385,60 @@ package body Hostkit.Native is
          return False;
    end Current_User_Id;
 
+   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+      function Getgid return Interfaces.C.unsigned
+        with Import => True, Convention => C, External_Name => "getgid";
+   begin
+      Group_Id := Natural (Getgid);
+      return True;
+   exception
+      when others =>
+         Group_Id := 0;
+         return False;
+   end Current_Group_Id;
+
+   function Current_Supplementary_Group_Ids
+     (Groups : out Hostkit.Process.Group_Id_List;
+      Last   : out Natural)
+      return Boolean
+   is
+      type C_Group_Id_List is array (Positive range <>) of Interfaces.C.unsigned;
+
+      function Getgroups
+        (Size : Interfaces.C.int;
+         List : System.Address)
+         return Interfaces.C.int
+      with Import => True, Convention => C, External_Name => "getgroups";
+
+      Native_Groups : aliased C_Group_Id_List (1 .. Groups'Length) := [others => 0];
+      Count         : Interfaces.C.int;
+   begin
+      for Index in Groups'Range loop
+         Groups (Index) := 0;
+      end loop;
+      Last := 0;
+
+      Count := Getgroups (Interfaces.C.int (Groups'Length), Native_Groups'Address);
+      if Count < 0 then
+         return False;
+      end if;
+
+      Last := Natural (Count);
+      if Last > 0 then
+         for Offset in 0 .. Last - 1 loop
+            Groups (Groups'First + Offset) := Natural (Native_Groups (Native_Groups'First + Offset));
+         end loop;
+      end if;
+      return True;
+   exception
+      when others =>
+         for Index in Groups'Range loop
+            Groups (Index) := 0;
+         end loop;
+         Last := 0;
+         return False;
+   end Current_Supplementary_Group_Ids;
+
    function Open_Native (Path : String) return Boolean is
       --  "open" is how macOS starts a document or an application bundle.
       Opener   : constant String := "open";
