@@ -116,6 +116,13 @@ package Hostkit.Process is
    --  variables return False; present empty variables return True with an empty
    --  value. Hostkit owns this so consumers do not probe process environment
    --  directly for host integration.
+   --
+   --  On Windows a present empty variable is not a thing that exists: setting
+   --  one to "" removes it, so this answers False where a POSIX host answers
+   --  True with an empty value. That is the host's rule rather than this
+   --  crate's, and a consumer that needs to tell "set to nothing" from "not
+   --  set" has to carry the distinction itself -- there is nowhere on that host
+   --  to keep it.
    function Environment_Value
      (Name  : String;
       Value : out UString)

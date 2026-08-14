@@ -27,6 +27,7 @@ with Hostkit.Windows_Command_Line;
 package body Hostkit_Suite is
    use AUnit.Assertions;
    use Ada.Strings.Unbounded;
+   use type Hostkit.Host.Kind;
 
    --  The suite's own directory: noop and failing are built beside it.
    function Companion (Name : String) return String is
@@ -327,13 +328,25 @@ package body Hostkit_Suite is
         (To_String (Value) = "",
          "a missing environment variable leaves no stale value");
 
+      --  A present empty variable, where the host has such a thing. Windows
+      --  does not: setting one to "" removes it, and absent is the only
+      --  answer left. Asserted per host rather than skipped, because what the
+      --  host does is the thing worth pinning.
       Ada.Environment_Variables.Set (Name, "");
-      Assert
-        (Hostkit.Process.Environment_Value (Name, Value),
-         "a present empty environment variable is still present");
-      Assert
-        (To_String (Value) = "",
-         "a present empty environment variable returns an empty value");
+
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert
+           (not Hostkit.Process.Environment_Value (Name, Value),
+            "setting a variable to nothing left it present on a host that "
+            & "removes it");
+      else
+         Assert
+           (Hostkit.Process.Environment_Value (Name, Value),
+            "a present empty environment variable is still present");
+         Assert
+           (To_String (Value) = "",
+            "a present empty environment variable returns an empty value");
+      end if;
 
       Ada.Environment_Variables.Set (Name, "hostkit-value");
       Assert
@@ -643,7 +656,6 @@ package body Hostkit_Suite is
 
    procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
    begin
       --  Two per-OS bodies, written independently, must agree about which host this is.
       --  An environment-sniffing answer is what this exists to replace, so the check is
@@ -671,7 +683,6 @@ package body Hostkit_Suite is
 
    procedure Test_Where_This_Program_Is (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Own : constant String := Hostkit.Fs.Own_Executable;
       Dir : constant String := Hostkit.Fs.Own_Executable_Directory;
@@ -705,7 +716,6 @@ package body Hostkit_Suite is
 
    procedure Test_Where_This_User_Lives (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Home : constant String := Hostkit.Fs.Home_Directory;
       Data : constant String := Hostkit.Fs.Application_Data_Directory;
@@ -731,7 +741,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Elevated : constant Boolean := Hostkit.Host.Is_Elevated;
    begin
@@ -793,7 +802,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Cache  : constant String := Hostkit.Fs.Cache_Directory;
       Data   : constant String := Hostkit.Fs.Application_Data_Directory;
@@ -836,7 +844,6 @@ package body Hostkit_Suite is
 
    procedure Test_Executability_Across_Modes (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Path : constant String := Ada.Directories.Compose (Scratch, "hk-exec-modes");
 
@@ -895,7 +902,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Facility : constant Hostkit.Trash.Facility := Hostkit.Trash.Current;
    begin
       --  Which hosts have a trash of their own is a fact about the hosts, not a
@@ -931,7 +937,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Locale : constant String := Hostkit.Host.Native_Locale;
    begin
       if Hostkit.Host.Current in Hostkit.Host.Windows | Hostkit.Host.MacOS then
@@ -1002,7 +1007,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
 
       Answers : array (Hostkit.Host.Stream_Kind) of Boolean;
    begin
@@ -1034,7 +1038,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Path : constant String := Hostkit.Host.Executable_Path;
    begin
       if Hostkit.Host.Current = Hostkit.Host.Unsupported then
@@ -1088,7 +1091,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Path : constant String := Ada.Directories.Compose (Scratch, "hk-meta-modes");
 
       Separate_Mode      : Natural;
@@ -1153,7 +1155,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Original : constant String := Ada.Directories.Compose (Scratch, "hk-same-original");
       Twin     : constant String := Ada.Directories.Compose (Scratch, "hk-same-twin");
       Other    : constant String := Ada.Directories.Compose (Scratch, "hk-same-other");
@@ -1259,7 +1260,6 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
-      use type Hostkit.Host.Kind;
       Path      : constant String := Ada.Directories.Compose (Scratch, "hk-meta-owner");
       User_Id   : Natural;
       Group_Id  : Natural;
