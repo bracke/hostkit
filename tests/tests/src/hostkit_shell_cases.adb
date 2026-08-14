@@ -855,6 +855,63 @@ package body Hostkit_Shell_Cases is
       Hostkit.Pty.Close (Item);
    end Test_Cursor_Control_Writes_To_A_Pseudo_Terminal;
 
+   --  A child given a replaced environment sees exactly what it was given.
+   --
+   --  Nothing tested this, on any host, and Adash's conformance runner leans
+   --  on it for every one of its six hundred cases: it replaces the
+   --  environment so a case gives the same answer on a developer's machine as
+   --  in CI. The Windows body builds an environment block by hand -- one
+   --  buffer of NAME=VALUE, each NUL-terminated, a second NUL at the end,
+   --  decoded to UTF-16 -- and until this ran, nothing had ever executed that
+   --  code and looked at the result.
+   procedure Test_A_Replaced_Environment_Reaches_The_Child
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Ends    : D.Pipe_Ends;
+      Options : Hostkit.Spawn.Options;
+      Child   : Hostkit.Spawn.Process_Handle;
+      Result  : Hostkit.Spawn.Status;
+      Args    : Hostkit.String_Vectors.Vector;
+   begin
+      Assert (D.Create_Pipe (Ends), "could not create a pipe");
+      Assert (D.Set_Inheritable (Ends.Write_End, True),
+              "could not make the write end inheritable");
+
+      Args.Append (Ada.Strings.Unbounded.To_Unbounded_String ("HOSTKIT_TEST"));
+
+      Options.Output := Ends.Write_End;
+      Options.Replace_Environment := True;
+      Options.Environment.Append
+        (Ada.Strings.Unbounded.To_Unbounded_String ("HOSTKIT_TEST=given"));
+
+      Assert (Hostkit.Spawn.Start (Companion ("env_reader"), Args, Options,
+                                   Child)
+              = Hostkit.Spawn.Spawn_Ok,
+              "spawning with a replaced environment failed");
+
+      D.Close (Ends.Write_End);
+
+      declare
+         Output : constant String := Drain (Ends.Read_End);
+      begin
+         Assert (Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Block, Result),
+                 "waiting for the child failed");
+
+         --  What it read, not merely that it ran: a child that started with no
+         --  environment at all would exit 4 and say "absent", which is the
+         --  failure this exists to catch.
+         Assert (Output'Length > 0 and then Output (Output'First .. Output'First + 5) = "value:",
+                 "the child did not see the variable it was given: [" & Output & "]");
+
+         Assert (Result.State = Hostkit.Spawn.Wait_Exited
+                   and then Result.Exit_Code = 0,
+                 "the child did not exit cleanly");
+      end;
+
+      D.Close (Ends.Read_End);
+   end Test_A_Replaced_Environment_Reaches_The_Child;
+
    --  Two saves of a terminal nobody touched in between.
    --
    --  Asked because the round-trip test compares saved settings for equality,
@@ -1298,6 +1355,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Cursor_Control_Writes_To_A_Pseudo_Terminal'Access,
          "terminal : a cursor action reaches the terminal it is aimed at");
+      Register_Routine
+        (T, Test_A_Replaced_Environment_Reaches_The_Child'Access,
+         "spawn : a replaced environment reaches the child");
       Register_Routine
         (T, Test_A_Saved_Mode_Is_Stable'Access,
          "terminal : two saves of an untouched terminal agree");

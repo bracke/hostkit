@@ -10,7 +10,8 @@ project Hostkit_Tests is
    --  tried either refused its arguments or -- cmd.exe -- opened an interactive shell
    --  and waited for input until CI gave up.
    for Main use
-     ("hostkit_tests.adb", "noop.adb", "failing.adb", "sleeper.adb", "echoer.adb");
+     ("hostkit_tests.adb", "noop.adb", "failing.adb", "sleeper.adb", "echoer.adb",
+      "env_reader.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use
