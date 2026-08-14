@@ -97,12 +97,15 @@ package Hostkit.Terminal_Control is
    --  not showing them what they type.
    --
    --  @param Terminal A descriptor open on the terminal.
+   --  A saved mode is not only settings. macOS keeps `PENDIN` -- a line
+   --  discipline state bit -- inside the same structure, so a mode read back
+   --  after a restore can differ from the one that went in while every setting
+   --  was applied. Comparing two saved modes is therefore not a test of
+   --  whether a restore worked, and this does not pretend otherwise: it
+   --  answers what the host answered.
+   --
    --  @param From Settings previously recorded by Save_Mode.
-   --  @return True when the settings were applied *and* the terminal reads
-   --          back as the ones that were saved. A host that takes the call and
-   --          keeps a setting of its own answers False here rather than True:
-   --          a restore that did not restore is the optimistic default this
-   --          crate exists to refuse.
+   --  @return True when the host took the settings.
    function Restore_Mode
      (Terminal : Hostkit.Descriptors.Descriptor;
       From     : Mode) return Boolean;

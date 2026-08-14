@@ -150,6 +150,16 @@ package body Hostkit.Terminal_Control is
    -- Restore_Mode --
    ------------------
 
+   --  What macOS does that Linux does not: a saved mode read back after a
+   --  restore is not byte-identical to the one that went in. The difference is
+   --  `PENDIN` in c_lflag -- 0x20000000, which Apple's own header labels
+   --  "(state)" -- set by the line discipline to say input is waiting to be
+   --  retyped. tcsetattr takes every setting and the kernel goes on keeping
+   --  that bit for itself.
+   --
+   --  So a saved mode holds host state as well as settings, and comparing two
+   --  of them is not a test of whether a restore worked. What this answers is
+   --  what the host answered.
    function Restore_Mode
      (Terminal : Hostkit.Descriptors.Descriptor;
       From     : Mode) return Boolean
@@ -163,24 +173,7 @@ package body Hostkit.Terminal_Control is
          return False;
       end if;
 
-      if Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) /= 0 then
-         return False;
-      end if;
-
-      --  Read back and compare. A host that takes the call, answers success
-      --  and keeps a setting of its own has not restored anything the caller
-      --  can rely on, and saying True there is the optimistic default this
-      --  crate exists to refuse. macOS does exactly that; Hostkit
-      --  .Terminal_Control.Differences says which byte.
-      declare
-         Applied : Mode;
-      begin
-         if not Save_Mode (Terminal, Applied) then
-            return False;
-         end if;
-
-         return Applied = From;
-      end;
+      return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
    end Restore_Mode;
 
    -------------

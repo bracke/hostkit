@@ -163,24 +163,7 @@ package body Hostkit.Terminal_Control is
          return False;
       end if;
 
-      if Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) /= 0 then
-         return False;
-      end if;
-
-      --  Read back and compare. A host that takes the call, answers success
-      --  and keeps a setting of its own has not restored anything the caller
-      --  can rely on, and saying True there is the optimistic default this
-      --  crate exists to refuse. macOS does exactly that; Hostkit
-      --  .Terminal_Control.Differences says which byte.
-      declare
-         Applied : Mode;
-      begin
-         if not Save_Mode (Terminal, Applied) then
-            return False;
-         end if;
-
-         return Applied = From;
-      end;
+      return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
    end Restore_Mode;
 
    -------------

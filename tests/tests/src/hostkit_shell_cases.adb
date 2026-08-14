@@ -899,6 +899,7 @@ package body Hostkit_Shell_Cases is
       Before : Hostkit.Terminal_Control.Mode;
       Raw    : Hostkit.Terminal_Control.Mode;
       After  : Hostkit.Terminal_Control.Mode;
+      Again  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
          return;
@@ -930,10 +931,29 @@ package body Hostkit_Shell_Cases is
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, After),
               "could not re-read the terminal settings");
 
-      --  What was put back is what was taken. Without this the restore could be
-      --  a no-op and every test above would still pass.
-      Assert (Before = After,
-              "restoring the terminal settings did not put back what was saved");
+      --  Not `Before = After`. A saved mode holds host state as well as
+      --  settings -- macOS keeps PENDIN in it -- so a restore that applied
+      --  every setting can still read back as something else, and asserting
+      --  byte equality tests the host's state bits rather than this crate.
+      --
+      --  What is asked instead is that the restore is not a no-op and is
+      --  repeatable: it moved the terminal away from raw, and going round
+      --  again lands in the same place. A restore that did nothing would leave
+      --  After equal to Raw, and one that landed somewhere new each time would
+      --  not agree with itself.
+      Assert (After /= Raw,
+              "restoring left the terminal in raw mode");
+
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
+              "could not set raw mode a second time");
+      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Device, Before),
+              "could not restore the terminal settings a second time");
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Again),
+              "could not re-read the terminal settings a second time");
+
+      Assert (After = Again,
+              "restoring the same saved settings twice reached two different "
+              & "terminals");
 
       Hostkit.Pty.Close (Item);
    end Test_Raw_Mode_Round_Trips;
@@ -952,6 +972,7 @@ package body Hostkit_Shell_Cases is
       Item   : Hostkit.Pty.Pair;
       Before : Hostkit.Terminal_Control.Mode;
       After  : Hostkit.Terminal_Control.Mode;
+      Again  : Hostkit.Terminal_Control.Mode;
 
       Was, Became : Interfaces.Unsigned_8;
       Restored    : Boolean;
@@ -973,11 +994,27 @@ package body Hostkit_Shell_Cases is
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, After),
               "could not re-read the terminal settings");
 
+      --  Round again. What a host may do is keep a state bit of its own -- and
+      --  then it keeps the same one every time. What it may not do is lose a
+      --  setting, which would show as the two journeys landing in different
+      --  places.
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
+              "could not set raw mode a second time");
+      Restored := Restored
+        and then Hostkit.Terminal_Control.Restore_Mode (Item.Device, Before);
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Again),
+              "could not re-read the terminal settings a second time");
+
       Where := Hostkit.Terminal_Control.Differences.First_Difference
                  (Before, After, Was, Became);
 
-      Assert (Where = 0,
-              "byte" & Natural'Image (Where) & " of the saved settings was"
+      --  The message carries the diagnosis whether or not this host needed
+      --  one: a run that fails somewhere else can be read without a second
+      --  trip through CI.
+      Assert (After = Again,
+              "two restores of the same saved settings reached two different"
+              & " terminals; the first differs from what was saved at byte"
+              & Natural'Image (Where) & ", which was"
               & Interfaces.Unsigned_8'Image (Was) & " and came back as"
               & Interfaces.Unsigned_8'Image (Became)
               & "; Restore_Mode answered " & Boolean'Image (Restored));
@@ -1000,6 +1037,7 @@ package body Hostkit_Shell_Cases is
       Item   : Hostkit.Pty.Pair;
       Before : Hostkit.Terminal_Control.Mode;
       After  : Hostkit.Terminal_Control.Mode;
+      Again  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
          return;
@@ -1016,9 +1054,16 @@ package body Hostkit_Shell_Cases is
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, After),
               "could not re-read the controller's settings");
 
-      Assert (Before = After,
-              "restoring the controller's settings did not put back what was "
-              & "saved");
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Controller),
+              "could not set raw mode on the controller a second time");
+      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Controller, Before),
+              "could not restore the controller's settings a second time");
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, Again),
+              "could not re-read the controller's settings a second time");
+
+      Assert (After = Again,
+              "restoring the controller's settings twice reached two different "
+              & "terminals");
 
       Hostkit.Pty.Close (Item);
    end Test_Raw_Mode_Round_Trips_On_The_Controller;
