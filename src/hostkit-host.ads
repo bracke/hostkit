@@ -78,6 +78,13 @@ package Hostkit.Host is
    --  Network node name for uname-style reporting. Empty means unavailable.
    function Node_Name return String;
 
+   --  Attempt to change the network node name.
+   --
+   --  This is a privileged operation on the hosts that support it. False means
+   --  the host refused it, the name is not representable for the native call,
+   --  or this Hostkit body does not know how to perform it.
+   function Set_Node_Name (Name : String) return Boolean;
+
    --  Operating-system release for uname-style reporting. Empty means unavailable.
    function Release_Name return String;
 

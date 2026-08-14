@@ -567,6 +567,21 @@ package body Hostkit.Native is
       return False;
    end Current_Supplementary_Group_Ids;
 
+   function User_Group_Ids
+     (User_Name : String;
+      Groups    : out Hostkit.Process.Group_Id_List;
+      Last      : out Natural)
+      return Boolean
+   is
+      pragma Unreferenced (User_Name);
+   begin
+      for Index in Groups'Range loop
+         Groups (Index) := 0;
+      end loop;
+      Last := 0;
+      return False;
+   end User_Group_Ids;
+
    function Open_Native (Path : String) return Boolean is
       Wide_Path : aliased Wide_String := Wide (Path);
       Operation : aliased Wide_String := Wide ("open");

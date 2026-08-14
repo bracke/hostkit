@@ -112,6 +112,15 @@ package Hostkit.Process is
       Last   : out Natural)
       return Boolean;
 
+   --  Primary and supplementary group ids for a named user. The primary group
+   --  appears first when the host can provide it; duplicates are suppressed by
+   --  the native body where the host reports them.
+   function User_Group_Ids
+     (User_Name : String;
+      Groups    : out Group_Id_List;
+      Last      : out Natural)
+      return Boolean;
+
    --  Read one inherited environment value from the host process. Missing
    --  variables return False; present empty variables return True with an empty
    --  value. Hostkit owns this so consumers do not probe process environment

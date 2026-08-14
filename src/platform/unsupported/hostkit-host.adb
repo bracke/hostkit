@@ -48,6 +48,11 @@ package body Hostkit.Host is
 
    function System_Name return String is ("");
    function Node_Name return String is ("");
+   function Set_Node_Name (Name : String) return Boolean is
+      pragma Unreferenced (Name);
+   begin
+      return False;
+   end Set_Node_Name;
    function Release_Name return String is ("");
    function Version_Name return String is ("");
    function Machine_Name return String is ("");

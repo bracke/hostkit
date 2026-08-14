@@ -430,6 +430,88 @@ package body Hostkit.Native is
          return False;
    end Current_Supplementary_Group_Ids;
 
+   function User_Group_Ids
+     (User_Name : String;
+      Groups    : out Hostkit.Process.Group_Id_List;
+      Last      : out Natural)
+      return Boolean
+   is
+      type C_Group_Id_List is array (Positive range <>) of Interfaces.C.unsigned;
+
+      type Passwd is record
+         Pw_Name   : System.Address;
+         Pw_Passwd : System.Address;
+         Pw_Uid    : Interfaces.C.unsigned;
+         Pw_Gid    : Interfaces.C.unsigned;
+         Pw_Gecos  : System.Address;
+         Pw_Dir    : System.Address;
+         Pw_Shell  : System.Address;
+      end record
+        with Convention => C;
+
+      function Getpwnam (Name : Interfaces.C.char_array) return access Passwd
+        with Import => True, Convention => C, External_Name => "getpwnam";
+
+      function Getgrouplist
+        (User   : Interfaces.C.char_array;
+         Group  : Interfaces.C.unsigned;
+         List   : System.Address;
+         Count  : access Interfaces.C.int)
+         return Interfaces.C.int
+      with Import => True, Convention => C, External_Name => "getgrouplist";
+
+      C_Name        : Interfaces.C.char_array := Interfaces.C.To_C (User_Name);
+      Passwd_Entry  : constant access Passwd := Getpwnam (C_Name);
+      Native_Groups : aliased C_Group_Id_List (1 .. Groups'Length) := [others => 0];
+      Count         : aliased Interfaces.C.int := Interfaces.C.int (Groups'Length);
+      Found         : Natural := 0;
+
+      procedure Append_Group (Id : Natural) is
+      begin
+         for Index in 1 .. Found loop
+            if Groups (Index) = Id then
+               return;
+            end if;
+         end loop;
+         if Found < Groups'Length then
+            Found := Found + 1;
+            Groups (Found) := Id;
+         end if;
+      end Append_Group;
+   begin
+      for Index in Groups'Range loop
+         Groups (Index) := 0;
+      end loop;
+      Last := 0;
+
+      if User_Name = "" or else Passwd_Entry = null then
+         return False;
+      end if;
+
+      Append_Group (Natural (Passwd_Entry.Pw_Gid));
+      if Getgrouplist
+        (C_Name, Passwd_Entry.Pw_Gid, Native_Groups'Address, Count'Access) < 0
+      then
+         Last := Found;
+         return Found > 0;
+      end if;
+
+      for Offset in 0 .. Natural (Count) - 1 loop
+         exit when Offset >= Native_Groups'Length;
+         Append_Group (Natural (Native_Groups (Native_Groups'First + Offset)));
+      end loop;
+
+      Last := Found;
+      return Last > 0;
+   exception
+      when others =>
+         for Index in Groups'Range loop
+            Groups (Index) := 0;
+         end loop;
+         Last := 0;
+         return False;
+   end User_Group_Ids;
+
    function Open_Native (Path : String) return Boolean is
       --  xdg-open is the freedesktop way to hand a path to whatever handles it.
       Opener   : constant String := "xdg-open";

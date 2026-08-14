@@ -69,6 +69,12 @@ private package Hostkit.Native is
       Last   : out Natural)
       return Boolean;
 
+   function User_Group_Ids
+     (User_Name : String;
+      Groups    : out Hostkit.Process.Group_Id_List;
+      Last      : out Natural)
+      return Boolean;
+
    --  Start whatever the host thinks Path is, the way a double-click would.
    function Open_Native (Path : String) return Boolean;
 

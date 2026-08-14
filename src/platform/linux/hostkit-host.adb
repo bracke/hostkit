@@ -138,6 +138,25 @@ package body Hostkit.Host is
       return Uname_Field (2);
    end Node_Name;
 
+   function Set_Node_Name (Name : String) return Boolean is
+      Raw : Interfaces.C.char_array := Interfaces.C.To_C (Name, Append_Nul => False);
+
+      function C_Sethostname
+        (Name : System.Address;
+         Size : Interfaces.C.size_t)
+         return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "sethostname";
+   begin
+      if Name = "" then
+         return False;
+      end if;
+
+      return C_Sethostname (Raw'Address, Raw'Length) = 0;
+   exception
+      when others =>
+         return False;
+   end Set_Node_Name;
+
    function Release_Name return String is
    begin
       return Uname_Field (3);

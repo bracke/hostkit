@@ -275,6 +275,24 @@ package body Hostkit.Host is
          return "";
    end Node_Name;
 
+   function Set_Node_Name (Name : String) return Boolean is
+      Raw : Interfaces.C.char_array := Interfaces.C.To_C (Name);
+
+      function Set_Computer_Name
+        (Name : System.Address)
+         return Interfaces.C.int
+      with Import, Convention => Stdcall, External_Name => "SetComputerNameA";
+   begin
+      if Name = "" then
+         return False;
+      end if;
+
+      return Set_Computer_Name (Raw'Address) /= 0;
+   exception
+      when others =>
+         return False;
+   end Set_Node_Name;
+
    function Release_Name return String is
       Info : constant RTL_OSVERSIONINFOEXW := Windows_Version_Info;
    begin
