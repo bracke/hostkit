@@ -894,6 +894,7 @@ package body Hostkit_Shell_Cases is
       pragma Unreferenced (T);
       Item   : Hostkit.Pty.Pair;
       Before : Hostkit.Terminal_Control.Mode;
+      Raw    : Hostkit.Terminal_Control.Mode;
       After  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
@@ -909,6 +910,17 @@ package body Hostkit_Shell_Cases is
               "could not save the terminal settings");
       Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
               "could not set raw mode");
+
+      --  Raw is a different terminal from the one that was saved. Asked before
+      --  the restore because a Set_Raw that changed nothing would make the
+      --  round-trip below pass for the wrong reason -- and on a host where the
+      --  round-trip fails, it says whether the going or the coming back is at
+      --  fault.
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Raw),
+              "could not read back the raw settings");
+      Assert (Before /= Raw,
+              "setting raw mode changed nothing this host will admit to");
+
       Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Device, Before),
               "could not restore the terminal settings");
 
@@ -922,6 +934,44 @@ package body Hostkit_Shell_Cases is
 
       Hostkit.Pty.Close (Item);
    end Test_Raw_Mode_Round_Trips;
+
+   --  The same journey on the other side of the pair.
+   --
+   --  A pseudo-terminal has two descriptors and they are not the same kind of
+   --  thing: one is what a child sees as its terminal, the other is what the
+   --  parent holds. If the settings come back on one and not on the other, what
+   --  is at fault is the host's driver for that side rather than this crate's
+   --  save and restore -- and that is worth knowing before anything here is
+   --  changed to suit it.
+   procedure Test_Raw_Mode_Round_Trips_On_The_Controller
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Item   : Hostkit.Pty.Pair;
+      Before : Hostkit.Terminal_Control.Mode;
+      After  : Hostkit.Terminal_Control.Mode;
+   begin
+      if not Hostkit.Pty.Is_Supported then
+         return;
+      end if;
+
+      Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
+
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, Before),
+              "could not save the controller's settings");
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Controller),
+              "could not set raw mode on the controller");
+      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Controller, Before),
+              "could not restore the controller's settings");
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, After),
+              "could not re-read the controller's settings");
+
+      Assert (Before = After,
+              "restoring the controller's settings did not put back what was "
+              & "saved");
+
+      Hostkit.Pty.Close (Item);
+   end Test_Raw_Mode_Round_Trips_On_The_Controller;
 
    procedure Test_An_Unsaved_Mode_Is_Not_Applied
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -1159,6 +1209,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips'Access,
          "terminal : raw mode round-trips and the settings come back");
+      Register_Routine
+        (T, Test_Raw_Mode_Round_Trips_On_The_Controller'Access,
+         "terminal : and round-trips on the controller side too");
       Register_Routine
         (T, Test_An_Unsaved_Mode_Is_Not_Applied'Access,
          "terminal : a mode that was never saved is refused, not applied");

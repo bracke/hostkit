@@ -31,10 +31,13 @@ project Hostkit is
    package Linker is
       case Hostkit_Config.Alire_Host_OS is
          when "windows" =>
-            --  ShellExecuteW and SHFileOperationW live in shell32. A consumer inherits
-            --  this, so nobody has to know that asking Hostkit to open something -- or
-            --  to trash it -- drags in a Windows library.
-            for Linker_Options use ("-lshell32");
+            --  ShellExecuteW and SHFileOperationW live in shell32, and RtlGetVersion
+            --  in ntdll -- which mingw does not link by default, so asking Windows
+            --  its own version failed at the link with nothing else wrong. A consumer
+            --  inherits both, so nobody has to know that asking Hostkit to open
+            --  something, to trash it, or to say which Windows this is drags in a
+            --  Windows library.
+            for Linker_Options use ("-lshell32", "-lntdll");
          when "macos" =>
             --  CoreServices for the trash (FSMoveObjectToTrashSync), CoreFoundation
             --  for the host locale (CFLocaleCopyCurrent). Inherited for the same
