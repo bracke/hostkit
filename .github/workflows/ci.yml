@@ -53,10 +53,17 @@ jobs:
           alr --non-interactive build
           # The binary is hostkit_tests.exe on Windows, and bash will not find it under
           # the Unix name.
+          #
+          # Under a timeout well inside the job's own, because a suite that hangs
+          # and is killed by the job takes its output with it: the Windows job
+          # twice came back "cancelled" after thirty minutes with not one test
+          # line in the log, so nothing said which test was stuck. Killed here
+          # instead, the step fails, the log survives, and the last test AUnit
+          # printed names the one that did not finish.
           if [ -f ./bin/hostkit_tests.exe ]; then
-            ./bin/hostkit_tests.exe
+            timeout --signal=KILL 300 ./bin/hostkit_tests.exe
           else
-            ./bin/hostkit_tests
+            timeout --signal=KILL 300 ./bin/hostkit_tests
           fi
 
   # The release checklist (tools/bin/check_all) drives the project_tools-based

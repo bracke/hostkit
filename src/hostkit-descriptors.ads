@@ -224,6 +224,17 @@ package Hostkit.Descriptors is
    --  @return True when Item is a terminal.
    function Is_Terminal (Item : Descriptor) return Boolean;
 
+   --  Return the host pathname or conventional name for a terminal descriptor.
+   --
+   --  POSIX hosts use ttyname-style answers where available. Windows consoles
+   --  do not have POSIX device pathnames, so a stable conventional console name
+   --  is returned when the descriptor is a console. Empty means Item is not a
+   --  terminal or the host cannot provide a name.
+   --
+   --  @param Item Descriptor to name.
+   --  @return Terminal name, or the empty string.
+   function Terminal_Name (Item : Descriptor) return String;
+
    --  Which of the three standard streams a descriptor is to become.
    type Standard_Stream is (Stream_Input, Stream_Output, Stream_Error);
 
