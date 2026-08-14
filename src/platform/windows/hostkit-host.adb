@@ -14,6 +14,69 @@ package body Hostkit.Host is
       return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "GetUserDefaultLocaleName";
 
+   subtype C_DWord is Interfaces.C.unsigned_long;
+   subtype C_Word is Interfaces.C.unsigned_short;
+
+   type RTL_OSVERSIONINFOEXW is record
+      OS_Version_Info_Size : C_DWord;
+      Major_Version        : C_DWord;
+      Minor_Version        : C_DWord;
+      Build_Number         : C_DWord;
+      Platform_Id          : C_DWord;
+      CSD_Version          : Wide_String (1 .. 128);
+      Service_Pack_Major   : C_Word;
+      Service_Pack_Minor   : C_Word;
+      Suite_Mask           : C_Word;
+      Product_Type         : Interfaces.C.unsigned_char;
+      Reserved             : Interfaces.C.unsigned_char;
+   end record
+     with Convention => C;
+
+   function RtlGetVersion (Info : access RTL_OSVERSIONINFOEXW) return Interfaces.C.long
+     with Import, Convention => Stdcall, External_Name => "RtlGetVersion";
+
+   function DWord_Image (Value : C_DWord) return String is
+      Raw : constant String := C_DWord'Image (Value);
+   begin
+      return Raw (Raw'First + 1 .. Raw'Last);
+   end DWord_Image;
+
+   function Windows_Version_Info return RTL_OSVERSIONINFOEXW is
+      Info : aliased RTL_OSVERSIONINFOEXW :=
+        (OS_Version_Info_Size => RTL_OSVERSIONINFOEXW'Size / System.Storage_Unit,
+         Major_Version        => 0,
+         Minor_Version        => 0,
+         Build_Number         => 0,
+         Platform_Id          => 0,
+         CSD_Version          => [others => Wide_Character'Val (0)],
+         Service_Pack_Major   => 0,
+         Service_Pack_Minor   => 0,
+         Suite_Mask           => 0,
+         Product_Type         => 0,
+         Reserved             => 0);
+   begin
+      if RtlGetVersion (Info'Access) /= 0 then
+         Info.Major_Version := 0;
+         Info.Minor_Version := 0;
+         Info.Build_Number := 0;
+      end if;
+      return Info;
+   exception
+      when others =>
+         return
+           (OS_Version_Info_Size => RTL_OSVERSIONINFOEXW'Size / System.Storage_Unit,
+            Major_Version        => 0,
+            Minor_Version        => 0,
+            Build_Number         => 0,
+            Platform_Id          => 0,
+            CSD_Version          => [others => Wide_Character'Val (0)],
+            Service_Pack_Major   => 0,
+            Service_Pack_Minor   => 0,
+            Suite_Mask           => 0,
+            Product_Type         => 0,
+            Reserved             => 0);
+   end Windows_Version_Info;
+
    function Current return Kind is
    begin
       return Windows;
@@ -208,13 +271,45 @@ package body Hostkit.Host is
    end Node_Name;
 
    function Release_Name return String is
+      Info : constant RTL_OSVERSIONINFOEXW := Windows_Version_Info;
    begin
-      return "";
+      if Info.Major_Version = 0 then
+         return "";
+      end if;
+
+      return DWord_Image (Info.Major_Version) & "."
+        & DWord_Image (Info.Minor_Version) & "."
+        & DWord_Image (Info.Build_Number);
    end Release_Name;
 
    function Version_Name return String is
+      Info : constant RTL_OSVERSIONINFOEXW := Windows_Version_Info;
+      Result : Unbounded_String;
    begin
-      return "";
+      if Info.Major_Version = 0 then
+         return "";
+      end if;
+
+      Append
+        (Result,
+         "Windows "
+         & DWord_Image (Info.Major_Version) & "."
+         & DWord_Image (Info.Minor_Version) & " build "
+         & DWord_Image (Info.Build_Number));
+
+      for Index in Info.CSD_Version'Range loop
+         exit when Info.CSD_Version (Index) = Wide_Character'Val (0);
+         if Wide_Character'Pos (Info.CSD_Version (Index)) <= Character'Pos (Character'Last) then
+            if Length (Result) > 0
+              and then Element (Result, Length (Result)) /= ' '
+            then
+               Append (Result, " ");
+            end if;
+            Append (Result, Character'Val (Wide_Character'Pos (Info.CSD_Version (Index))));
+         end if;
+      end loop;
+
+      return To_String (Result);
    end Version_Name;
 
    function Machine_Name return String is
@@ -228,5 +323,25 @@ package body Hostkit.Host is
       when others =>
          return "";
    end Machine_Name;
+
+   function Login_Name return String is
+      function Get_User_Name
+        (Buffer : System.Address;
+         Size   : access Interfaces.C.unsigned_long)
+         return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "GetUserNameA";
+
+      Size   : aliased Interfaces.C.unsigned_long := 256;
+      Buffer : aliased Interfaces.C.char_array (1 .. 256) := [others => Interfaces.C.nul];
+   begin
+      if Get_User_Name (Buffer'Address, Size'Access) /= 0 then
+         return Interfaces.C.To_Ada (Buffer);
+      else
+         return "";
+      end if;
+   exception
+      when others =>
+         return "";
+   end Login_Name;
 
 end Hostkit.Host;

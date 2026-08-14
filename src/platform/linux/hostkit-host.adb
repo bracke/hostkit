@@ -1,5 +1,6 @@
 with Ada.Directories;
 with Interfaces.C;
+with System;
 
 package body Hostkit.Host is
    use type Interfaces.C.int;
@@ -151,5 +152,24 @@ package body Hostkit.Host is
    begin
       return Uname_Field (5);
    end Machine_Name;
+
+   function Login_Name return String is
+      Buffer : aliased Interfaces.C.char_array (1 .. 256) := [others => Interfaces.C.nul];
+
+      function Getlogin_R
+        (Name : System.Address;
+         Size : Interfaces.C.size_t)
+         return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "getlogin_r";
+   begin
+      if Getlogin_R (Buffer'Address, Buffer'Length) = 0 then
+         return Interfaces.C.To_Ada (Buffer);
+      end if;
+
+      return "";
+   exception
+      when others =>
+         return "";
+   end Login_Name;
 
 end Hostkit.Host;

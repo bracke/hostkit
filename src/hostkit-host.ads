@@ -87,6 +87,11 @@ package Hostkit.Host is
    --  Hardware or processor class for uname-style reporting. Empty means unavailable.
    function Machine_Name return String;
 
+   --  Login name for the user associated with this session, for logname-style
+   --  reporting. Empty means unavailable; callers that need an environment
+   --  convention such as LOGNAME should apply that policy themselves.
+   function Login_Name return String;
+
    --  A standard stream a program may be sharing with a person.
    type Stream_Kind is (Standard_Input, Standard_Output, Standard_Error);
 

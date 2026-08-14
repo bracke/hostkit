@@ -307,6 +307,17 @@ begin
    Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserDefaultLocaleName");
    Require_Binding ("src/platform/macos/hostkit-host.adb", "CFLocaleCopyCurrent");
 
+   --  uname-style host reporting. POSIX hosts use uname; Windows uses the
+   --  native version query rather than environment guesses or shell commands.
+   Require_Binding ("src/platform/linux/hostkit-host.adb", "uname");
+   Require_Binding ("src/platform/macos/hostkit-host.adb", "uname");
+   Require_Binding ("src/platform/windows/hostkit-host.adb", "RtlGetVersion");
+
+   --  Login/session name used by logname-style callers.
+   Require_Binding ("src/platform/linux/hostkit-host.adb", "getlogin_r");
+   Require_Binding ("src/platform/macos/hostkit-host.adb", "getlogin_r");
+   Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserNameA");
+
    --  Reading a link's own target, which Windows has no readlink for.
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "readlink");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeviceIoControl");

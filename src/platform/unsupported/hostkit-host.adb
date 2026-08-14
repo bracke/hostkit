@@ -51,5 +51,6 @@ package body Hostkit.Host is
    function Release_Name return String is ("");
    function Version_Name return String is ("");
    function Machine_Name return String is ("");
+   function Login_Name return String is ("");
 
 end Hostkit.Host;
