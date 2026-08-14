@@ -161,8 +161,8 @@ package Hostkit.Process is
    --                    that cannot be opened fails the launch rather than falling
    --                    back to the caller's input -- silently handing a password
    --                    prompt the caller's terminal is how a test hangs for ever.
-   --  @param Stdout_Path File to capture standard output into; discarded when empty.
-   --  @param Stderr_Path File to capture standard error into; discarded when empty.
+   --  @param Stdout_Path File to capture standard output into; inherited when empty.
+   --  @param Stderr_Path File to capture standard error into; inherited when empty.
    --  @param Timeout_Ms How long to wait before killing it; 0 waits indefinitely.
    --  @param Cancelled Asked while waiting; True kills the process.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
