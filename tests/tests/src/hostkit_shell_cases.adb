@@ -832,12 +832,30 @@ package body Hostkit_Shell_Cases is
       --  holds that open, reading its own side never ends.
       Hostkit.Pty.Close_Device (Terminal);
 
+      --  A moment for the host to attach a client to the terminal, and for
+      --  whatever it says when it does. A console host announces itself the
+      --  moment it has one; a pseudo-terminal says nothing at all, so this is
+      --  a wait that finds something on one host and nothing on the other, and
+      --  neither is a failure. What it is for is not typing at a terminal
+      --  whose far side is not there yet.
+      if D.Wait_Readable (Terminal.From_Child, 500) then
+         declare
+            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
+            Taken  : Ada.Streams.Stream_Element_Offset;
+         begin
+            if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
+              and then Taken >= Buffer'First
+            then
+               for Index in Buffer'First .. Taken loop
+                  Append (Seen, Character'Val (Natural (Buffer (Index))));
+               end loop;
+            end if;
+         end;
+      end if;
+
       Assert (D.Write (Terminal.To_Child, Typed, Last) = D.Transfer_Ok,
               "could not type into the terminal");
 
-      --  Waiting before reading, rather than reading and hoping. A read of an
-      --  empty pipe waits for ever on the host with no non-blocking mode, and
-      --  a test that hangs is a job that reports nothing.
       for Attempt in 1 .. 200 loop
          if D.Wait_Readable (Terminal.From_Child, 50) then
             declare
@@ -857,15 +875,15 @@ package body Hostkit_Shell_Cases is
          exit when Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0;
       end loop;
 
-      Assert (Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0,
-              "the child never read what was typed at its terminal: ["
-              & To_String (Seen) & "]");
-
-      --  And it ends of its own accord, having had its line.
+      --  How the child ended, gathered before asserting anything about what it
+      --  wrote. A child that exited 3 read nothing at all, which is a
+      --  different fault from one that read the wrong thing or wrote where
+      --  this cannot see it -- and a failure that cannot tell those apart
+      --  costs a run to find out.
       declare
          Ended : Boolean := False;
       begin
-         for Attempt in 1 .. 200 loop
+         for Attempt in 1 .. 100 loop
             if Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
               and then Result.State /= Hostkit.Spawn.Wait_Running
             then
@@ -875,6 +893,17 @@ package body Hostkit_Shell_Cases is
 
             delay 0.05;
          end loop;
+
+         Assert (Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0,
+                 "the child never read what was typed at its terminal. It "
+                 & (if Ended
+                    then "ended "
+                         & Hostkit.Spawn.Wait_State'Image (Result.State)
+                         & " with status"
+                         & Integer'Image (Result.Exit_Code)
+                    else "was still running")
+                 & ", and the terminal gave back ["
+                 & To_String (Seen) & "]");
 
          Assert (Ended, "the child never finished after reading its line");
       end;
