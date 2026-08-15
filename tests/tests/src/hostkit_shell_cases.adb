@@ -799,13 +799,15 @@ package body Hostkit_Shell_Cases is
    --  redraws where a line discipline echoes, so what arrives is the child's
    --  text among control sequences, and the claim is that the text is in
    --  there.
-   --  What the host will *start* is narrower than what it calls a program.
+   --  What the host will *start* from a name is narrower than what it calls a
+   --  program, and not narrower in the way one would guess.
    --
-   --  On Windows a .bat, a .cmd, a .ps1 and an .msi are executables and the
-   --  process loader starts none of them: each needs something else run first,
-   --  and which something is a policy this crate does not have. A consumer
-   --  about to hand a name to Spawn asks the narrower question, and gets a
-   --  refusal here rather than a failed process creation there.
+   --  On Windows a .bat, a .cmd, a .ps1 and an .msi are all executables. The
+   --  first two are started -- the host runs the command interpreter for them
+   --  itself -- and the last two are not: one is read by another shell and the
+   --  other by the installer. This crate said none of the four were startable
+   --  until a case on that host proved otherwise, which is the reason the
+   --  question is asked here rather than reasoned about.
    procedure Test_What_Starts_Is_Narrower_Than_What_Runs
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -825,33 +827,35 @@ package body Hostkit_Shell_Cases is
          Ada.Text_IO.Close (File);
       end Write;
 
-      Batch : constant String := Hostkit.Fs.Join (Room, "thing.bat");
-      Plain : constant String := Hostkit.Fs.Join (Room, "thing.txt");
+      Batch  : constant String := Hostkit.Fs.Join (Room, "thing.bat");
+      Script : constant String := Hostkit.Fs.Join (Room, "thing.ps1");
+      Plain  : constant String := Hostkit.Fs.Join (Room, "thing.txt");
    begin
       Write ("thing.bat");
+      Write ("thing.ps1");
       Write ("thing.txt");
 
-      --  Neither question says yes to a file that is not a program at all.
-      Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Plain),
-              "a plain text file was said to be startable");
+      --  A file that is not a program on any host.
+      Assert (not Hostkit.Fs.Starts_When_Named (Plain),
+              "a plain text file was said to start");
 
       if Hostkit.Fs.Is_Executable (Batch) then
-         --  A host that calls a batch file a program: it must still say that
-         --  it will not start one, or a consumer walks into a failure it
-         --  could have been told about.
-         Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Batch),
-                 "a batch file was said to start without an interpreter");
+         --  The host that calls these programs. It starts the batch file, by
+         --  running the interpreter for it, and does not start the other.
+         Assert (Hostkit.Fs.Starts_When_Named (Batch),
+                 "a batch file was said not to start on a host that runs one");
+         Assert (not Hostkit.Fs.Starts_When_Named (Script),
+                 "a file nothing starts from a name was said to start");
       else
-         --  A host with no such notion: the two questions have the same
-         --  answer, and that is the claim.
-         Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Batch),
+         --  A host with no such notion: neither is a program, and both
+         --  questions agree.
+         Assert (not Hostkit.Fs.Starts_When_Named (Batch),
                  "a file this host does not call a program was said to start");
       end if;
 
       --  And the suite's own binary, which every host starts.
-      Assert (Hostkit.Fs.Starts_Without_An_Interpreter
-                (Ada.Command_Line.Command_Name),
-              "the running program was said not to be startable");
+      Assert (Hostkit.Fs.Starts_When_Named (Ada.Command_Line.Command_Name),
+              "the running program was said not to start");
 
       Ada.Directories.Delete_Tree (Room);
    end Test_What_Starts_Is_Narrower_Than_What_Runs;

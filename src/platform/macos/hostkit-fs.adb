@@ -762,14 +762,14 @@ package body Hostkit.Fs is
       return "";
    end Executable_Suffix;
 
-   -----------------------------------
-   -- Starts_Without_An_Interpreter --
-   -----------------------------------
+   -----------------------
+   -- Starts_When_Named --
+   -----------------------
 
    --  The same question as Is_Executable here: a file the kernel will start is
    --  one with the bit set, and what it does with a `#!` line is its own
    --  business rather than the caller's.
-   function Starts_Without_An_Interpreter (Path : String) return Boolean
+   function Starts_When_Named (Path : String) return Boolean
    is (Is_Executable (Path));
 
 end Hostkit.Fs;
