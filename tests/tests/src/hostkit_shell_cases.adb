@@ -882,6 +882,82 @@ package body Hostkit_Shell_Cases is
 
       Hang.Append (Ada.Strings.Unbounded.To_Unbounded_String ("--hang"));
 
+      --  Nought: what the child sees of the streams it was given. Written to a
+      --  file rather than to those streams, because a child asked whether its
+      --  output is a terminal cannot answer on that output if the answer is
+      --  that it has none.
+      declare
+         Told : Hostkit.String_Vectors.Vector;
+         Said : Unbounded_String;
+
+         Room : constant String :=
+           Ada.Directories.Compose
+             (Ada.Directories.Containing_Directory
+                (Ada.Command_Line.Command_Name),
+              "terminal-report.txt");
+      begin
+         if Ada.Directories.Exists (Room) then
+            Ada.Directories.Delete_File (Room);
+         end if;
+
+         Told.Append (Ada.Strings.Unbounded.To_Unbounded_String (Room));
+
+         Assert (Hostkit.Pty.Open (Writing), "could not open a terminal");
+         Assert (Hostkit.Pty.Attach (Writing, Options),
+                 "could not arrange to start a reporter on the terminal");
+         Assert (Hostkit.Spawn.Start
+                   (Companion ("terminal_reporter"), Told, Options, Child)
+                 = Hostkit.Spawn.Spawn_Ok,
+                 "the reporter would not start on a terminal");
+
+         Hostkit.Pty.Close_Device (Writing);
+
+         for Attempt in 1 .. 200 loop
+            exit when Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
+                      and then Result.State /= Hostkit.Spawn.Wait_Running;
+            delay 0.05;
+         end loop;
+
+         declare
+            Ignored : constant Boolean := Gathered (Writing, 20, "", Seen);
+            pragma Unreferenced (Ignored);
+         begin
+            null;
+         end;
+
+         Hostkit.Pty.Close (Writing);
+
+         if Ada.Directories.Exists (Room) then
+            declare
+               Report : Ada.Text_IO.File_Type;
+            begin
+               Ada.Text_IO.Open (Report, Ada.Text_IO.In_File, Room);
+
+               while not Ada.Text_IO.End_Of_File (Report) loop
+                  Append (Said, Ada.Text_IO.Get_Line (Report) & " ");
+               end loop;
+
+               Ada.Text_IO.Close (Report);
+            end;
+         end if;
+
+         --  A child on a terminal has one on both its streams. This is the
+         --  claim every other terminal test rests on, and it is the one that
+         --  says which half is wrong when a child on a console writes into the
+         --  void.
+         Assert (Ada.Strings.Fixed.Index (To_String (Said), "input=TRUE") > 0
+                 and then
+                 Ada.Strings.Fixed.Index (To_String (Said), "output=TRUE") > 0
+                 and then
+                 Ada.Strings.Fixed.Index (To_String (Said), "wrote=TRUE") > 0,
+                 "a child started on a terminal did not see one. It reported ["
+                 & To_String (Said) & "] and the terminal gave back ["
+                 & To_String (Seen) & "]");
+      end;
+
+      Seen := Null_Unbounded_String;
+      Options := (others => <>);
+
       --  One: the child's output reaches the parent's side.
       Assert (Hostkit.Pty.Open (Writing), "could not open a terminal");
       Assert (Hostkit.Pty.Set_Size (Writing, (Rows => 24, Columns => 80)),
