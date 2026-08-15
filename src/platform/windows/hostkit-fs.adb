@@ -794,4 +794,13 @@ package body Hostkit.Fs is
    --  every Windows build of this crate.
    function Separator return Character is ('\');
 
+   ---------------------------
+   -- Search_Path_Delimiter --
+   ---------------------------
+
+   function Search_Path_Delimiter return Character is
+   begin
+      return ';';
+   end Search_Path_Delimiter;
+
 end Hostkit.Fs;

@@ -233,6 +233,16 @@ package Hostkit.Fs is
    --  shows the path to a person or hands it to a tool that does not.
    function Separator return Character;
 
+   --  The character this host writes between the entries of a search path.
+   --
+   --  A colon on POSIX and a semicolon on Windows, where a colon is part of a
+   --  drive letter and could not be a separator at all. A consumer splitting
+   --  PATH has to ask: the two hosts differ, and a split on the wrong one
+   --  turns `C:\Windows` into two directories that do not exist.
+   --
+   --  @return The delimiter.
+   function Search_Path_Delimiter return Character;
+
    --  Join two path segments the way this host writes them.
    --
    --  Ada.Directories.Compose looks like the portable answer and is not: its
