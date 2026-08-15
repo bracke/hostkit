@@ -5,6 +5,7 @@ with AUnit.Assertions;
 with Ada.Command_Line;
 with Ada.Directories;
 with Ada.Streams;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 
 with Interfaces;
@@ -628,27 +629,41 @@ package body Hostkit_Shell_Cases is
       Item : Hostkit.Pty.Pair;
    begin
       if not Hostkit.Pty.Is_Supported then
-         --  Windows. The refusal is the correct answer there, and a consumer
-         --  degrades on it explicitly rather than on a failed Open.
+         --  A host with neither pseudo-terminals nor a console of its own. The
+         --  refusal is the correct answer, and a consumer degrades on the
+         --  question rather than on a failed Open.
          return;
       end if;
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
-      Assert (D.Is_Valid (Item.Controller) and then D.Is_Valid (Item.Device),
-              "a pseudo-terminal handed back an invalid side");
+      Assert (D.Is_Valid (Item.To_Child) and then D.Is_Valid (Item.From_Child),
+              "a pseudo-terminal handed back an invalid side for the parent");
 
-      --  The whole point of the thing: unlike a pipe, both sides are terminals,
-      --  so a program that checks will behave as it does for a user.
-      Assert (D.Is_Terminal (Item.Device),
-              "the device side of a pseudo-terminal is not a terminal");
-      Assert (D.Is_Terminal (Item.Controller),
-              "the controller side of a pseudo-terminal is not a terminal");
+      if D.Is_Valid (Item.Device) then
+         --  A host with pseudo-terminals. The whole point of the thing: unlike
+         --  a pipe, both sides are terminals, so a program that checks behaves
+         --  as it does for a user.
+         Assert (D.Is_Terminal (Item.Device),
+                 "the device side of a pseudo-terminal is not a terminal");
+         Assert (D.Is_Terminal (Item.From_Child),
+                 "the controlling side of a pseudo-terminal is not a terminal");
 
-      Assert (Hostkit.Pty.Device_Name (Item)'Length > 0,
-              "a pseudo-terminal could not name its device side");
+         Assert (Hostkit.Pty.Device_Name (Item)'Length > 0,
+                 "a pseudo-terminal could not name its device side");
+      else
+         --  A host whose answer is a console: two ordinary pipes for the
+         --  parent and a console for the child. The pipes are pipes and do not
+         --  pretend otherwise -- what makes the child see a terminal is the
+         --  console, not these -- and there is no device to name.
+         Assert (Hostkit.Spawn.Is_Attached (Item.Console),
+                 "a host with no device side handed back no console either");
+         Assert (Hostkit.Pty.Device_Name (Item)'Length = 0,
+                 "a pseudo-console named a device it has not got");
+      end if;
 
       Hostkit.Pty.Close (Item);
-      Assert (not D.Is_Valid (Item.Controller), "Close left the controller valid");
+      Assert (not D.Is_Valid (Item.To_Child), "Close left a parent side valid");
+      Assert (not D.Is_Valid (Item.From_Child), "Close left a parent side valid");
       Assert (not D.Is_Valid (Item.Device), "Close left the device valid");
    end Test_A_Pseudo_Terminal_Is_A_Terminal;
 
@@ -694,26 +709,20 @@ package body Hostkit_Shell_Cases is
       Hang.Append (Ada.Strings.Unbounded.To_Unbounded_String ("--hang"));
 
       Assert (Hostkit.Pty.Open (Terminal), "could not open a pseudo-terminal");
-      Assert (D.Set_Inheritable (Terminal.Device, True),
-              "could not hand the device side to a child");
-
-      Options.Input := Terminal.Device;
-      Options.Output := Terminal.Device;
-      Options.Error_Output := Terminal.Device;
 
       --  Its own session, with this terminal as the controlling one, and its
       --  own group in that terminal's foreground: the three together are what
-      --  a keystroke needs to become a signal.
-      Options.Controlling_Terminal := Terminal.Device;
-      Options.Group := Hostkit.Spawn.Group_New;
-      Options.Foreground_Terminal := Terminal.Device;
+      --  a keystroke needs to become a signal, and Attach is where they are
+      --  arranged.
+      Assert (Hostkit.Pty.Attach (Terminal, Options),
+              "could not arrange to start a child on a terminal");
 
       Assert (Hostkit.Spawn.Start
                 (Companion ("sleeper"), Hang, Options, Child)
               = Hostkit.Spawn.Spawn_Ok,
               "the sleeper would not start on a terminal");
 
-      D.Close (Terminal.Device);
+      Hostkit.Pty.Close_Device (Terminal);
 
       --  It writes a line before it hangs, so waiting for that is waiting for
       --  a child that has reached its own code rather than for a fixed time.
@@ -725,7 +734,7 @@ package body Hostkit_Shell_Cases is
                Buffer : Ada.Streams.Stream_Element_Array (1 .. 512);
                Taken  : Ada.Streams.Stream_Element_Offset;
             begin
-               if D.Read (Terminal.Controller, Buffer, Taken) = D.Transfer_Ok
+               if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
                  and then Taken >= Buffer'First
                then
                   Seen := True;
@@ -739,7 +748,7 @@ package body Hostkit_Shell_Cases is
          Assert (Seen, "the child never wrote to the terminal it was given");
       end;
 
-      Assert (D.Write (Terminal.Controller, Ctrl_C, Last) = D.Transfer_Ok,
+      Assert (D.Write (Terminal.To_Child, Ctrl_C, Last) = D.Transfer_Ok,
               "could not type into the terminal");
 
       for Attempt in 1 .. 100 loop
@@ -757,8 +766,108 @@ package body Hostkit_Shell_Cases is
               "Ctrl-C at the terminal did not reach the child: "
               & Hostkit.Spawn.Wait_State'Image (Result.State));
 
-      D.Close (Terminal.Controller);
+      Hostkit.Pty.Close (Terminal);
    end Test_A_Child_Can_Own_A_Terminal;
+
+   --  A child started on a terminal reads what is typed at it and writes back
+   --  through it -- on every host, whatever shape that host's terminal is.
+   --
+   --  The test that matters most for the newest of the three. Where there are
+   --  pseudo-terminals this has always worked and this says so; where the
+   --  answer is a pseudo-console, nothing here had ever started a child at all
+   --  and the only thing asserted was the refusal. What it does not assert is
+   --  *how* the bytes come back: a console host redraws rather than echoing,
+   --  so what arrives is the child's text among control sequences, and the
+   --  claim is that the text is in there.
+   procedure Test_A_Child_Runs_On_A_Terminal
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Terminal : Hostkit.Pty.Pair;
+      Options  : Hostkit.Spawn.Options;
+      Child    : Hostkit.Spawn.Process_Handle;
+      Result   : Hostkit.Spawn.Status;
+      Nothing  : Hostkit.String_Vectors.Vector;
+
+      --  CR LF, because the two hosts disagree about which one Enter is and
+      --  each accepts the pair.
+      --  Bounds written out. A positional aggregate for an unconstrained array
+      --  starts at the index type's first value, which for a stream element
+      --  offset is a large negative number, and every length computed from it
+      --  afterwards overflows.
+      Typed : constant Ada.Streams.Stream_Element_Array (1 .. 7) :=
+        [Character'Pos ('h'), Character'Pos ('e'), Character'Pos ('l'),
+         Character'Pos ('l'), Character'Pos ('o'), 13, 10];
+
+      Last : Ada.Streams.Stream_Element_Offset;
+      Seen : Unbounded_String;
+   begin
+      if not Hostkit.Pty.Is_Supported then
+         return;
+      end if;
+
+      Assert (Hostkit.Pty.Open (Terminal), "could not open a terminal");
+      Assert (Hostkit.Pty.Set_Size (Terminal, (Rows => 24, Columns => 80)),
+              "could not size the terminal");
+      Assert (Hostkit.Pty.Attach (Terminal, Options),
+              "could not arrange to start a child on the terminal");
+
+      Assert (Hostkit.Spawn.Start
+                (Companion ("echoer"), Nothing, Options, Child)
+              = Hostkit.Spawn.Spawn_Ok,
+              "the echoer would not start on a terminal");
+
+      --  The parent's copy of the child's side, where there was one. While it
+      --  holds that open, reading its own side never ends.
+      Hostkit.Pty.Close_Device (Terminal);
+
+      Assert (D.Write (Terminal.To_Child, Typed, Last) = D.Transfer_Ok,
+              "could not type into the terminal");
+
+      for Attempt in 1 .. 200 loop
+         declare
+            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
+            Taken  : Ada.Streams.Stream_Element_Offset;
+         begin
+            if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
+              and then Taken >= Buffer'First
+            then
+               for Index in Buffer'First .. Taken loop
+                  Append (Seen, Character'Val (Natural (Buffer (Index))));
+               end loop;
+            end if;
+         end;
+
+         exit when Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0;
+
+         delay 0.05;
+      end loop;
+
+      Assert (Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0,
+              "the child never read what was typed at its terminal: ["
+              & To_String (Seen) & "]");
+
+      --  And it ends of its own accord, having had its line.
+      declare
+         Ended : Boolean := False;
+      begin
+         for Attempt in 1 .. 200 loop
+            if Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
+              and then Result.State /= Hostkit.Spawn.Wait_Running
+            then
+               Ended := True;
+               exit;
+            end if;
+
+            delay 0.05;
+         end loop;
+
+         Assert (Ended, "the child never finished after reading its line");
+      end;
+
+      Hostkit.Pty.Close (Terminal);
+   end Test_A_Child_Runs_On_A_Terminal;
 
    procedure Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -775,14 +884,25 @@ package body Hostkit_Shell_Cases is
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
 
-      --  Fresh, it reports zero by zero, and Size refuses rather than passing
-      --  that on -- the single most common way to get a pseudo-terminal wrong
-      --  is to hand a child one that says it has no room.
-      Assert (not Hostkit.Terminal_Control.Size (Item.Device, Size),
-              "an unsized pseudo-terminal reported a size");
+      if D.Is_Valid (Item.Device) then
+         --  Fresh, it reports zero by zero, and Size refuses rather than
+         --  passing that on -- the single most common way to get a
+         --  pseudo-terminal wrong is to hand a child one that says it has no
+         --  room. A console is made with a size instead, because the host will
+         --  not make one measuring nothing.
+         Assert (not Hostkit.Terminal_Control.Size (Item.Device, Size),
+                 "an unsized pseudo-terminal reported a size");
+      end if;
 
       Assert (Hostkit.Pty.Set_Size (Item, (Rows => 24, Columns => 80)),
               "could not set the pseudo-terminal size");
+
+      if not D.Is_Valid (Item.Device) then
+         --  Nothing to ask on a host with no device side: what the console was
+         --  told is between it and the child it redraws.
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
 
       Assert (Hostkit.Terminal_Control.Size (Item.Device, Size),
               "a sized pseudo-terminal would not report its size");
@@ -966,7 +1086,7 @@ package body Hostkit_Shell_Cases is
       --  of the check is that the action reached the terminal at all: an action
       --  that silently wrote nothing would leave a line editor redrawing over
       --  its own previous output.
-      case D.Read (Item.Controller, Into, Last) is
+      case D.Read (Item.From_Child, Into, Last) is
          when D.Transfer_Ok =>
             Assert (Last >= Into'First,
                     "a cursor action wrote no bytes to the terminal");
@@ -1253,20 +1373,29 @@ package body Hostkit_Shell_Cases is
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
 
-      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, Before),
+      if not D.Is_Terminal (Item.From_Child) then
+         --  A host whose parent side is a pipe rather than a terminal: there
+         --  are no line-discipline settings to save, and asking for them is
+         --  what Is_Terminal is for. The console keeps the modes there, and
+         --  the child's end of it is what has them.
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
+
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.From_Child, Before),
               "could not save the controller's settings");
-      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Controller),
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.From_Child),
               "could not set raw mode on the controller");
-      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Controller, Before),
+      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.From_Child, Before),
               "could not restore the controller's settings");
-      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, After),
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.From_Child, After),
               "could not re-read the controller's settings");
 
-      Assert (Hostkit.Terminal_Control.Set_Raw (Item.Controller),
+      Assert (Hostkit.Terminal_Control.Set_Raw (Item.From_Child),
               "could not set raw mode on the controller a second time");
-      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.Controller, Before),
+      Assert (Hostkit.Terminal_Control.Restore_Mode (Item.From_Child, Before),
               "could not restore the controller's settings a second time");
-      Assert (Hostkit.Terminal_Control.Save_Mode (Item.Controller, Again),
+      Assert (Hostkit.Terminal_Control.Save_Mode (Item.From_Child, Again),
               "could not re-read the controller's settings a second time");
 
       Assert (After = Again,
@@ -1530,6 +1659,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips'Access,
          "terminal : raw mode round-trips and the settings come back");
+      Register_Routine
+        (T, Test_A_Child_Runs_On_A_Terminal'Access,
+         "shell : a child runs on a terminal and reads what is typed at it");
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips_On_The_Controller'Access,
          "terminal : and round-trips on the controller side too");

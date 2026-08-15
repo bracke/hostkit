@@ -60,8 +60,7 @@ package body Hostkit.Pty is
       Name       : Interfaces.C.Strings.chars_ptr;
       Ignored    : C_Int;
    begin
-      Item := (Controller => Hostkit.Descriptors.Invalid,
-               Device     => Hostkit.Descriptors.Invalid);
+      Item := (others => <>);
 
       --  O_NOCTTY: opening a terminal would otherwise make it this process's
       --  controlling terminal, and a shell acquiring the pseudo-terminal it
@@ -101,11 +100,17 @@ package body Hostkit.Pty is
          return False;
       end if;
 
+      --  One bidirectional descriptor, so both of the parent's sides are it.
+      --  A caller that writes to one and reads the other is right here and on
+      --  the host where they are two ends of two pipes.
       Item :=
-        (Controller =>
+        (To_Child   =>
+           Hostkit.Descriptors.From_Native_Value (Long_Long_Integer (Controller)),
+         From_Child =>
            Hostkit.Descriptors.From_Native_Value (Long_Long_Integer (Controller)),
          Device     =>
-           Hostkit.Descriptors.From_Native_Value (Long_Long_Integer (Device)));
+           Hostkit.Descriptors.From_Native_Value (Long_Long_Integer (Device)),
+         Console    => Hostkit.Spawn.No_Console);
 
       return True;
    end Open;
@@ -117,7 +122,7 @@ package body Hostkit.Pty is
    function Device_Name (Item : Pair) return String is
       Name : Interfaces.C.Strings.chars_ptr;
    begin
-      if not Hostkit.Descriptors.Is_Valid (Item.Controller) then
+      if not Hostkit.Descriptors.Is_Valid (Item.From_Child) then
          return "";
       end if;
 
@@ -126,7 +131,7 @@ package body Hostkit.Pty is
       --  would be a name that changes underneath the caller; this copies it
       --  into an Ada String at the moment it is asked for.
       Name := Ptsname
-        (C_Int (Hostkit.Descriptors.Native_Value (Item.Controller)));
+        (C_Int (Hostkit.Descriptors.Native_Value (Item.From_Child)));
 
       if Name = Interfaces.C.Strings.Null_Ptr then
          return "";
@@ -135,13 +140,52 @@ package body Hostkit.Pty is
       return Interfaces.C.Strings.Value (Name);
    end Device_Name;
 
+   ------------
+   -- Attach --
+   ------------
+
+   function Attach (Item : Pair; To : in out Hostkit.Spawn.Options)
+                    return Boolean is
+   begin
+      --  Inheritable for the one child about to be started. Every descriptor
+      --  this crate makes is close-on-exec, and this is the opt-in.
+      if not Hostkit.Descriptors.Set_Inheritable (Item.Device, True) then
+         return False;
+      end if;
+
+      --  The device side is the child's three streams, and the terminal it is
+      --  to control. Without the last of those the child reads from a terminal
+      --  it does not control, and a Ctrl-C typed at that terminal reaches
+      --  nobody -- which is the whole reason a harness opens one of these.
+      To.Input := Item.Device;
+      To.Output := Item.Device;
+      To.Error_Output := Item.Device;
+      To.Controlling_Terminal := Item.Device;
+      To.Foreground_Terminal := Item.Device;
+      To.Group := Hostkit.Spawn.Group_New;
+
+      return True;
+   end Attach;
+
+   -------------------
+   -- Close_Device --
+   -------------------
+
+   procedure Close_Device (Item : in out Pair) is
+   begin
+      Hostkit.Descriptors.Close (Item.Device);
+   end Close_Device;
+
    -----------
    -- Close --
    -----------
 
    procedure Close (Item : in out Pair) is
    begin
-      Hostkit.Descriptors.Close (Item.Controller);
+      --  Both of the parent's sides are the one descriptor here, so closing is
+      --  one close and then a hand-back that says so.
+      Hostkit.Descriptors.Close (Item.From_Child);
+      Item.To_Child := Hostkit.Descriptors.Invalid;
       Hostkit.Descriptors.Close (Item.Device);
    end Close;
 
@@ -157,7 +201,7 @@ package body Hostkit.Pty is
       --  Set on the controller. Setting it there is what makes the host raise
       --  the window-change signal on the far side, which is how the program
       --  under the pseudo-terminal learns to redraw.
-      return Hostkit.Terminal_Control.Set_Size (Item.Controller, To);
+      return Hostkit.Terminal_Control.Set_Size (Item.From_Child, To);
    end Set_Size;
 
 end Hostkit.Pty;

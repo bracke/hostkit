@@ -91,6 +91,36 @@ package Hostkit.Spawn is
       Group_Join);
 
    --  How to start a child.
+   --  A console for the child to be attached to, where the host has such a
+   --  thing to attach.
+   --
+   --  Opaque, and made only by Hostkit.Pty: what it holds is a host's own
+   --  notion of a console and is meaningless to a caller. Windows is the host
+   --  that has one -- a pseudo-console is given to a child through a
+   --  process-thread attribute rather than as descriptors it inherits, which is
+   --  why this is not one of the three streams above. Everywhere else it stays
+   --  No_Console and nothing reads it.
+   type Console_Attachment is private;
+
+   --  No console: what an ordinary child gets, on every host.
+   No_Console : constant Console_Attachment;
+
+   --  @param Item A console attachment.
+   --  @return True when it names one.
+   function Is_Attached (Item : Console_Attachment) return Boolean;
+
+   --  Build one from a host handle. For Hostkit.Pty, which is the only thing
+   --  that has one to hand over.
+   --
+   --  @param Value The host's own value.
+   --  @return The attachment carrying it.
+   function Console_From_Native (Value : Long_Long_Integer)
+                                 return Console_Attachment;
+
+   --  @param Item An attachment.
+   --  @return The host's own value, for the body that has to pass it on.
+   function Native_Console (Item : Console_Attachment) return Long_Long_Integer;
+
    type Options is record
 
       --  Where to run it. The parent's directory when empty. Set in the child,
@@ -142,6 +172,15 @@ package Hostkit.Spawn is
       --  interruptible on one host and not another.
       Controlling_Terminal : Hostkit.Descriptors.Descriptor :=
         Hostkit.Descriptors.Invalid;
+
+      --  A console the child is to be attached to, from Hostkit.Pty.Attach.
+      --
+      --  Where this is set the child is given that console rather than the
+      --  three streams above, because the host that has consoles gives them to
+      --  a child a different way. A host with no such notion ignores it, and a
+      --  caller that has one uses Hostkit.Pty.Attach rather than setting this
+      --  by hand.
+      Console : Console_Attachment := No_Console;
 
       --  Put every signal disposition back to the host default before exec.
       --  See the header: the other choice is almost always a bug.
@@ -302,6 +341,23 @@ package Hostkit.Spawn is
       Result : out Status) return Boolean;
 
 private
+
+   --  A host handle, which is what every host that has consoles has. Zero is
+   --  none: no host hands out a console at address zero, and a default-built
+   --  Options must mean "no console" without anything having to say so.
+   type Console_Attachment is new Long_Long_Integer;
+
+   No_Console : constant Console_Attachment := 0;
+
+   function Is_Attached (Item : Console_Attachment) return Boolean
+   is (Item /= No_Console);
+
+   function Console_From_Native (Value : Long_Long_Integer)
+                                 return Console_Attachment
+   is (Console_Attachment (Value));
+
+   function Native_Console (Item : Console_Attachment) return Long_Long_Integer
+   is (Long_Long_Integer (Item));
 
    use type Interfaces.Integer_64;
 

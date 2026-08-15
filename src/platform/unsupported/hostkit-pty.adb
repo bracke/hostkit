@@ -10,8 +10,7 @@ package body Hostkit.Pty is
 
    function Open (Item : out Pair) return Boolean is
    begin
-      Item := (Controller => Hostkit.Descriptors.Invalid,
-               Device     => Hostkit.Descriptors.Invalid);
+      Item := (others => <>);
       return False;
    end Open;
 
@@ -21,9 +20,25 @@ package body Hostkit.Pty is
       return "";
    end Device_Name;
 
+   function Attach (Item : Pair; To : in out Hostkit.Spawn.Options)
+                    return Boolean
+   is
+      pragma Unreferenced (Item, To);
+   begin
+      --  Nothing to attach. Open refused, so there is no pair to have got here
+      --  with, and filling anything in would be inventing a terminal.
+      return False;
+   end Attach;
+
+   procedure Close_Device (Item : in out Pair) is
+   begin
+      Hostkit.Descriptors.Close (Item.Device);
+   end Close_Device;
+
    procedure Close (Item : in out Pair) is
    begin
-      Hostkit.Descriptors.Close (Item.Controller);
+      Hostkit.Descriptors.Close (Item.To_Child);
+      Hostkit.Descriptors.Close (Item.From_Child);
       Hostkit.Descriptors.Close (Item.Device);
    end Close;
 
