@@ -233,6 +233,21 @@ package Hostkit.Fs is
    --  shows the path to a person or hands it to a tool that does not.
    function Separator return Character;
 
+   --  The suffix this host supplies for itself when a program is named
+   --  without one.
+   --
+   --  "" on POSIX, where a program is its file name and nothing is added.
+   --  ".exe" on Windows, where the loader appends exactly that to a name with
+   --  no extension -- which is why `run ("git")` starts `git.exe` there and
+   --  why a caller offering a name to a user should take it off again.
+   --
+   --  Not the whole of PATHEXT. A `.bat` or a `.cmd` is run by the command
+   --  interpreter rather than by the loader, so its name has to be written
+   --  out; this is only the one suffix a name may leave off.
+   --
+   --  @return The suffix, with its dot, or "".
+   function Executable_Suffix return String;
+
    --  The character this host writes between the entries of a search path.
    --
    --  A colon on POSIX and a semicolon on Windows, where a colon is part of a

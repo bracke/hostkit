@@ -802,4 +802,13 @@ package body Hostkit.Fs is
       return ':';
    end Search_Path_Delimiter;
 
+   ------------------------
+   -- Executable_Suffix --
+   ------------------------
+
+   function Executable_Suffix return String is
+   begin
+      return "";
+   end Executable_Suffix;
+
 end Hostkit.Fs;
