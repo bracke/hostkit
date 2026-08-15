@@ -374,8 +374,9 @@ package body Hostkit.Spawn is
 
                   Extended : aliased Extended_Startup_Info;
 
-                  Console : aliased System.Address :=
-                    To_Address (Integer_Address (Native_Console (With_Options.Console)));
+                  Console : constant System.Address :=
+                    To_Address
+                      (Integer_Address (Native_Console (With_Options.Console)));
                begin
                   if Initialize_Attribute_List
                        (Room'Address, 1, 0, Needed'Access) = 0
@@ -383,11 +384,15 @@ package body Hostkit.Spawn is
                      return Spawn_Failed;
                   end if;
 
-                  --  The value is the console handle itself, passed by
-                  --  address and by size the way every attribute is.
+                  --  The console handle itself is the value, not a pointer to
+                  --  it. Most attributes take the address of the thing they
+                  --  are about; this one takes the handle, and passing its
+                  --  address instead is a call that succeeds and attaches the
+                  --  child to nothing -- which looks like a console that
+                  --  produces no output at all.
                   if Update_Attribute
                        (Room'Address, 0, Attribute_Pseudo_Console,
-                        Console'Address, System.Address'Size / 8,
+                        Console, System.Address'Size / 8,
                         System.Null_Address, System.Null_Address) = 0
                   then
                      Delete_Attribute_List (Room'Address);

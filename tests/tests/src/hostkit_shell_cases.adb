@@ -1355,6 +1355,11 @@ package body Hostkit_Shell_Cases is
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
 
+      if not Has_A_Device_Side (Item) then
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
+
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Before),
               "could not save the terminal settings");
       Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
