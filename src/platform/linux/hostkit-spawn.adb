@@ -69,6 +69,25 @@ package body Hostkit.Spawn is
    function Setsid return C_Int
      with Import => True, Convention => C, External_Name => "setsid";
 
+   --  A signal *mask* is not a disposition, and fork and exec both keep it. A
+   --  child that inherits a blocked SIGINT cannot be interrupted however its
+   --  dispositions were reset -- and a caller that uses Ada tasking has a mask
+   --  it never chose, because the run-time blocks signals in the threads it
+   --  makes. So the mask is emptied beside the dispositions.
+   --
+   --  sigset_t is 128 bytes here and 4 on macOS; a buffer of the larger size
+   --  is safe on both, and sigemptyset fills whichever the host uses.
+   type Signal_Set is array (1 .. 128) of Interfaces.Unsigned_8
+     with Convention => C;
+
+   SIG_SETMASK : constant C_Int := 2;
+
+   function Sigemptyset (Set : System.Address) return C_Int
+     with Import => True, Convention => C, External_Name => "sigemptyset";
+   function Sigprocmask
+     (How : C_Int; Set : System.Address; Old : System.Address) return C_Int
+     with Import => True, Convention => C, External_Name => "sigprocmask";
+
    --  TIOCSCTTY, Linux: "make this terminal my controlling terminal". A small
    --  number here, where BSD encodes the direction and size into it -- which is
    --  why this constant belongs to this body and cannot be shared with macOS.
@@ -393,9 +412,21 @@ package body Hostkit.Spawn is
             end;
          end if;
 
-         --  Signal dispositions back to the host default. A child that inherits
-         --  the shell's ignored SIGINT is a foreground program Ctrl-C cannot
-         --  stop; see the package header.
+         --  Signal dispositions back to the host default, and the mask with
+         --  them. A child that inherits the shell's ignored SIGINT is a
+         --  foreground program Ctrl-C cannot stop; one that inherits a blocked
+         --  SIGINT is the same program with no way to tell.
+         if With_Options.Reset_Signals then
+            declare
+               Empty   : aliased Signal_Set := [others => 0];
+               Ignored : C_Int;
+            begin
+               Ignored := Sigemptyset (Empty'Address);
+               Ignored := Sigprocmask
+                 (SIG_SETMASK, Empty'Address, System.Null_Address);
+            end;
+         end if;
+
          if With_Options.Reset_Signals then
             for Item in Hostkit.Signals.Signal loop
                if Item /= Hostkit.Signals.Signal_Kill
