@@ -181,22 +181,22 @@ package Hostkit.Spawn is
       --  caller that has one uses Hostkit.Pty.Attach rather than setting this
       --  by hand.
       --
-      --  **One thing a caller has to know.** A child's standard handles are
-      --  copied from its parent's before anything else decides them, and
-      --  attaching to a console fills in only the ones that are not already
-      --  there -- so a parent whose own output is a pipe would hand the child
-      --  that pipe, and the child would write into the parent's output while
-      --  the console it was given sat untouched. Start therefore clears this
-      --  process's own standard handles for the length of the one call that
-      --  creates the child, and puts them back immediately.
+      --  **What this quietly prevents.** A child's standard handles are copied
+      --  from its parent's before anything else decides them, and attaching to
+      --  a console fills in only the ones that are not already there -- so a
+      --  parent whose own output is a pipe would hand the child that pipe, and
+      --  the child would write into the parent's output while the console it
+      --  was given sat untouched. Start says the child's three handles are
+      --  nothing, which is what stops the copy and leaves the console to fill
+      --  the gap.
       --
-      --  Two spawns cannot overlap that window; a *write* can. For the length
-      --  of one process creation this process has no standard output, and a
-      --  thread writing to it then writes to nothing. There is no way to have
-      --  both -- the hand-over is by inheritance and inheritance is
-      --  process-wide -- so a program that starts children on consoles from
-      --  one thread while another writes to its own output should serialise
-      --  the two itself. Nothing here can do it for them.
+      --  Nothing of this process is disturbed by that. An earlier version took
+      --  this process's own standard handles away for the length of the call
+      --  and put them back afterwards, which worked and left a window in which
+      --  this process had no output of its own -- a thread writing during it
+      --  wrote to nothing, and no lock could have helped, since the hand-over
+      --  is by inheritance and inheritance is process-wide. Saying the child's
+      --  handles rather than hiding the parent's has no such window.
       Console : Console_Attachment := No_Console;
 
       --  Put every signal disposition back to the host default before exec.

@@ -165,71 +165,6 @@ package body Hostkit.Spawn is
    function Get_Last_Error return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
-   Std_Input_Handle  : constant C_DWord := 16#FFFF_FFF6#;
-   Std_Output_Handle : constant C_DWord := 16#FFFF_FFF5#;
-   Std_Error_Handle  : constant C_DWord := 16#FFFF_FFF4#;
-
-   function Get_Std_Handle (Which : C_DWord) return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
-
-   --  One spawn at a time through the window below.
-   --
-   --  A critical section rather than a protected object: this is the one body
-   --  that needs it, and a protected object would put the tasking run-time into
-   --  every program that links this crate on this host, whether or not it has
-   --  a task in it. A critical section is what the host offers for exactly
-   --  this, costs nothing when uncontended, and is what the rest of this file
-   --  would reach for.
-   --
-   --  It does not make the window safe against a *writer*. Nothing can: for
-   --  the length of one CreateProcess call this process has no standard
-   --  handles, and a thread writing to its own output then writes to nothing.
-   --  What it does is keep two console spawns from taking each other's handles
-   --  away, which is the failure a caller can neither see nor prevent.
-   type Critical_Section is array (1 .. 40) of System.Storage_Elements.Storage_Element
-     with Alignment => 8;
-
-   Spawning : aliased Critical_Section := [others => 0];
-
-   procedure Initialize_Critical_Section (Item : System.Address)
-     with Import => True, Convention => Stdcall,
-          External_Name => "InitializeCriticalSection";
-
-   procedure Enter_Critical_Section (Item : System.Address)
-     with Import => True, Convention => Stdcall,
-          External_Name => "EnterCriticalSection";
-
-   procedure Leave_Critical_Section (Item : System.Address)
-     with Import => True, Convention => Stdcall,
-          External_Name => "LeaveCriticalSection";
-
-   --  Initialised once, before anything can spawn: a section entered before it
-   --  is initialised is undefined, and there is no moment here at which two
-   --  callers could race to initialise it.
-   Ready : Boolean := False;
-
-   procedure Take_The_Spawn_Lock;
-   procedure Release_The_Spawn_Lock;
-
-   procedure Take_The_Spawn_Lock is
-   begin
-      if not Ready then
-         Initialize_Critical_Section (Spawning'Address);
-         Ready := True;
-      end if;
-
-      Enter_Critical_Section (Spawning'Address);
-   end Take_The_Spawn_Lock;
-
-   procedure Release_The_Spawn_Lock is
-   begin
-      Leave_Critical_Section (Spawning'Address);
-   end Release_The_Spawn_Lock;
-
-   function Set_Std_Handle
-     (Which : C_DWord; Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "SetStdHandle";
-
    function Wide (Value : String) return Wide_String
    is (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
 
@@ -356,11 +291,24 @@ package body Hostkit.Spawn is
       --  handles from here or none of them, so any stream the caller left
       --  Invalid is filled in with this process's own.
       if Is_Attached (With_Options.Console) then
-         --  Except on a pseudo-console, where the console host gives the child
-         --  its handles and inherited ones would be a second answer to the
-         --  same question. Hostkit.Pty.Attach leaves all three Invalid for
-         --  exactly this reason, and this says so rather than relying on it.
-         null;
+         --  A pseudo-console gives the child its handles, and what must not
+         --  happen is the child keeping this process's: a child's standard
+         --  handles are copied from its parent's before anything else decides
+         --  them, and attaching to a console fills in only what is not already
+         --  there. A parent whose own output is a pipe -- every parent under a
+         --  build service -- would hand the child that pipe, and the child
+         --  would write into it while the console it was given sat untouched.
+         --
+         --  Said here as three handles of nothing, which is what stops the
+         --  copy. The other way is to take this process's own handles away for
+         --  the length of the call and put them back afterwards, and that
+         --  works too; what it also has is a window in which this process has
+         --  no output of its own, and a thread writing during that window
+         --  writes to nothing. This has no window.
+         Startup.Flags := Startup.Flags + Startf_Use_Std_Handles;
+         Startup.Std_Input := System.Null_Address;
+         Startup.Std_Output := System.Null_Address;
+         Startup.Std_Error := System.Null_Address;
 
       elsif With_Options.Input /= Hostkit.Descriptors.Invalid
         or else With_Options.Output /= Hostkit.Descriptors.Invalid
@@ -469,71 +417,27 @@ package body Hostkit.Spawn is
                     C_DWord (Extended_Startup_Info'Size / 8);
                   Extended.Attribute_List := Room'Address;
 
-                  --  This process's own standard handles, put aside for the
-                  --  length of the call and put back after it.
-                  --
-                  --  A child's standard handles are copied from its parent's
-                  --  before anything else decides them, and attaching to a
-                  --  console fills in only the ones that are not already
-                  --  there. A parent whose own output is a pipe -- which is
-                  --  every parent under a build service -- therefore hands the
-                  --  child that pipe, and the child writes its output into the
-                  --  parent's rather than into the console it was given: the
-                  --  console is attached, is never written to, and the text
-                  --  turns up in the log of whatever started the parent. That
-                  --  is exactly what it did before this.
-                  --
-                  --  Cleared for the call, so there is nothing to copy and the
-                  --  console fills all three in. Restored immediately: this
-                  --  process wants its own output back.
-                  Take_The_Spawn_Lock;
+                  Started := Create_Process_Extended
+                    (Application_Name   => System.Null_Address,
+                     Command_Line       => Wide_Command'Address,
+                     Process_Attributes => System.Null_Address,
+                     Thread_Attributes  => System.Null_Address,
 
-                  declare
-                     Kept_Input  : constant System.Address :=
-                       Get_Std_Handle (Std_Input_Handle);
-                     Kept_Output : constant System.Address :=
-                       Get_Std_Handle (Std_Output_Handle);
-                     Kept_Error  : constant System.Address :=
-                       Get_Std_Handle (Std_Error_Handle);
-
-                     Ignored : Interfaces.C.int;
-                  begin
-                     Ignored := Set_Std_Handle
-                                  (Std_Input_Handle, System.Null_Address);
-                     Ignored := Set_Std_Handle
-                                  (Std_Output_Handle, System.Null_Address);
-                     Ignored := Set_Std_Handle
-                                  (Std_Error_Handle, System.Null_Address);
-
-                     Started := Create_Process_Extended
-                          (Application_Name   => System.Null_Address,
-                        Command_Line       => Wide_Command'Address,
-                        Process_Attributes => System.Null_Address,
-                        Thread_Attributes  => System.Null_Address,
-
-                           --  Nothing of this crate's travels this way: every
-                           --  descriptor it makes is non-inheritable until a
-                           --  caller opts one in, and the console's own pipe ends
-                           --  were closed here the moment the console took its
-                           --  copies.
-                           Inherit_Handles    => 1,
-                        Creation_Flags     => Flags + Extended_Startup_Info_Present,
-                        Environment        =>
-                          (if Use_Environment then Wide_Environment'Address
-                           else System.Null_Address),
-                        Current_Directory  =>
-                          (if With_Options.Working_Directory = Null_Unbounded_String
-                           then System.Null_Address
-                           else Wide_Dir'Address),
-                        Startup            => Extended'Access,
-                        Information        => Information'Access);
-
-                     Ignored := Set_Std_Handle (Std_Input_Handle, Kept_Input);
-                     Ignored := Set_Std_Handle (Std_Output_Handle, Kept_Output);
-                     Ignored := Set_Std_Handle (Std_Error_Handle, Kept_Error);
-                  end;
-
-                  Release_The_Spawn_Lock;
+                     --  Nothing of this crate's travels this way: every
+                     --  descriptor it makes is non-inheritable until a caller
+                     --  opts one in, and the console's own pipe ends were
+                     --  closed here the moment the console took its copies.
+                     Inherit_Handles    => 1,
+                     Creation_Flags     => Flags + Extended_Startup_Info_Present,
+                     Environment        =>
+                       (if Use_Environment then Wide_Environment'Address
+                        else System.Null_Address),
+                     Current_Directory  =>
+                       (if With_Options.Working_Directory = Null_Unbounded_String
+                        then System.Null_Address
+                        else Wide_Dir'Address),
+                     Startup            => Extended'Access,
+                     Information        => Information'Access);
 
                   Delete_Attribute_List (Room'Address);
 
