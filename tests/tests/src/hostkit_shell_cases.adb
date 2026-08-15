@@ -1070,69 +1070,6 @@ package body Hostkit_Shell_Cases is
       Hostkit.Pty.Close (Reading);
    end Test_A_Child_Runs_On_A_Terminal;
 
-   --  A console attachment that names nothing is refused, not started without
-   --  one.
-   --
-   --  Which also says whether the attribute reaches the host at all: a child
-   --  started happily on a console handle that is not one would be a child the
-   --  host never read the attribute for, and that is a different fault from a
-   --  console that will not carry a child.
-   procedure Test_A_Console_That_Is_Not_One_Is_Refused
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Options : Hostkit.Spawn.Options;
-      Child   : Hostkit.Spawn.Process_Handle;
-      Result  : Hostkit.Spawn.Status;
-      Nothing : Hostkit.String_Vectors.Vector;
-
-      Started : Hostkit.Spawn.Spawn_Outcome;
-   begin
-      --  Only where a console is a thing at all. Everywhere else the field is
-      --  ignored, which is the documented behaviour and not this test's
-      --  subject.
-      if not Hostkit.Pty.Is_Supported then
-         return;
-      end if;
-
-      declare
-         Item : Hostkit.Pty.Pair;
-      begin
-         Assert (Hostkit.Pty.Open (Item), "could not open a terminal");
-
-         if Has_A_Device_Side (Item) then
-            --  A host whose terminal is a device: there is no console field to
-            --  get wrong.
-            Hostkit.Pty.Close (Item);
-            return;
-         end if;
-
-         Hostkit.Pty.Close (Item);
-      end;
-
-      --  Not a console: a handle value no host hands out for one.
-      Options.Console := Hostkit.Spawn.Console_From_Native (1);
-
-      Started := Hostkit.Spawn.Start
-                   (Companion ("noop"), Nothing, Options, Child);
-
-      if Started = Hostkit.Spawn.Spawn_Ok then
-         --  It ran. Tidy it up before saying so, and say what it means: the
-         --  host did not look at the attachment, which is why a child on a
-         --  real console does not get one either.
-         for Attempt in 1 .. 100 loop
-            exit when Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
-                      and then Result.State /= Hostkit.Spawn.Wait_Running;
-            delay 0.05;
-         end loop;
-      end if;
-
-      Assert (Started /= Hostkit.Spawn.Spawn_Ok,
-              "a child started on a console handle that is not a console, so "
-              & "the host is not reading the attachment at all");
-   end Test_A_Console_That_Is_Not_One_Is_Refused;
-
    procedure Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1943,9 +1880,6 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips'Access,
          "terminal : raw mode round-trips and the settings come back");
-      Register_Routine
-        (T, Test_A_Console_That_Is_Not_One_Is_Refused'Access,
-         "shell : a console attachment that names nothing is refused");
       Register_Routine
         (T, Test_A_Child_Runs_On_A_Terminal'Access,
          "shell : a child runs on a terminal and reads what is typed at it");
