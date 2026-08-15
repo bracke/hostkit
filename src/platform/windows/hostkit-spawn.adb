@@ -172,6 +172,60 @@ package body Hostkit.Spawn is
    function Get_Std_Handle (Which : C_DWord) return System.Address
      with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
 
+   --  One spawn at a time through the window below.
+   --
+   --  A critical section rather than a protected object: this is the one body
+   --  that needs it, and a protected object would put the tasking run-time into
+   --  every program that links this crate on this host, whether or not it has
+   --  a task in it. A critical section is what the host offers for exactly
+   --  this, costs nothing when uncontended, and is what the rest of this file
+   --  would reach for.
+   --
+   --  It does not make the window safe against a *writer*. Nothing can: for
+   --  the length of one CreateProcess call this process has no standard
+   --  handles, and a thread writing to its own output then writes to nothing.
+   --  What it does is keep two console spawns from taking each other's handles
+   --  away, which is the failure a caller can neither see nor prevent.
+   type Critical_Section is array (1 .. 40) of System.Storage_Elements.Storage_Element
+     with Alignment => 8;
+
+   Spawning : aliased Critical_Section := [others => 0];
+
+   procedure Initialize_Critical_Section (Item : System.Address)
+     with Import => True, Convention => Stdcall,
+          External_Name => "InitializeCriticalSection";
+
+   procedure Enter_Critical_Section (Item : System.Address)
+     with Import => True, Convention => Stdcall,
+          External_Name => "EnterCriticalSection";
+
+   procedure Leave_Critical_Section (Item : System.Address)
+     with Import => True, Convention => Stdcall,
+          External_Name => "LeaveCriticalSection";
+
+   --  Initialised once, before anything can spawn: a section entered before it
+   --  is initialised is undefined, and there is no moment here at which two
+   --  callers could race to initialise it.
+   Ready : Boolean := False;
+
+   procedure Take_The_Spawn_Lock;
+   procedure Release_The_Spawn_Lock;
+
+   procedure Take_The_Spawn_Lock is
+   begin
+      if not Ready then
+         Initialize_Critical_Section (Spawning'Address);
+         Ready := True;
+      end if;
+
+      Enter_Critical_Section (Spawning'Address);
+   end Take_The_Spawn_Lock;
+
+   procedure Release_The_Spawn_Lock is
+   begin
+      Leave_Critical_Section (Spawning'Address);
+   end Release_The_Spawn_Lock;
+
    function Set_Std_Handle
      (Which : C_DWord; Handle : System.Address) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "SetStdHandle";
@@ -432,6 +486,8 @@ package body Hostkit.Spawn is
                   --  Cleared for the call, so there is nothing to copy and the
                   --  console fills all three in. Restored immediately: this
                   --  process wants its own output back.
+                  Take_The_Spawn_Lock;
+
                   declare
                      Kept_Input  : constant System.Address :=
                        Get_Std_Handle (Std_Input_Handle);
@@ -476,6 +532,8 @@ package body Hostkit.Spawn is
                      Ignored := Set_Std_Handle (Std_Output_Handle, Kept_Output);
                      Ignored := Set_Std_Handle (Std_Error_Handle, Kept_Error);
                   end;
+
+                  Release_The_Spawn_Lock;
 
                   Delete_Attribute_List (Room'Address);
 
