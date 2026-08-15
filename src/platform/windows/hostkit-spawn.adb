@@ -37,6 +37,10 @@ package body Hostkit.Spawn is
    --  contract with the OS either way.
    Attribute_Pseudo_Console : constant := 16#0002_0016#;
 
+   --  Started without the console this process has, so that the one it is
+   --  given is the only one it can have.
+   Detached_Process : constant C_DWord := 16#0000_0008#;
+
    --  CreateProcess failure codes worth telling apart, so that a shell can say
    --  which of the four mistakes a user made rather than "it did not run".
    Error_File_Not_Found    : constant C_DWord := 2;
@@ -423,7 +427,14 @@ package body Hostkit.Spawn is
                      --  and the console's own pipe ends were closed here the
                      --  moment the console took its copies.
                      Inherit_Handles    => 1,
-                     Creation_Flags     => Flags + Extended_Startup_Info_Present,
+                     --  Detached as well as attached. A child created from a
+                     --  process that has a console inherits that console
+                     --  unless it is told not to, and a child with two answers
+                     --  to "what is my console" uses the inherited one: it
+                     --  writes into the parent's and never touches the one it
+                     --  was given.
+                     Creation_Flags     =>
+                       Flags + Extended_Startup_Info_Present + Detached_Process,
                      Environment        =>
                        (if Use_Environment then Wide_Environment'Address
                         else System.Null_Address),
