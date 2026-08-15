@@ -110,6 +110,28 @@ package Hostkit.Descriptors is
    --          express it. False is a refusal, not a failure to be retried.
    function Set_Non_Blocking (Item : Descriptor; Non_Blocking : Boolean) return Boolean;
 
+   --  Wait until reading would not have to wait, or a deadline passes.
+   --
+   --  What a caller does where Set_Non_Blocking refuses -- which is Windows,
+   --  where an anonymous pipe has no non-blocking mode and a read of an empty
+   --  one waits for ever. A harness driving a child through a terminal needs
+   --  exactly this: read what is there, and come back rather than hang when
+   --  there is nothing.
+   --
+   --  Ready includes *the writer having closed*. A read then returns
+   --  end-of-file at once, which is not waiting; a caller that treated the two
+   --  as different would loop until its deadline on a child that had already
+   --  gone.
+   --
+   --  @param Item Descriptor to watch.
+   --  @param Timeout_Ms How long to wait. Zero asks and returns; a negative
+   --         value waits for as long as it takes.
+   --  @return True when a read would not wait. False on a timeout, and on a
+   --          host that cannot answer -- which is a refusal, and a caller that
+   --          reads anyway may block.
+   function Wait_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Boolean;
+
    --  What became of a read.
    type Transfer_Outcome is
      ( --  Bytes were transferred; see the count.

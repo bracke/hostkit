@@ -272,6 +272,69 @@ package body Hostkit.Descriptors is
       return False;
    end Set_Non_Blocking;
 
+   -------------------
+   -- Wait_Readable --
+   -------------------
+
+   --  Asked of the pipe directly, because this host cannot poll one: poll and
+   --  select are for sockets here. PeekNamedPipe says how many bytes are
+   --  waiting without taking them, in a short loop until there are some or the
+   --  deadline passes.
+   function Wait_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   is
+      function Peek_Named_Pipe
+        (Pipe            : System.Address;
+         Buffer          : System.Address;
+         Buffer_Size     : C_DWord;
+         Bytes_Read      : access C_DWord;
+         Total_Available : access C_DWord;
+         Bytes_Left      : access C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall,
+             External_Name => "PeekNamedPipe";
+
+      procedure Sleep (Milliseconds : C_DWord)
+        with Import => True, Convention => Stdcall, External_Name => "Sleep";
+
+      Available : aliased C_DWord := 0;
+      Waited    : Integer := 0;
+
+      --  Ten milliseconds between asks. Short enough that a caller waiting
+      --  fifty does not overshoot by much, long enough not to spin a core.
+      Slice : constant Integer := 10;
+   begin
+      if Item = Invalid then
+         return False;
+      end if;
+
+      loop
+         Available := 0;
+
+         if Peek_Named_Pipe
+              (To_Handle (Item), System.Null_Address, 0, null,
+               Available'Access, null) = 0
+         then
+            --  The pipe is gone, which is a readable event rather than a wait
+            --  error: the caller's next read returns end-of-file at once. It
+            --  is also what a handle that is not a pipe answers, and a caller
+            --  told "not ready" about one of those would wait out its whole
+            --  deadline for no reason.
+            return True;
+         end if;
+
+         if Available > 0 then
+            return True;
+         end if;
+
+         exit when Timeout_Ms >= 0 and then Waited >= Timeout_Ms;
+
+         Sleep (C_DWord (Slice));
+         Waited := Waited + Slice;
+      end loop;
+
+      return False;
+   end Wait_Readable;
+
    ----------
    -- Read --
    ----------

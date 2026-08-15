@@ -41,6 +41,17 @@ package body Hostkit.Descriptors is
       return False;
    end Set_Non_Blocking;
 
+   function Wait_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   is
+      pragma Unreferenced (Item, Timeout_Ms);
+   begin
+      --  A host this build does not know cannot say. False is the refusal, and
+      --  a caller that reads anyway may wait -- which is why it is documented
+      --  as a refusal rather than as "not ready yet".
+      return False;
+   end Wait_Readable;
+
    function Read
      (Item : Descriptor;
       Into : out Ada.Streams.Stream_Element_Array;

@@ -835,23 +835,26 @@ package body Hostkit_Shell_Cases is
       Assert (D.Write (Terminal.To_Child, Typed, Last) = D.Transfer_Ok,
               "could not type into the terminal");
 
+      --  Waiting before reading, rather than reading and hoping. A read of an
+      --  empty pipe waits for ever on the host with no non-blocking mode, and
+      --  a test that hangs is a job that reports nothing.
       for Attempt in 1 .. 200 loop
-         declare
-            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
-            Taken  : Ada.Streams.Stream_Element_Offset;
-         begin
-            if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
-              and then Taken >= Buffer'First
-            then
-               for Index in Buffer'First .. Taken loop
-                  Append (Seen, Character'Val (Natural (Buffer (Index))));
-               end loop;
-            end if;
-         end;
+         if D.Wait_Readable (Terminal.From_Child, 50) then
+            declare
+               Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
+               Taken  : Ada.Streams.Stream_Element_Offset;
+            begin
+               if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
+                 and then Taken >= Buffer'First
+               then
+                  for Index in Buffer'First .. Taken loop
+                     Append (Seen, Character'Val (Natural (Buffer (Index))));
+                  end loop;
+               end if;
+            end;
+         end if;
 
          exit when Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0;
-
-         delay 0.05;
       end loop;
 
       Assert (Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0,
@@ -875,6 +878,21 @@ package body Hostkit_Shell_Cases is
 
          Assert (Ended, "the child never finished after reading its line");
       end;
+
+      --  Drained before closing. A console host with output nobody has taken
+      --  can keep the close waiting, and the same drain costs nothing on a
+      --  host where the child's side is already gone.
+      for Attempt in 1 .. 20 loop
+         exit when not D.Wait_Readable (Terminal.From_Child, 10);
+
+         declare
+            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
+            Taken  : Ada.Streams.Stream_Element_Offset;
+         begin
+            exit when D.Read (Terminal.From_Child, Buffer, Taken)
+                      /= D.Transfer_Ok;
+         end;
+      end loop;
 
       Hostkit.Pty.Close (Terminal);
    end Test_A_Child_Runs_On_A_Terminal;

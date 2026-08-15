@@ -258,6 +258,53 @@ package body Hostkit.Descriptors is
       return C_Fcntl (To_Fd (Item), F_Setfl, Flags) = 0;
    end Set_Non_Blocking;
 
+   --------------------
+   -- Wait_Readable --
+   --------------------
+
+   function Wait_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   is
+      type Poll_Entry is record
+         Fd      : C_Int := -1;
+         Events  : Interfaces.C.short := 0;
+         Revents : Interfaces.C.short := 0;
+      end record
+        with Convention => C;
+
+      Poll_In : constant Interfaces.C.short := 1;
+
+      function C_Poll
+        (Entries : access Poll_Entry;
+         Count   : Interfaces.C.unsigned_long;
+         Timeout : C_Int) return C_Int
+        with Import => True, Convention => C, External_Name => "poll";
+
+      Watched : aliased Poll_Entry;
+      Answer  : C_Int;
+   begin
+      if Item = Invalid then
+         return False;
+      end if;
+
+      Watched.Fd := C_Int (Native_Value (Item));
+      Watched.Events := Poll_In;
+
+      loop
+         Answer := C_Poll (Watched'Access, 1, C_Int (Timeout_Ms));
+
+         --  Interrupted before anything happened. Asked again rather than
+         --  reported as a timeout: a signal arriving is not an answer to the
+         --  question, and a caller told "not ready" would spin.
+         exit when Answer >= 0 or else Errno /= E_Intr;
+      end loop;
+
+      --  Any answer at all -- readable, hung up, or an error on the
+      --  descriptor -- means a read returns rather than waits, which is the
+      --  question that was asked.
+      return Answer > 0;
+   end Wait_Readable;
+
    ----------
    -- Read --
    ----------
