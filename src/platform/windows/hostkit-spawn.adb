@@ -37,10 +37,6 @@ package body Hostkit.Spawn is
    --  contract with the OS either way.
    Attribute_Pseudo_Console : constant := 16#0002_0016#;
 
-   --  Started without the console this process has, so that the one it is
-   --  given is the only one it can have.
-   Detached_Process : constant C_DWord := 16#0000_0008#;
-
    --  CreateProcess failure codes worth telling apart, so that a shell can say
    --  which of the four mistakes a user made rather than "it did not run".
    Error_File_Not_Found    : constant C_DWord := 2;
@@ -168,6 +164,17 @@ package body Hostkit.Spawn is
 
    function Get_Last_Error return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
+
+   Std_Input_Handle  : constant C_DWord := 16#FFFF_FFF6#;
+   Std_Output_Handle : constant C_DWord := 16#FFFF_FFF5#;
+   Std_Error_Handle  : constant C_DWord := 16#FFFF_FFF4#;
+
+   function Get_Std_Handle (Which : C_DWord) return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
+
+   function Set_Std_Handle
+     (Which : C_DWord; Handle : System.Address) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "SetStdHandle";
 
    function Wide (Value : String) return Wide_String
    is (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
@@ -408,42 +415,67 @@ package body Hostkit.Spawn is
                     C_DWord (Extended_Startup_Info'Size / 8);
                   Extended.Attribute_List := Room'Address;
 
-                  Started := Create_Process_Extended
-                    (Application_Name   => System.Null_Address,
-                     Command_Line       => Wide_Command'Address,
-                     Process_Attributes => System.Null_Address,
-                     Thread_Attributes  => System.Null_Address,
+                  --  This process's own standard handles, put aside for the
+                  --  length of the call and put back after it.
+                  --
+                  --  A child's standard handles are copied from its parent's
+                  --  before anything else decides them, and attaching to a
+                  --  console fills in only the ones that are not already
+                  --  there. A parent whose own output is a pipe -- which is
+                  --  every parent under a build service -- therefore hands the
+                  --  child that pipe, and the child writes its output into the
+                  --  parent's rather than into the console it was given: the
+                  --  console is attached, is never written to, and the text
+                  --  turns up in the log of whatever started the parent. That
+                  --  is exactly what it did before this.
+                  --
+                  --  Cleared for the call, so there is nothing to copy and the
+                  --  console fills all three in. Restored immediately: this
+                  --  process wants its own output back.
+                  declare
+                     Kept_Input  : constant System.Address :=
+                       Get_Std_Handle (Std_Input_Handle);
+                     Kept_Output : constant System.Address :=
+                       Get_Std_Handle (Std_Output_Handle);
+                     Kept_Error  : constant System.Address :=
+                       Get_Std_Handle (Std_Error_Handle);
 
-                     --  True, as on the ordinary path. A child attached to a
-                     --  pseudo-console is given the console's handles by the
-                     --  host, and that hand-over goes through inheritance:
-                     --  created with it off, the child keeps the standard
-                     --  handles copied from this process instead -- which are
-                     --  valid, which is why it writes its output into the
-                     --  parent's own and reads end-of-file from the parent's
-                     --  input, and never touches the console at all. Nothing
-                     --  of this crate's leaks that way: every descriptor it
-                     --  makes is non-inheritable until a caller opts one in,
-                     --  and the console's own pipe ends were closed here the
-                     --  moment the console took its copies.
-                     Inherit_Handles    => 1,
-                     --  Detached as well as attached. A child created from a
-                     --  process that has a console inherits that console
-                     --  unless it is told not to, and a child with two answers
-                     --  to "what is my console" uses the inherited one: it
-                     --  writes into the parent's and never touches the one it
-                     --  was given.
-                     Creation_Flags     =>
-                       Flags + Extended_Startup_Info_Present + Detached_Process,
-                     Environment        =>
-                       (if Use_Environment then Wide_Environment'Address
-                        else System.Null_Address),
-                     Current_Directory  =>
-                       (if With_Options.Working_Directory = Null_Unbounded_String
-                        then System.Null_Address
-                        else Wide_Dir'Address),
-                     Startup            => Extended'Access,
-                     Information        => Information'Access);
+                     Ignored : Interfaces.C.int;
+                  begin
+                     Ignored := Set_Std_Handle
+                                  (Std_Input_Handle, System.Null_Address);
+                     Ignored := Set_Std_Handle
+                                  (Std_Output_Handle, System.Null_Address);
+                     Ignored := Set_Std_Handle
+                                  (Std_Error_Handle, System.Null_Address);
+
+                     Started := Create_Process_Extended
+                          (Application_Name   => System.Null_Address,
+                        Command_Line       => Wide_Command'Address,
+                        Process_Attributes => System.Null_Address,
+                        Thread_Attributes  => System.Null_Address,
+
+                           --  Nothing of this crate's travels this way: every
+                           --  descriptor it makes is non-inheritable until a
+                           --  caller opts one in, and the console's own pipe ends
+                           --  were closed here the moment the console took its
+                           --  copies.
+                           Inherit_Handles    => 1,
+                        Creation_Flags     => Flags + Extended_Startup_Info_Present,
+                        Environment        =>
+                          (if Use_Environment then Wide_Environment'Address
+                           else System.Null_Address),
+                        Current_Directory  =>
+                          (if With_Options.Working_Directory = Null_Unbounded_String
+                           then System.Null_Address
+                           else Wide_Dir'Address),
+                        Startup            => Extended'Access,
+                        Information        => Information'Access);
+
+                     Ignored := Set_Std_Handle (Std_Input_Handle, Kept_Input);
+                     Ignored := Set_Std_Handle (Std_Output_Handle, Kept_Output);
+                     Ignored := Set_Std_Handle (Std_Error_Handle, Kept_Error);
+                  end;
 
                   Delete_Attribute_List (Room'Address);
 
