@@ -410,11 +410,19 @@ package body Hostkit.Spawn is
                      Process_Attributes => System.Null_Address,
                      Thread_Attributes  => System.Null_Address,
 
-                     --  False here, unlike the ordinary path: there are no
-                     --  handed-over descriptors to inherit, and a child of a
-                     --  pseudo-console that inherited the parent's would hold
-                     --  the pipe ends open after it exited.
-                     Inherit_Handles    => 0,
+                     --  True, as on the ordinary path. A child attached to a
+                     --  pseudo-console is given the console's handles by the
+                     --  host, and that hand-over goes through inheritance:
+                     --  created with it off, the child keeps the standard
+                     --  handles copied from this process instead -- which are
+                     --  valid, which is why it writes its output into the
+                     --  parent's own and reads end-of-file from the parent's
+                     --  input, and never touches the console at all. Nothing
+                     --  of this crate's leaks that way: every descriptor it
+                     --  makes is non-inheritable until a caller opts one in,
+                     --  and the console's own pipe ends were closed here the
+                     --  moment the console took its copies.
+                     Inherit_Handles    => 1,
                      Creation_Flags     => Flags + Extended_Startup_Info_Present,
                      Environment        =>
                        (if Use_Environment then Wide_Environment'Address
