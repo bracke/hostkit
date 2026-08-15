@@ -19,6 +19,10 @@ package body Hostkit.Spawn is
       return Integer (Item.Group);
    end Group_Id;
 
+   --  There is nothing to make a session on a host this build does not know,
+   --  and nothing to start in one either.
+   function Supports_Sessions return Boolean is (False);
+
    function Start
      (Program      : String;
       Arguments    : String_Vectors.Vector;

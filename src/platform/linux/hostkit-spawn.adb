@@ -66,6 +66,18 @@ package body Hostkit.Spawn is
      with Import => True, Convention => C, External_Name => "__errno_location";
    function Getpgrp return C_Int
      with Import => True, Convention => C, External_Name => "getpgrp";
+   function Setsid return C_Int
+     with Import => True, Convention => C, External_Name => "setsid";
+
+   --  TIOCSCTTY, Linux: "make this terminal my controlling terminal". A small
+   --  number here, where BSD encodes the direction and size into it -- which is
+   --  why this constant belongs to this body and cannot be shared with macOS.
+   TIOCSCTTY : constant Interfaces.C.unsigned_long := 16#0000_540E#;
+
+   function Ioctl
+     (Fd : C_Int; Request : Interfaces.C.unsigned_long; Argument : System.Address)
+      return C_Int
+     with Import => True, Convention => C, External_Name => "ioctl";
 
    --  extern char **environ. Assigning it replaces the environment the next
    --  exec will pass on, and -- because execvp reads PATH from it -- the PATH
@@ -200,6 +212,14 @@ package body Hostkit.Spawn is
       end case;
    end Outcome_For_Errno;
 
+   ------------------------
+   -- Supports_Sessions --
+   ------------------------
+
+   --  A POSIX session is what setsid makes, and every process that is not
+   --  already a session leader can make one.
+   function Supports_Sessions return Boolean is (True);
+
    -----------
    -- Start --
    -----------
@@ -278,20 +298,46 @@ package body Hostkit.Spawn is
          end Fail_Now;
 
       begin
-         --  The child half of the group race. See the package header.
-         case With_Options.Group is
-            when Group_Inherit =>
-               null;
-            when Group_New =>
-               Unused := Setpgid (0, 0);
-            when Group_Join =>
-               Unused := Setpgid (0, C_Int (With_Options.Join_Group));
-         end case;
+         --  A session of its own, and the terminal that goes with it, before
+         --  anything else: setsid leaves the child with no controlling
+         --  terminal at all, and the ioctl below is what gives it one. After
+         --  this the child leads its own group as well, so the group work
+         --  below is a confirmation rather than a change -- and tcsetpgrp
+         --  starts working, since the terminal is now the child's own.
+         if With_Options.Controlling_Terminal
+            /= Hostkit.Descriptors.Invalid
+         then
+            --  setsid makes a session, a process group and a session leader in
+            --  one step, and the ioctl gives that session the terminal. Its
+            --  own group is then the terminal's foreground group already, so
+            --  nothing below has to arrange either -- and nothing above may
+            --  have: setsid *fails* for a process that is already a group
+            --  leader, which is what the parent's half of the group race
+            --  would have made this child. That is why the parent leaves a
+            --  session alone.
+            Unused := Setsid;
+            Unused := Ioctl
+              (To_Native (With_Options.Controlling_Terminal),
+               TIOCSCTTY, System.Null_Address);
+
+         else
+            --  The child half of the group race. See the package header.
+            case With_Options.Group is
+               when Group_Inherit =>
+                  null;
+               when Group_New =>
+                  Unused := Setpgid (0, 0);
+               when Group_Join =>
+                  Unused := Setpgid (0, C_Int (With_Options.Join_Group));
+            end case;
+         end if;
 
          --  Take the terminal, if this is a foreground job. Also done by the
          --  caller, for the same race.
          if With_Options.Foreground_Terminal /= Hostkit.Descriptors.Invalid
            and then With_Options.Group /= Group_Inherit
+           and then With_Options.Controlling_Terminal
+                    = Hostkit.Descriptors.Invalid
          then
             declare
                Group : constant C_Int :=
@@ -418,20 +464,29 @@ package body Hostkit.Spawn is
       --  The parent.
       Hostkit.Descriptors.Close (Report.Write_End);
 
-      --  The parent half of the group race.
+      --  The parent half of the group race -- unless the child is making a
+      --  session, in which case there is no race and the parent must keep out
+      --  of it: a child that is already a group leader cannot call setsid.
       declare
          Unused : C_Int;
       begin
-         case With_Options.Group is
-            when Group_Inherit =>
-               Item.Group := -1;
-            when Group_New =>
-               Unused := Setpgid (Child, Child);
-               Item.Group := Interfaces.Integer_64 (Child);
-            when Group_Join =>
-               Unused := Setpgid (Child, C_Int (With_Options.Join_Group));
-               Item.Group := Interfaces.Integer_64 (With_Options.Join_Group);
-         end case;
+         if With_Options.Controlling_Terminal /= Hostkit.Descriptors.Invalid
+         then
+            Item.Group := Interfaces.Integer_64 (Child);
+
+         else
+            case With_Options.Group is
+               when Group_Inherit =>
+                  Item.Group := -1;
+               when Group_New =>
+                  Unused := Setpgid (Child, Child);
+                  Item.Group := Interfaces.Integer_64 (Child);
+               when Group_Join =>
+                  Unused := Setpgid (Child, C_Int (With_Options.Join_Group));
+                  Item.Group :=
+                    Interfaces.Integer_64 (With_Options.Join_Group);
+            end case;
+         end if;
       end;
 
       --  Did it exec, or did it fail? End-of-file means the pipe closed

@@ -652,6 +652,114 @@ package body Hostkit_Shell_Cases is
       Assert (not D.Is_Valid (Item.Device), "Close left the device valid");
    end Test_A_Pseudo_Terminal_Is_A_Terminal;
 
+   --  A child in a session of its own controls the terminal it was given, and
+   --  a Ctrl-C typed at that terminal reaches it.
+   --
+   --  This is the whole reason Options.Controlling_Terminal exists. Without
+   --  it, a program handed a pseudo-terminal as its streams does not control
+   --  it -- the terminal belongs to whoever opened it -- so the line
+   --  discipline has no foreground group of that terminal's session to signal,
+   --  and typing Ctrl-C does nothing at all. What proves the difference is the
+   --  child dying of an interrupt it could not otherwise have received.
+   procedure Test_A_Child_Can_Own_A_Terminal
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Terminal : Hostkit.Pty.Pair;
+      Options  : Hostkit.Spawn.Options;
+      Child    : Hostkit.Spawn.Process_Handle;
+      Result   : Hostkit.Spawn.Status;
+      Ended    : Boolean := False;
+
+      Ctrl_C : constant Ada.Streams.Stream_Element_Array :=
+        [1 => Ada.Streams.Stream_Element (3)];
+      Last   : Ada.Streams.Stream_Element_Offset;
+
+      --  The sleeper writes its lines and then refuses to finish, which is
+      --  what gives an interrupt something to interrupt.
+      Hang : Hostkit.String_Vectors.Vector;
+   begin
+      if not Hostkit.Pty.Is_Supported
+        or else not Hostkit.Spawn.Supports_Sessions
+        or else not Hostkit.Signals.Is_Supported
+                      (Hostkit.Signals.Signal_Interrupt)
+      then
+         --  Windows: no pseudo-terminals, no sessions of this shape and no
+         --  signals. Each is answered for separately because a host could
+         --  gain one without the others.
+         return;
+      end if;
+
+      Hang.Append (Ada.Strings.Unbounded.To_Unbounded_String ("--hang"));
+
+      Assert (Hostkit.Pty.Open (Terminal), "could not open a pseudo-terminal");
+      Assert (D.Set_Inheritable (Terminal.Device, True),
+              "could not hand the device side to a child");
+
+      Options.Input := Terminal.Device;
+      Options.Output := Terminal.Device;
+      Options.Error_Output := Terminal.Device;
+
+      --  Its own session, with this terminal as the controlling one, and its
+      --  own group in that terminal's foreground: the three together are what
+      --  a keystroke needs to become a signal.
+      Options.Controlling_Terminal := Terminal.Device;
+      Options.Group := Hostkit.Spawn.Group_New;
+      Options.Foreground_Terminal := Terminal.Device;
+
+      Assert (Hostkit.Spawn.Start
+                (Companion ("sleeper"), Hang, Options, Child)
+              = Hostkit.Spawn.Spawn_Ok,
+              "the sleeper would not start on a terminal");
+
+      D.Close (Terminal.Device);
+
+      --  It writes a line before it hangs, so waiting for that is waiting for
+      --  a child that has reached its own code rather than for a fixed time.
+      declare
+         Seen : Boolean := False;
+      begin
+         for Attempt in 1 .. 100 loop
+            declare
+               Buffer : Ada.Streams.Stream_Element_Array (1 .. 512);
+               Taken  : Ada.Streams.Stream_Element_Offset;
+            begin
+               if D.Read (Terminal.Controller, Buffer, Taken) = D.Transfer_Ok
+                 and then Taken >= Buffer'First
+               then
+                  Seen := True;
+                  exit;
+               end if;
+            end;
+
+            delay 0.05;
+         end loop;
+
+         Assert (Seen, "the child never wrote to the terminal it was given");
+      end;
+
+      Assert (D.Write (Terminal.Controller, Ctrl_C, Last) = D.Transfer_Ok,
+              "could not type into the terminal");
+
+      for Attempt in 1 .. 100 loop
+         if Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Poll, Result)
+           and then Result.State /= Hostkit.Spawn.Wait_Running
+         then
+            Ended := True;
+            exit;
+         end if;
+
+         delay 0.05;
+      end loop;
+
+      Assert (Ended and then Result.State = Hostkit.Spawn.Wait_Signalled,
+              "Ctrl-C at the terminal did not reach the child: "
+              & Hostkit.Spawn.Wait_State'Image (Result.State));
+
+      D.Close (Terminal.Controller);
+   end Test_A_Child_Can_Own_A_Terminal;
+
    procedure Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1395,6 +1503,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_A_Pseudo_Terminal_Is_A_Terminal'Access,
          "pty : both sides of a pseudo-terminal are terminals");
+      Register_Routine
+        (T, Test_A_Child_Can_Own_A_Terminal'Access,
+         "pty : a child in its own session is interrupted by Ctrl-C");
       Register_Routine
         (T, Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set'Access,
          "pty : a fresh pseudo-terminal has no size until it is given one");

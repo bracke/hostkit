@@ -51,6 +51,11 @@ interface. The question to ask of a new subprogram is:
 | `Hostkit.Native` | The parts of starting a program that only the host can answer (one body per OS) |
 | `Hostkit.Shell` | Running a command line through the host's shell |
 | `Hostkit.Local_Channel` | A byte channel to a local endpoint named by a path |
+| `Hostkit.Spawn` | Starting a program the way a shell has to: descriptors the caller made, a process group, a terminal's foreground, a session of its own, and no wait |
+| `Hostkit.Descriptors` | Pipes, duplication, inheritance, non-blocking mode, and reads that tell end-of-file from would-block |
+| `Hostkit.Pty` | Pseudo-terminals, for running a child under a terminal it did not inherit |
+| `Hostkit.Terminal_Control` | Terminal modes, window size, and the foreground process group |
+| `Hostkit.Locks` | Advisory file locks |
 
 The **specs (`src/hostkit*.ads`) are the reference documentation** — each subprogram is
 commented with what the host actually does, per OS. Start with `src/hostkit.ads`.

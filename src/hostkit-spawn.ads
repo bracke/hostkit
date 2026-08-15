@@ -116,6 +116,33 @@ package Hostkit.Spawn is
       Foreground_Terminal : Hostkit.Descriptors.Descriptor :=
         Hostkit.Descriptors.Invalid;
 
+      --  When valid, the child starts a session of its own and takes this
+      --  terminal as its controlling terminal.
+      --
+      --  A terminal turns Ctrl-C into a signal for the foreground process
+      --  group of the session that *controls* it. A child handed a
+      --  pseudo-terminal as its streams does not control it -- the terminal
+      --  belongs to whatever session opened it, usually the caller's, and the
+      --  caller's own controlling terminal is somewhere else entirely. So a
+      --  program run that way cannot be interrupted through the terminal it is
+      --  reading from, however its process group is arranged, and
+      --  Foreground_Terminal on its own does not help: tcsetpgrp on a terminal
+      --  the caller does not control is refused by the host.
+      --
+      --  What this is for is the program that runs another *under* a terminal
+      --  it made: a test harness, a terminal multiplexer, anything that has to
+      --  drive an interactive program the way a person would.
+      --
+      --  Not the default, and it should not be. A session leader starts with
+      --  no controlling terminal, so a child that started a session would lose
+      --  the one it inherited -- and an ordinary command wants to keep it.
+      --
+      --  Windows has no sessions in this sense: Supports_Sessions is False
+      --  there and Start refuses rather than starting a child that would be
+      --  interruptible on one host and not another.
+      Controlling_Terminal : Hostkit.Descriptors.Descriptor :=
+        Hostkit.Descriptors.Invalid;
+
       --  Put every signal disposition back to the host default before exec.
       --  See the header: the other choice is almost always a bug.
       Reset_Signals : Boolean := True;
@@ -167,11 +194,25 @@ package Hostkit.Spawn is
    --  Arguments are a vector and never a command line, so an argument
    --  containing a space, a quote or a newline is just an argument.
    --
+   --  Whether this host can start a child in a session of its own, with a
+   --  terminal of the caller's as its controlling terminal.
+   --
+   --  False on Windows, where a console is attached rather than controlled and
+   --  there is nothing this shape to ask for. A caller that needs it asks
+   --  first; one that sets Controlling_Terminal anyway is refused rather than
+   --  quietly given a child that cannot be interrupted.
+   --
+   --  @return True when Options.Controlling_Terminal is honoured.
+   function Supports_Sessions return Boolean;
+
    --  @param Program The program: a path, or a name to find on PATH.
    --  @param Arguments Its arguments, not including the program name itself.
    --  @param With_Options How to start it.
    --  @param Item The handle, valid only when this returns Spawn_Ok.
-   --  @return What became of the attempt.
+   --  @return What became of the attempt. Spawn_Failed when
+   --          Controlling_Terminal was set and Supports_Sessions is False:
+   --          the caller asked for something this host cannot do, which is a
+   --          refusal rather than a silent difference in behaviour.
    function Start
      (Program      : String;
       Arguments    : String_Vectors.Vector;

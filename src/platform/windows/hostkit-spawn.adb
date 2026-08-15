@@ -169,6 +169,17 @@ package body Hostkit.Spawn is
       return -1;
    end Group_Id;
 
+   ------------------------
+   -- Supports_Sessions --
+   ------------------------
+
+   --  There is nothing this shape here: a console is attached to a process
+   --  rather than controlled by a session, and what a child gets is decided by
+   --  how it was created rather than by an ioctl it can make afterwards. False
+   --  is a refusal to guess, which is what a caller asks this in order to
+   --  avoid.
+   function Supports_Sessions return Boolean is (False);
+
    -----------
    -- Start --
    -----------
@@ -201,6 +212,14 @@ package body Hostkit.Spawn is
         and then not With_Options.Environment.Is_Empty;
    begin
       Item := Invalid_Process;
+
+      --  Asked for something this host does not have. Refused rather than
+      --  started without it: a child that could be interrupted through its
+      --  terminal on one host and not on another is the difference this crate
+      --  exists to make visible.
+      if With_Options.Controlling_Terminal /= Hostkit.Descriptors.Invalid then
+         return Spawn_Failed;
+      end if;
 
       Startup.Cb := C_DWord (Startup_Info'Size / 8);
 
