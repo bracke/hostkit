@@ -38,6 +38,24 @@ package Hostkit.Fs is
    --  file on the other, and both answers are right.
    function Is_Executable (Path : String) return Boolean;
 
+   --  Will this host *start* this file, as it stands, with no interpreter?
+   --
+   --  The narrower question, and the one a caller about to hand a name to
+   --  Hostkit.Spawn is actually asking. Is_Executable says whether the host
+   --  counts the file a program at all, and on Windows that takes in a `.bat`,
+   --  a `.cmd`, a `.ps1` and an `.msi` -- none of which the process loader
+   --  starts. Each needs something else run first, and *which* something is a
+   --  policy this crate does not have: naming an interpreter is a decision
+   --  about what a consumer's language means, not a fact about the host.
+   --
+   --  The same answer as Is_Executable everywhere else, where a file with the
+   --  bit set is started by the kernel and the `#!` line is the kernel's
+   --  business rather than the caller's.
+   --
+   --  @param Path The file.
+   --  @return True when Spawn could start it by name.
+   function Starts_Without_An_Interpreter (Path : String) return Boolean;
+
    --  Can anyone but the owner get at this file?
    --
    --  A private key must not be. OpenSSH refuses one whose file is group- or world-readable,

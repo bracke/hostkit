@@ -12,6 +12,7 @@ with Interfaces;
 
 with Hostkit;
 with Hostkit.Descriptors;
+with Hostkit.Fs;
 with Hostkit.Locks;
 with Hostkit.Pty;
 with Hostkit.Host;
@@ -798,6 +799,63 @@ package body Hostkit_Shell_Cases is
    --  redraws where a line discipline echoes, so what arrives is the child's
    --  text among control sequences, and the claim is that the text is in
    --  there.
+   --  What the host will *start* is narrower than what it calls a program.
+   --
+   --  On Windows a .bat, a .cmd, a .ps1 and an .msi are executables and the
+   --  process loader starts none of them: each needs something else run first,
+   --  and which something is a policy this crate does not have. A consumer
+   --  about to hand a name to Spawn asks the narrower question, and gets a
+   --  refusal here rather than a failed process creation there.
+   procedure Test_What_Starts_Is_Narrower_Than_What_Runs
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Room : constant String :=
+        Hostkit.Fs.Create_Temporary_Directory ("hostkit-starts-test");
+
+      procedure Write (Name : String);
+
+      procedure Write (Name : String) is
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Create
+           (File, Ada.Text_IO.Out_File, Hostkit.Fs.Join (Room, Name));
+         Ada.Text_IO.Put_Line (File, "rem nothing");
+         Ada.Text_IO.Close (File);
+      end Write;
+
+      Batch : constant String := Hostkit.Fs.Join (Room, "thing.bat");
+      Plain : constant String := Hostkit.Fs.Join (Room, "thing.txt");
+   begin
+      Write ("thing.bat");
+      Write ("thing.txt");
+
+      --  Neither question says yes to a file that is not a program at all.
+      Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Plain),
+              "a plain text file was said to be startable");
+
+      if Hostkit.Fs.Is_Executable (Batch) then
+         --  A host that calls a batch file a program: it must still say that
+         --  it will not start one, or a consumer walks into a failure it
+         --  could have been told about.
+         Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Batch),
+                 "a batch file was said to start without an interpreter");
+      else
+         --  A host with no such notion: the two questions have the same
+         --  answer, and that is the claim.
+         Assert (not Hostkit.Fs.Starts_Without_An_Interpreter (Batch),
+                 "a file this host does not call a program was said to start");
+      end if;
+
+      --  And the suite's own binary, which every host starts.
+      Assert (Hostkit.Fs.Starts_Without_An_Interpreter
+                (Ada.Command_Line.Command_Name),
+              "the running program was said not to be startable");
+
+      Ada.Directories.Delete_Tree (Room);
+   end Test_What_Starts_Is_Narrower_Than_What_Runs;
+
    procedure Test_A_Child_Runs_On_A_Terminal
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1880,6 +1938,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Raw_Mode_Round_Trips'Access,
          "terminal : raw mode round-trips and the settings come back");
+      Register_Routine
+        (T, Test_What_Starts_Is_Narrower_Than_What_Runs'Access,
+         "fs : what the host starts is narrower than what it calls a program");
       Register_Routine
         (T, Test_A_Child_Runs_On_A_Terminal'Access,
          "shell : a child runs on a terminal and reads what is typed at it");

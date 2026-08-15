@@ -812,4 +812,24 @@ package body Hostkit.Fs is
       return ".exe";
    end Executable_Suffix;
 
+   -----------------------------------
+   -- Starts_Without_An_Interpreter --
+   -----------------------------------
+
+   --  What the loader starts, which is not what the host calls a program. A
+   --  .bat and a .cmd are read by the command interpreter, a .ps1 by another
+   --  shell again, an .msi by the installer -- CreateProcess starts none of
+   --  them, and answering True here would send a consumer to a failure that
+   --  looks like the file being missing.
+   function Starts_Without_An_Interpreter (Path : String) return Boolean is
+      function Ends_With (Suffix : String) return Boolean
+      is (Path'Length >= Suffix'Length
+          and then Ada.Characters.Handling.To_Lower
+                     (Path (Path'Last - Suffix'Length + 1 .. Path'Last))
+                   = Suffix);
+   begin
+      return Is_Executable (Path)
+        and then (Ends_With (".exe") or else Ends_With (".com"));
+   end Starts_Without_An_Interpreter;
+
 end Hostkit.Fs;
