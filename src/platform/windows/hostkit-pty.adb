@@ -8,16 +8,29 @@ with System;
 package body Hostkit.Pty is
 
    use type Interfaces.C.long;
+   use type Interfaces.C.unsigned;
    use type System.Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   --  A COORD is two 16-bit counts in one 32-bit word, passed by value.
-   type Console_Size is record
-      Columns : Interfaces.C.short := 0;
-      Rows    : Interfaces.C.short := 0;
-   end record
-     with Convention => C;
+   --  A COORD is two 16-bit counts in one 32-bit word, and the calls below take
+   --  one *by value*.
+   --
+   --  Passed here as the word rather than as a record of two shorts. A record
+   --  is what it is in the Windows headers, and a record is also the thing an
+   --  Ada compiler is entitled to pass by reference for a foreign convention:
+   --  the call then reads the low and high halves of a pointer as a width and
+   --  a height, which is a console of some enormous accidental size that
+   --  CreatePseudoConsole is content with and ResizePseudoConsole refuses.
+   --  Four bytes in a register is what the ABI actually specifies, and an
+   --  unsigned 32-bit value is that with nothing left to interpretation.
+   subtype Console_Size is Interfaces.C.unsigned;
+
+   --  Columns in the low half, rows in the high half: X then Y, which is the
+   --  order the two fields have in the structure.
+   function Sized (Rows, Columns : Natural) return Console_Size
+   is (Console_Size (Columns mod 65_536)
+       + Console_Size (Rows mod 65_536) * 65_536);
 
    --  The three pseudo-console calls, resolved at run time rather than linked.
    --
@@ -48,7 +61,7 @@ package body Hostkit.Pty is
    --  sits after the calls that take one, because a type's size is not static
    --  until something has frozen it.
    pragma Compile_Time_Error
-     (Console_Size'Size /= 4 * 8, "COORD layout does not match the Win32 one");
+     (Console_Size'Size /= 4 * 8, "COORD is not four bytes wide");
 
    function Get_Module_Handle (Name : Interfaces.C.char_array)
                                return System.Address
@@ -98,7 +111,7 @@ package body Hostkit.Pty is
       declare
          Made   : constant System.Address :=
            Get_Proc_Address (Kernel, Interfaces.C.To_C ("CreatePseudoConsole"));
-         Sized  : constant System.Address :=
+         Resizer : constant System.Address :=
            Get_Proc_Address (Kernel, Interfaces.C.To_C ("ResizePseudoConsole"));
          Closed : constant System.Address :=
            Get_Proc_Address (Kernel, Interfaces.C.To_C ("ClosePseudoConsole"));
@@ -107,14 +120,14 @@ package body Hostkit.Pty is
          --  through gaining the feature, which is not a thing that happens and
          --  is not a thing to write code for.
          if Made = System.Null_Address
-           or else Sized = System.Null_Address
+           or else Resizer = System.Null_Address
            or else Closed = System.Null_Address
          then
             return;
          end if;
 
          Create := To_Create (Made);
-         Resize := To_Resize (Sized);
+         Resize := To_Resize (Resizer);
          Dismiss := To_Close (Closed);
       end;
    end Resolve;
@@ -161,7 +174,7 @@ package body Hostkit.Pty is
       --  Eighty by twenty-four, so that a fresh one is usable rather than a
       --  console of no size at all. Windows will not make one measuring zero,
       --  and a caller that means something else calls Set_Size.
-      Initial : constant Console_Size := (Columns => 80, Rows => 24);
+      Initial : constant Console_Size := Sized (Rows => 24, Columns => 80);
    begin
       Item := (others => <>);
 
@@ -291,8 +304,7 @@ package body Hostkit.Pty is
              (Hostkit.Spawn.Native_Console (Item.Console)));
 
       Wanted : constant Console_Size :=
-        (Columns => Interfaces.C.short (To.Columns),
-         Rows    => Interfaces.C.short (To.Rows));
+        Sized (Rows => To.Rows, Columns => To.Columns);
    begin
       if not Hostkit.Spawn.Is_Attached (Item.Console) or else Resize = null then
          return False;

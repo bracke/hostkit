@@ -39,6 +39,16 @@ package body Hostkit_Shell_Cases is
 
    package D renames Hostkit.Descriptors;
 
+   --  Whether this host's terminal has a side this process can ask questions
+   --  of. A pseudo-terminal's device side is a descriptor here in the parent,
+   --  so its modes, its size and its cursor can all be read and written from
+   --  this side. A pseudo-console's child side belongs to the console host:
+   --  there is no descriptor here to save a mode from, and the questions below
+   --  are not questions on that host rather than questions with a wrong
+   --  answer.
+   function Has_A_Device_Side (Item : Hostkit.Pty.Pair) return Boolean
+   is (D.Is_Valid (Item.Device));
+
    --  The suite's own directory: the companion programs are built beside it.
    function Companion (Name : String) return String is
       Self : constant String := Ada.Command_Line.Command_Name;
@@ -1068,6 +1078,11 @@ package body Hostkit_Shell_Cases is
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
 
+      if not Has_A_Device_Side (Item) then
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
+
       Assert (Hostkit.Terminal_Control.Supports_Cursor_Control (Item.Device),
               "a pseudo-terminal refused cursor control");
 
@@ -1207,6 +1222,11 @@ package body Hostkit_Shell_Cases is
 
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
 
+      if not Has_A_Device_Side (Item) then
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
+
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Once),
               "could not save the terminal settings");
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Again),
@@ -1237,6 +1257,11 @@ package body Hostkit_Shell_Cases is
       --  input: a test that put the developer's real terminal into raw mode and
       --  then failed an assertion would leave them typing `reset` blind.
       Assert (Hostkit.Pty.Open (Item), "could not open a pseudo-terminal");
+
+      if not Has_A_Device_Side (Item) then
+         Hostkit.Pty.Close (Item);
+         return;
+      end if;
 
       Assert (Hostkit.Terminal_Control.Save_Mode (Item.Device, Before),
               "could not save the terminal settings");
