@@ -779,29 +779,33 @@ package body Hostkit_Shell_Cases is
       Hostkit.Pty.Close (Terminal);
    end Test_A_Child_Can_Own_A_Terminal;
 
-   --  A child started on a terminal reads what is typed at it and writes back
-   --  through it -- on every host, whatever shape that host's terminal is.
+   --  A child started on a terminal writes back through it, and reads what is
+   --  typed at it -- on every host, whatever shape that host's terminal is.
    --
    --  The test that matters most for the newest of the three. Where there are
    --  pseudo-terminals this has always worked and this says so; where the
    --  answer is a pseudo-console, nothing here had ever started a child at all
-   --  and the only thing asserted was the refusal. What it does not assert is
-   --  *how* the bytes come back: a console host redraws rather than echoing,
-   --  so what arrives is the child's text among control sequences, and the
-   --  claim is that the text is in there.
+   --  and the only thing asserted was the refusal.
+   --
+   --  Two children, because the two directions fail differently and a test
+   --  that could not say which had failed cost a run each time to find out.
+   --  The first writes as soon as it starts and then hangs, so what it proves
+   --  is that the child's output reaches the parent's side. The second reads a
+   --  line and writes back what it read, which needs the other direction as
+   --  well.
+   --
+   --  What neither asserts is *how* the bytes come back: a console host
+   --  redraws where a line discipline echoes, so what arrives is the child's
+   --  text among control sequences, and the claim is that the text is in
+   --  there.
    procedure Test_A_Child_Runs_On_A_Terminal
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
       pragma Unreferenced (T);
 
-      Terminal : Hostkit.Pty.Pair;
-      Options  : Hostkit.Spawn.Options;
-      Child    : Hostkit.Spawn.Process_Handle;
-      Result   : Hostkit.Spawn.Status;
-      Nothing  : Hostkit.String_Vectors.Vector;
-
       --  CR LF, because the two hosts disagree about which one Enter is and
       --  each accepts the pair.
+      --
       --  Bounds written out. A positional aggregate for an unconstrained array
       --  starts at the index type's first value, which for a stream element
       --  offset is a large negative number, and every length computed from it
@@ -810,77 +814,142 @@ package body Hostkit_Shell_Cases is
         [Character'Pos ('h'), Character'Pos ('e'), Character'Pos ('l'),
          Character'Pos ('l'), Character'Pos ('o'), 13, 10];
 
+      --  Everything read from a terminal so far, as text.
+      function Gathered
+        (Terminal : Hostkit.Pty.Pair;
+         Rounds   : Positive;
+         Wanted   : String;
+         Into     : in out Unbounded_String) return Boolean;
+
+      function Gathered
+        (Terminal : Hostkit.Pty.Pair;
+         Rounds   : Positive;
+         Wanted   : String;
+         Into     : in out Unbounded_String) return Boolean is
+      begin
+         for Attempt in 1 .. Rounds loop
+            --  Waiting before reading, rather than reading and hoping. A read
+            --  of an empty pipe waits for ever on the host with no
+            --  non-blocking mode, and a test that hangs is a job that reports
+            --  nothing.
+            if D.Wait_Readable (Terminal.From_Child, 50) then
+               declare
+                  Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
+                  Taken  : Ada.Streams.Stream_Element_Offset;
+               begin
+                  if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
+                    and then Taken >= Buffer'First
+                  then
+                     for Index in Buffer'First .. Taken loop
+                        Append (Into, Character'Val (Natural (Buffer (Index))));
+                     end loop;
+                  end if;
+               end;
+            end if;
+
+            --  An empty pattern is how a caller says "just read what is
+            --  there": Index raises on one, and drain-until-nothing has no
+            --  text to wait for.
+            if Wanted'Length > 0
+              and then Ada.Strings.Fixed.Index (To_String (Into), Wanted) > 0
+            then
+               return True;
+            end if;
+         end loop;
+
+         return False;
+      end Gathered;
+
+      Writing : Hostkit.Pty.Pair;
+      Reading : Hostkit.Pty.Pair;
+
+      Options : Hostkit.Spawn.Options;
+      Child   : Hostkit.Spawn.Process_Handle;
+      Result  : Hostkit.Spawn.Status;
+
+      Hang    : Hostkit.String_Vectors.Vector;
+      Nothing : Hostkit.String_Vectors.Vector;
+
       Last : Ada.Streams.Stream_Element_Offset;
       Seen : Unbounded_String;
+
+      Stopped : Boolean;
+      pragma Unreferenced (Stopped);
    begin
       if not Hostkit.Pty.Is_Supported then
          return;
       end if;
 
-      Assert (Hostkit.Pty.Open (Terminal), "could not open a terminal");
-      Assert (Hostkit.Pty.Set_Size (Terminal, (Rows => 24, Columns => 80)),
+      Hang.Append (Ada.Strings.Unbounded.To_Unbounded_String ("--hang"));
+
+      --  One: the child's output reaches the parent's side.
+      Assert (Hostkit.Pty.Open (Writing), "could not open a terminal");
+      Assert (Hostkit.Pty.Set_Size (Writing, (Rows => 24, Columns => 80)),
               "could not size the terminal");
-      Assert (Hostkit.Pty.Attach (Terminal, Options),
+      Assert (Hostkit.Pty.Attach (Writing, Options),
               "could not arrange to start a child on the terminal");
+
+      Assert (Hostkit.Spawn.Start
+                (Companion ("sleeper"), Hang, Options, Child)
+              = Hostkit.Spawn.Spawn_Ok,
+              "the sleeper would not start on a terminal");
+
+      Hostkit.Pty.Close_Device (Writing);
+
+      declare
+         Arrived : constant Boolean :=
+           Gathered (Writing, 200, "out-line", Seen);
+      begin
+         --  Terminated before asserting, so that a failure does not leave a
+         --  child of this suite running for the rest of the job. Whether it
+         --  worked is not this test's claim: the assert below is.
+         Stopped := Hostkit.Process.Request_Stop
+                      (Hostkit.Spawn.Process_Id (Child));
+
+         Assert (Arrived,
+                 "a child on a terminal wrote a line the parent never saw: ["
+                 & To_String (Seen) & "]");
+      end;
+
+      Hostkit.Pty.Close (Writing);
+
+      --  Two: what is typed at the child reaches it.
+      Seen := Null_Unbounded_String;
+      Options := (others => <>);
+
+      Assert (Hostkit.Pty.Open (Reading), "could not open a second terminal");
+      Assert (Hostkit.Pty.Set_Size (Reading, (Rows => 24, Columns => 80)),
+              "could not size the second terminal");
+      Assert (Hostkit.Pty.Attach (Reading, Options),
+              "could not arrange to start a reader on the terminal");
 
       Assert (Hostkit.Spawn.Start
                 (Companion ("echoer"), Nothing, Options, Child)
               = Hostkit.Spawn.Spawn_Ok,
               "the echoer would not start on a terminal");
 
-      --  The parent's copy of the child's side, where there was one. While it
-      --  holds that open, reading its own side never ends.
-      Hostkit.Pty.Close_Device (Terminal);
+      Hostkit.Pty.Close_Device (Reading);
 
       --  A moment for the host to attach a client to the terminal, and for
       --  whatever it says when it does. A console host announces itself the
-      --  moment it has one; a pseudo-terminal says nothing at all, so this is
-      --  a wait that finds something on one host and nothing on the other, and
-      --  neither is a failure. What it is for is not typing at a terminal
-      --  whose far side is not there yet.
-      if D.Wait_Readable (Terminal.From_Child, 500) then
-         declare
-            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
-            Taken  : Ada.Streams.Stream_Element_Offset;
-         begin
-            if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
-              and then Taken >= Buffer'First
-            then
-               for Index in Buffer'First .. Taken loop
-                  Append (Seen, Character'Val (Natural (Buffer (Index))));
-               end loop;
-            end if;
-         end;
-      end if;
+      --  moment it has one; a pseudo-terminal says nothing at all, so this
+      --  finds something on one host and nothing on the other, and neither is
+      --  a failure. What it is for is not typing at a terminal whose far side
+      --  is not there yet.
+      declare
+         Ignored : constant Boolean := Gathered (Reading, 10, "read:hello", Seen);
+         pragma Unreferenced (Ignored);
+      begin
+         null;
+      end;
 
-      Assert (D.Write (Terminal.To_Child, Typed, Last) = D.Transfer_Ok,
+      Assert (D.Write (Reading.To_Child, Typed, Last) = D.Transfer_Ok,
               "could not type into the terminal");
 
-      for Attempt in 1 .. 200 loop
-         if D.Wait_Readable (Terminal.From_Child, 50) then
-            declare
-               Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
-               Taken  : Ada.Streams.Stream_Element_Offset;
-            begin
-               if D.Read (Terminal.From_Child, Buffer, Taken) = D.Transfer_Ok
-                 and then Taken >= Buffer'First
-               then
-                  for Index in Buffer'First .. Taken loop
-                     Append (Seen, Character'Val (Natural (Buffer (Index))));
-                  end loop;
-               end if;
-            end;
-         end if;
-
-         exit when Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0;
-      end loop;
-
-      --  How the child ended, gathered before asserting anything about what it
-      --  wrote. A child that exited 3 read nothing at all, which is a
-      --  different fault from one that read the wrong thing or wrote where
-      --  this cannot see it -- and a failure that cannot tell those apart
-      --  costs a run to find out.
       declare
+         Answered : constant Boolean :=
+           Gathered (Reading, 200, "read:hello", Seen);
+
          Ended : Boolean := False;
       begin
          for Attempt in 1 .. 100 loop
@@ -894,7 +963,11 @@ package body Hostkit_Shell_Cases is
             delay 0.05;
          end loop;
 
-         Assert (Ada.Strings.Fixed.Index (To_String (Seen), "read:hello") > 0,
+         --  How the child ended is part of the failure. A child that exited 3
+         --  read nothing at all, which is a different fault from one that read
+         --  the wrong thing or wrote where this cannot see it -- and a failure
+         --  that cannot tell those apart costs a run to find out.
+         Assert (Answered,
                  "the child never read what was typed at its terminal. It "
                  & (if Ended
                     then "ended "
@@ -911,19 +984,14 @@ package body Hostkit_Shell_Cases is
       --  Drained before closing. A console host with output nobody has taken
       --  can keep the close waiting, and the same drain costs nothing on a
       --  host where the child's side is already gone.
-      for Attempt in 1 .. 20 loop
-         exit when not D.Wait_Readable (Terminal.From_Child, 10);
+      declare
+         Ignored : constant Boolean := Gathered (Reading, 20, "", Seen);
+         pragma Unreferenced (Ignored);
+      begin
+         null;
+      end;
 
-         declare
-            Buffer : Ada.Streams.Stream_Element_Array (1 .. 1024);
-            Taken  : Ada.Streams.Stream_Element_Offset;
-         begin
-            exit when D.Read (Terminal.From_Child, Buffer, Taken)
-                      /= D.Transfer_Ok;
-         end;
-      end loop;
-
-      Hostkit.Pty.Close (Terminal);
+      Hostkit.Pty.Close (Reading);
    end Test_A_Child_Runs_On_A_Terminal;
 
    procedure Test_A_Fresh_Pseudo_Terminal_Has_No_Size_Until_Set
