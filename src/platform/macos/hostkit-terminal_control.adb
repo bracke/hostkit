@@ -403,4 +403,15 @@ package body Hostkit.Terminal_Control is
       return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
    end Set_Interruptible;
 
+   ---------------------------------------
+   -- Interrupt_Reaches_A_Busy_Program --
+   ---------------------------------------
+
+   function Interrupt_Reaches_A_Busy_Program return Boolean is
+   begin
+      --  A signal is delivered between two instructions of the program it
+      --  interrupts, whatever those instructions are doing.
+      return True;
+   end Interrupt_Reaches_A_Busy_Program;
+
 end Hostkit.Terminal_Control;

@@ -148,6 +148,34 @@ package Hostkit.Terminal_Control is
    function Set_Interruptible
      (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
 
+   --  Whether an interrupt key reaches a program that is not waiting for it.
+   --
+   --  Set_Interruptible arranges for the host to notice Ctrl-C by itself, and
+   --  on POSIX that is the end of the matter: the signal is delivered between
+   --  two instructions of whatever the program was doing, however busy it is.
+   --  On Windows it is not. The console control routine runs on a thread
+   --  Windows creates, and a process spinning in a loop of its own is never
+   --  told at all -- not late, not unnoticed: the routine does not run. A
+   --  program that stops spinning half a second later still finds nothing.
+   --
+   --  That was measured on all three hosts rather than read: the same probe,
+   --  spinning while a Ctrl-C was typed at its terminal, is told on two of
+   --  them and not on the third.
+   --
+   --  So a caller whose whole reason for asking is stopping a runaway loop --
+   --  a shell, an interpreter -- needs to know which kind of host it is on. It
+   --  is a fact about the host rather than about a particular terminal, which
+   --  is why it takes nothing: the answer cannot depend on which descriptor
+   --  you would have asked about.
+   --
+   --  What to do where it is False is the caller's: the keystroke itself still
+   --  arrives as a byte on a terminal left raw, so a caller that cannot be
+   --  told can look. That is a different arrangement, not a smaller one, and
+   --  this crate will not choose it for anybody.
+   --
+   --  @return True when a busy program is told; False where it must look.
+   function Interrupt_Reaches_A_Busy_Program return Boolean;
+
    --  How big a terminal is, in character cells.
    type Window_Size is record
       Rows    : Natural := 0;

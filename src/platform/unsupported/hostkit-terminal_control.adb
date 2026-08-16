@@ -99,4 +99,15 @@ package body Hostkit.Terminal_Control is
       return False;
    end Set_Interruptible;
 
+   ---------------------------------------
+   -- Interrupt_Reaches_A_Busy_Program --
+   ---------------------------------------
+
+   function Interrupt_Reaches_A_Busy_Program return Boolean is
+   begin
+      --  A host this crate knows nothing about does nothing for a caller. The
+      --  refusal is the whole point of this body.
+      return False;
+   end Interrupt_Reaches_A_Busy_Program;
+
 end Hostkit.Terminal_Control;

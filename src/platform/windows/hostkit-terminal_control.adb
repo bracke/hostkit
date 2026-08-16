@@ -463,4 +463,16 @@ package body Hostkit.Terminal_Control is
       end;
    end Set_Interruptible;
 
+   ---------------------------------------
+   -- Interrupt_Reaches_A_Busy_Program --
+   ---------------------------------------
+
+   function Interrupt_Reaches_A_Busy_Program return Boolean is
+   begin
+      --  Measured, not assumed: a probe spinning on a console while Ctrl-C is
+      --  typed is never told, and is still not told half a second after it
+      --  stops spinning. The control routine does not run for it at all.
+      return False;
+   end Interrupt_Reaches_A_Busy_Program;
+
 end Hostkit.Terminal_Control;
