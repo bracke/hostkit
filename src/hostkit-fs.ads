@@ -270,6 +270,22 @@ package Hostkit.Fs is
    --  @return The suffix, with its dot, or "".
    function Executable_Suffix return String;
 
+   --  The path of the device that reads as nothing and swallows what is
+   --  written to it.
+   --
+   --  For a caller that must give a program a stream and has none to give: a
+   --  job started into the background on a host with no job control cannot
+   --  share the keyboard with the shell that started it, and a program whose
+   --  input is this reads end-of-file rather than racing for keystrokes.
+   --
+   --  A path rather than an open descriptor, because a caller opens it the way
+   --  it opens any other file and closes it the same way. Every host this
+   --  crate supports has one; "" would mean a host that does not, and a caller
+   --  finding "" must not open it.
+   --
+   --  @return "/dev/null", "NUL", or "" on a host without one.
+   function Null_Device return String;
+
    --  The character this host writes between the entries of a search path.
    --
    --  A colon on POSIX and a semicolon on Windows, where a colon is part of a

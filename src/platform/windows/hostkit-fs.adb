@@ -833,4 +833,16 @@ package body Hostkit.Fs is
                   or else Ends_With (".bat") or else Ends_With (".cmd"));
    end Starts_When_Named;
 
+   ------------------
+   -- Null_Device --
+   ------------------
+
+   function Null_Device return String is
+   begin
+      --  The name the loader knows rather than a path: it is not a file in a
+      --  directory here, and "\\.\NUL" would be the same device named the
+      --  long way round.
+      return "NUL";
+   end Null_Device;
+
 end Hostkit.Fs;

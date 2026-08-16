@@ -15,6 +15,9 @@ with Ada.Strings.Unbounded;
 with Hostkit;
 with Hostkit_Shell_Cases;
 with Hostkit.Filesystem_Rules;
+with Ada.Streams;
+
+with Hostkit.Descriptors;
 with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Metadata;
@@ -1461,6 +1464,68 @@ package body Hostkit_Suite is
       Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
    end Set_Up;
 
+   --  The device that reads as nothing is there, and reads as nothing.
+   --
+   --  A caller reaches for this when it must give a program a stream and has
+   --  none to give -- a job started into the background on a host with no job
+   --  control, which cannot share the keyboard with the shell that started it.
+   --  What that caller needs is end of input, immediately: a path that opened
+   --  and then blocked would hang the program it was trying to protect.
+   procedure Test_The_Null_Device_Reads_As_Nothing
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_The_Null_Device_Reads_As_Nothing
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Handle : Hostkit.Descriptors.Descriptor;
+      Buffer : Ada.Streams.Stream_Element_Array (1 .. 16);
+      Last   : Ada.Streams.Stream_Element_Offset;
+
+      use type Hostkit.Descriptors.Transfer_Outcome;
+   begin
+      if Hostkit.Fs.Null_Device = "" then
+         --  A host this crate knows nothing about is not promised one.
+         return;
+      end if;
+
+      Assert (Hostkit.Descriptors.Open_File
+                (Hostkit.Fs.Null_Device,
+                 Hostkit.Descriptors.Open_Read, Handle),
+              "the null device would not open for reading: "
+              & Hostkit.Fs.Null_Device);
+
+      Assert (Hostkit.Descriptors.Read (Handle, Buffer, Last)
+              = Hostkit.Descriptors.Transfer_End_Of_File,
+              "the null device did not read as nothing");
+
+      Hostkit.Descriptors.Close (Handle);
+
+      --  And it takes what is written to it, which is the other half of what
+      --  a caller with nothing to give needs.
+      Assert (Hostkit.Descriptors.Open_File
+                (Hostkit.Fs.Null_Device,
+                 Hostkit.Descriptors.Open_Write_Truncate, Handle),
+              "the null device would not open for writing");
+
+      declare
+         Written : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
+           [1, 2, 3, 4];
+
+         Took : constant Boolean :=
+           Hostkit.Descriptors.Write (Handle, Written, Last)
+           = Hostkit.Descriptors.Transfer_Ok;
+
+         use type Ada.Streams.Stream_Element_Offset;
+      begin
+         Assert (Took and then Last = Written'Last,
+                 "the null device would not take what was written to it");
+      end;
+
+      Hostkit.Descriptors.Close (Handle);
+   end Test_The_Null_Device_Reads_As_Nothing;
+
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
@@ -1560,6 +1625,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_The_Watch_Notices_Changes'Access,
          "watch : the host's notification facility notices creations and deletions");
+      Register_Routine
+        (T, Test_The_Null_Device_Reads_As_Nothing'Access,
+         "fs : the null device reads as nothing and takes what is written");
    end Register_Tests;
 
    function Suite return AUnit.Test_Suites.Access_Test_Suite is

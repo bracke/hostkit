@@ -772,4 +772,15 @@ package body Hostkit.Fs is
    function Starts_When_Named (Path : String) return Boolean
    is (Is_Executable (Path));
 
+   ------------------
+   -- Null_Device --
+   ------------------
+
+   function Null_Device return String is
+   begin
+      --  A character device every POSIX host has, in the place every POSIX
+      --  host keeps it.
+      return "/dev/null";
+   end Null_Device;
+
 end Hostkit.Fs;

@@ -272,4 +272,15 @@ package body Hostkit.Fs is
    function Starts_When_Named (Path : String) return Boolean
    is (Is_Executable (Path));
 
+   ------------------
+   -- Null_Device --
+   ------------------
+
+   function Null_Device return String is
+   begin
+      --  A host this crate knows nothing about is not promised to have one,
+      --  and a plausible guess would be a caller opening something else.
+      return "";
+   end Null_Device;
+
 end Hostkit.Fs;
