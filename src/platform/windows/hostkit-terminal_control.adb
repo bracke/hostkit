@@ -22,6 +22,15 @@ package body Hostkit.Terminal_Control is
    Enable_Echo_Input             : constant C_DWord := 16#0004#;
    Enable_Virtual_Terminal_Input : constant C_DWord := 16#0200#;
 
+   --  The code page a console hands its input over in. 65001 is UTF-8, which
+   --  is what every consumer of this crate reads and what every other host
+   --  gives them without being asked.
+   Utf8_Code_Page : constant C_DWord := 65_001;
+
+   function Set_Console_Cp (Code_Page : C_DWord) return Interfaces.C.int
+     with Import => True, Convention => Stdcall,
+          External_Name => "SetConsoleCP";
+
    --  On the output handle: interpret control sequences rather than printing
    --  them. Required before any cursor movement or erase reaches the screen.
    Enable_Virtual_Terminal_Processing : constant C_DWord := 16#0004#;
@@ -217,7 +226,32 @@ package body Hostkit.Terminal_Control is
       --  thing a caller reads on POSIX and means one decoder rather than two.
       Wanted := Wanted or Enable_Virtual_Terminal_Input;
 
-      return Set_Console_Mode (To_Handle (Terminal), Wanted) /= 0;
+      if Set_Console_Mode (To_Handle (Terminal), Wanted) = 0 then
+         return False;
+      end if;
+
+      --  And the bytes a character arrives as. A console hands a program its
+      --  input in the console's code page, which on a fresh Windows is an OEM
+      --  one: an accented e typed at it arrives as the single byte 130 rather
+      --  than as the two bytes of its UTF-8, and a caller that reads UTF-8 --
+      --  which is what this crate's consumers do, and what every other host
+      --  gives them -- sees a byte that is not a character at all. Measured
+      --  rather than reasoned: a companion sitting on such a terminal recorded
+      --  `byte= 130` for a character whose UTF-8 is 195 169.
+      --
+      --  Asked for as UTF-8 here, where raw mode is set, because that is where
+      --  a caller declares it will read the bytes itself. A failure is not
+      --  fatal: the mode is what raw mode is about, and a console that will
+      --  not change its code page is one where a consumer reads what it always
+      --  read.
+      declare
+         Ignored : constant Interfaces.C.int := Set_Console_Cp (Utf8_Code_Page);
+         pragma Unreferenced (Ignored);
+      begin
+         null;
+      end;
+
+      return True;
    end Set_Raw;
 
    ----------
