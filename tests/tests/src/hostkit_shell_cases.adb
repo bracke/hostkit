@@ -1933,15 +1933,23 @@ package body Hostkit_Shell_Cases is
 
          --  Drained while it runs: a terminal nobody reads fills up, and a
          --  program writing into a full one waits instead of finishing.
-         declare
-            Buffer : Ada.Streams.Stream_Element_Array (1 .. 512);
-            Taken  : Ada.Streams.Stream_Element_Offset;
-            Ignored : constant D.Transfer_Outcome :=
-              D.Read (Terminal.From_Child, Buffer, Taken);
-            pragma Unreferenced (Ignored);
-         begin
-            null;
-         end;
+         --
+         --  Only when there is something there. This watcher writes nothing to
+         --  its terminal -- it writes to a file, which is the whole point of
+         --  the file -- and a read of a pipe nothing has been written to
+         --  blocks until something is. That hung the suite on the one host
+         --  this case exists for.
+         if D.Wait_Readable (Terminal.From_Child, 0) then
+            declare
+               Buffer : Ada.Streams.Stream_Element_Array (1 .. 512);
+               Taken  : Ada.Streams.Stream_Element_Offset;
+               Ignored : constant D.Transfer_Outcome :=
+                 D.Read (Terminal.From_Child, Buffer, Taken);
+               pragma Unreferenced (Ignored);
+            begin
+               null;
+            end;
+         end if;
 
          delay 0.05;
       end loop;
