@@ -126,6 +126,12 @@ package Hostkit.Descriptors is
    --  @param Item Descriptor to watch.
    --  @param Timeout_Ms How long to wait. Zero asks and returns; a negative
    --         value waits for as long as it takes.
+   --  A console is asked a different question from a pipe, and gets a
+   --  different one right: only a key going *down* with a character on it
+   --  makes a read return, so releasing a key, moving a mouse and resizing a
+   --  window are events that do not count. Answering from the count of events
+   --  would say ready and leave the caller's read waiting.
+   --
    --  @return True when a read would not wait. False on a timeout, and on a
    --          host that cannot answer -- which is a refusal, and a caller that
    --          reads anyway may block.

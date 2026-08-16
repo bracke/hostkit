@@ -276,13 +276,48 @@ package body Hostkit.Descriptors is
    -- Wait_Readable --
    -------------------
 
-   --  Asked of the pipe directly, because this host cannot poll one: poll and
-   --  select are for sockets here. PeekNamedPipe says how many bytes are
-   --  waiting without taking them, in a short loop until there are some or the
-   --  deadline passes.
+   --  Asked of the thing directly, because this host cannot poll: poll and
+   --  select are for sockets here.
+   --
+   --  Two things, and the difference matters. A pipe answers PeekNamedPipe,
+   --  which says how many bytes are waiting without taking them. A *console*
+   --  does not answer it at all -- and saying "ready" because the question was
+   --  refused is what made a caller's next read block for ever on a console
+   --  with nothing typed at it. A console is asked with PeekConsoleInput
+   --  instead, and only a key going down with a character on it counts:
+   --  releasing a key, moving a mouse and resizing a window are all events,
+   --  and a read waits through every one of them.
    function Wait_Readable
      (Item : Descriptor; Timeout_Ms : Integer) return Boolean
    is
+      use type Interfaces.C.unsigned_short;
+
+      --  An input record is 20 bytes on this host: a two-byte event type, two
+      --  bytes of padding, and a union whose largest member is the key event.
+      --  Only the type and, for a key, whether it went down and what character
+      --  it carried are read here, so the rest is left as bytes.
+      type Input_Record is record
+         Event      : Interfaces.C.unsigned_short := 0;
+         Padding    : Interfaces.C.unsigned_short := 0;
+         Key_Down   : Interfaces.C.int := 0;
+         Repeats    : Interfaces.C.unsigned_short := 0;
+         Virtual_Key : Interfaces.C.unsigned_short := 0;
+         Scan_Code  : Interfaces.C.unsigned_short := 0;
+         Character_Value : Interfaces.C.unsigned_short := 0;
+         Control_State : C_DWord := 0;
+      end record
+        with Convention => C;
+
+      Key_Event : constant Interfaces.C.unsigned_short := 1;
+
+      function Peek_Console_Input
+        (Console : System.Address;
+         Records : System.Address;
+         Wanted  : C_DWord;
+         Read    : access C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall,
+             External_Name => "PeekConsoleInputW";
+
       function Peek_Named_Pipe
         (Pipe            : System.Address;
          Buffer          : System.Address;
@@ -299,11 +334,50 @@ package body Hostkit.Descriptors is
       Available : aliased C_DWord := 0;
       Waited    : Integer := 0;
 
+      Console_Mode : aliased C_DWord := 0;
+
       --  Ten milliseconds between asks. Short enough that a caller waiting
       --  fifty does not overshoot by much, long enough not to spin a core.
       Slice : constant Integer := 10;
    begin
       if Item = Invalid then
+         return False;
+      end if;
+
+      --  A console is not a pipe, and the two are told apart by asking the one
+      --  question only a console answers.
+      if Get_Console_Mode (To_Handle (Item), Console_Mode'Access) /= 0 then
+         loop
+            declare
+               Waiting : aliased array (1 .. 32) of Input_Record :=
+                 [others => <>];
+               Taken   : aliased C_DWord := 0;
+            begin
+               if Peek_Console_Input
+                    (To_Handle (Item), Waiting'Address, 32, Taken'Access) = 0
+               then
+                  --  A console that will not answer. Ready is the safe reply
+                  --  here for the same reason it is for a pipe that has gone:
+                  --  the caller's read returns rather than waits.
+                  return True;
+               end if;
+
+               for Index in 1 .. Natural (Taken) loop
+                  if Waiting (Index).Event = Key_Event
+                    and then Waiting (Index).Key_Down /= 0
+                    and then Waiting (Index).Character_Value /= 0
+                  then
+                     return True;
+                  end if;
+               end loop;
+            end;
+
+            exit when Timeout_Ms >= 0 and then Waited >= Timeout_Ms;
+
+            Sleep (C_DWord (Slice));
+            Waited := Waited + Slice;
+         end loop;
+
          return False;
       end if;
 
