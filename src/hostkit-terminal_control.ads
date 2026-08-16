@@ -132,6 +132,11 @@ package Hostkit.Terminal_Control is
    --  Windows it is the console's processed input, which does the same job
    --  through a control event.
    --
+   --  On Windows it also turns *off* the virtual-terminal input that raw mode
+   --  turns on, and that is the half a reading of the flags does not give you:
+   --  with it on the console hands Ctrl-C over as the byte three, which is
+   --  right for a caller that is reading and invisible to one that is not.
+   --
    --  Not the whole of cooked mode, and not the settings a caller saved: a
    --  caller that has its own mode to put back does that first and asks this
    --  afterwards, since what a saved mode carries is whatever the terminal

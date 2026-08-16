@@ -439,16 +439,28 @@ package body Hostkit.Terminal_Control is
          return False;
       end if;
 
-      if (Current and Enable_Processed_Input) /= 0 then
-         return True;
-      end if;
-
       --  Processed input is what turns Ctrl-C into a control event rather than
       --  a byte nobody reads. A console handed over by a pseudo-console can
       --  arrive without it, and a saved mode put back carries whatever it
       --  arrived with.
-      return Set_Console_Mode
-               (To_Handle (Terminal), Current or Enable_Processed_Input) /= 0;
+      --
+      --  Virtual-terminal input has to go with it, and that is the half a
+      --  reading of the flags does not give you: with it on, the console hands
+      --  the key over as the byte three -- which is right for a caller that is
+      --  reading, and is exactly what a caller that is *not* reading cannot
+      --  see. Raw mode turns it on, so a terminal that has been read from once
+      --  keeps it until something says otherwise.
+      declare
+         Wanted : constant C_DWord :=
+           (Current or Enable_Processed_Input)
+           - (Current and Enable_Virtual_Terminal_Input);
+      begin
+         if Wanted = Current then
+            return True;
+         end if;
+
+         return Set_Console_Mode (To_Handle (Terminal), Wanted) /= 0;
+      end;
    end Set_Interruptible;
 
 end Hostkit.Terminal_Control;
