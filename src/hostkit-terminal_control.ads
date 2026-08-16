@@ -123,6 +123,26 @@ package Hostkit.Terminal_Control is
    --  @return True when raw mode was set.
    function Set_Raw (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
 
+   --  Arrange for this terminal to turn an interrupt key into an interrupt.
+   --
+   --  What a shell wants of its terminal *between* line reads: while a program
+   --  runs, nobody is reading, and the only thing that can stop a runaway loop
+   --  is the host noticing Ctrl-C by itself. On POSIX that is the line
+   --  discipline's ISIG, which raw mode turns off and this turns back on. On
+   --  Windows it is the console's processed input, which does the same job
+   --  through a control event.
+   --
+   --  Not the whole of cooked mode, and not the settings a caller saved: a
+   --  caller that has its own mode to put back does that first and asks this
+   --  afterwards, since what a saved mode carries is whatever the terminal
+   --  happened to have -- a console handed over by a pseudo-console may have
+   --  arrived with the flag already off.
+   --
+   --  @param Terminal The terminal.
+   --  @return True when it will now report an interrupt key.
+   function Set_Interruptible
+     (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
+
    --  How big a terminal is, in character cells.
    type Window_Size is record
       Rows    : Natural := 0;

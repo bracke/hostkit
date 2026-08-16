@@ -362,4 +362,45 @@ package body Hostkit.Terminal_Control is
       end;
    end Control;
 
+   -----------------------
+   -- Set_Interruptible --
+   -----------------------
+
+   function Set_Interruptible
+     (Terminal : Hostkit.Descriptors.Descriptor) return Boolean
+   is
+      Settings : Mode_Storage := [others => 0];
+
+      --  The local-flags word, and the bit in it that says a control character
+      --  is a signal. Both are where POSIX puts them: c_lflag is the fourth
+      --  32-bit field of a termios, and ISIG is its first bit.
+      Local_Flags : constant := 3;
+      I_Sig       : constant := 1;
+   begin
+      if not Hostkit.Descriptors.Is_Valid (Terminal) then
+         return False;
+      end if;
+
+      if Tcgetattr (To_Fd (Terminal), Settings'Address) /= 0 then
+         return False;
+      end if;
+
+      declare
+         use type Interfaces.Unsigned_32;
+
+         Words : array (0 .. 3) of Interfaces.Unsigned_32
+           with Import, Address => Settings'Address;
+      begin
+         if (Words (Local_Flags) and I_Sig) /= 0 then
+            --  Already so. Writing the same settings back would be a syscall
+            --  and a drain for nothing.
+            return True;
+         end if;
+
+         Words (Local_Flags) := Words (Local_Flags) or I_Sig;
+      end;
+
+      return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
+   end Set_Interruptible;
+
 end Hostkit.Terminal_Control;

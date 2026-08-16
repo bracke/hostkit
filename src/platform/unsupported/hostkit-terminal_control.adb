@@ -89,4 +89,14 @@ package body Hostkit.Terminal_Control is
       return False;
    end Control;
 
+   function Set_Interruptible
+     (Terminal : Hostkit.Descriptors.Descriptor) return Boolean
+   is
+      pragma Unreferenced (Terminal);
+   begin
+      --  A host this build does not know. False is the refusal: a consumer
+      --  that needs an interrupt key to work knows it will not.
+      return False;
+   end Set_Interruptible;
+
 end Hostkit.Terminal_Control;

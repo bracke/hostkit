@@ -422,4 +422,33 @@ package body Hostkit.Terminal_Control is
       end;
    end Control;
 
+   -----------------------
+   -- Set_Interruptible --
+   -----------------------
+
+   function Set_Interruptible
+     (Terminal : Hostkit.Descriptors.Descriptor) return Boolean
+   is
+      Current : aliased C_DWord := 0;
+   begin
+      if not Hostkit.Descriptors.Is_Valid (Terminal) then
+         return False;
+      end if;
+
+      if Get_Console_Mode (To_Handle (Terminal), Current'Access) = 0 then
+         return False;
+      end if;
+
+      if (Current and Enable_Processed_Input) /= 0 then
+         return True;
+      end if;
+
+      --  Processed input is what turns Ctrl-C into a control event rather than
+      --  a byte nobody reads. A console handed over by a pseudo-console can
+      --  arrive without it, and a saved mode put back carries whatever it
+      --  arrived with.
+      return Set_Console_Mode
+               (To_Handle (Terminal), Current or Enable_Processed_Input) /= 0;
+   end Set_Interruptible;
+
 end Hostkit.Terminal_Control;
