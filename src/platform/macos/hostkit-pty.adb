@@ -45,6 +45,16 @@ package body Hostkit.Pty is
    --  Non-inheritable, matching every other descriptor this crate produces:
    --  inheritance is opted into per child, never inherited by default.
 
+   ---------------------------
+   -- Write_Fails_When_Unheld --
+   ---------------------------
+
+   --  True. Once the last descriptor for the device side is closed, a write to
+   --  the controller fails with EIO rather than being buffered. A caller sees
+   --  this as a transfer that took no bytes, and on this host that is the
+   --  child being gone rather than anything about what was written.
+   function Write_Fails_When_Unheld return Boolean is (True);
+
    ------------------
    -- Is_Supported --
    ------------------

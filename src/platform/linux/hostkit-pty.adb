@@ -41,6 +41,15 @@ package body Hostkit.Pty is
    --  Non-inheritable, matching every other descriptor this crate produces:
    --  inheritance is opted into per child, never inherited by default.
 
+   ---------------------------
+   -- Write_Fails_When_Unheld --
+   ---------------------------
+
+   --  False. A write to the controller of a Linux pseudo-terminal whose device
+   --  side nothing holds is accepted: the bytes go into the line discipline's
+   --  buffer, where they stay. Only a read then reports the end.
+   function Write_Fails_When_Unheld return Boolean is (False);
+
    ------------------
    -- Is_Supported --
    ------------------

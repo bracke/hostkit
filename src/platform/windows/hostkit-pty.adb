@@ -142,6 +142,28 @@ package body Hostkit.Pty is
    is (Long_Long_Integer
          (System.Storage_Elements.To_Integer (Item)));
 
+   ---------------------------
+   -- Write_Fails_When_Unheld --
+   ---------------------------
+
+   --  False, and this one is the answer nobody has measured yet.
+   --
+   --  The other two were: a Linux controller buffers the bytes, a macOS one
+   --  refuses them with EIO. Here the input side is a pipe the pseudo-console
+   --  holds, and what it does with a write after the child has gone is not
+   --  something this crate has watched happen.
+   --
+   --  False is the conservative half of that. A caller told True treats a
+   --  refused write as evidence that the child left, and would excuse a
+   --  genuine error on a host where writes fail for other reasons; a caller
+   --  told False reports the failure it saw, which is what every caller did
+   --  before this question existed.
+   --
+   --  The case beside this asserts the answer against what the host does, so
+   --  the first run on this host that disagrees will say so rather than
+   --  leaving the guess standing.
+   function Write_Fails_When_Unheld return Boolean is (False);
+
    ------------------
    -- Is_Supported --
    ------------------

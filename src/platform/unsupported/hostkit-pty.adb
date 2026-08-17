@@ -3,6 +3,15 @@ package body Hostkit.Pty is
    --  A host this build does not know. Is_Supported is False, so a consumer
    --  degrades on the question rather than on a failed Open.
 
+   ---------------------------
+   -- Write_Fails_When_Unheld --
+   ---------------------------
+
+   --  There are no terminals here to write to, so this is the refusal every
+   --  other answer in this body is: a caller who got here has nothing to ask
+   --  about.
+   function Write_Fails_When_Unheld return Boolean is (False);
+
    function Is_Supported return Boolean is
    begin
       return False;

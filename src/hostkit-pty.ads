@@ -60,6 +60,36 @@ package Hostkit.Pty is
    --  @return True when Open can succeed on this host.
    function Is_Supported return Boolean;
 
+   --  Whether writing to a terminal fails once nothing holds the device side.
+   --
+   --  Two hosts answer a write to To_Child differently after the child that
+   --  was given the device side has gone, and the difference is not small: one
+   --  refuses the write, and the other takes the bytes into a buffer that
+   --  nobody will ever read and reports success.
+   --
+   --  A caller that does not know which kind of host it is on reads a refusal
+   --  as "the byte was wrong" and goes looking at what it typed. That is not a
+   --  hypothetical: a shell's test suite spent weeks reading `could not type
+   --  into the terminal` on one host as an interrupt that never arrived, when
+   --  the interrupt had arrived, been acted on, and left the shell on its way
+   --  out -- and the write that failed was the *next* one.
+   --
+   --  So the question is asked here rather than guessed there. Where this is
+   --  True, a write that fails is first of all evidence about the child; where
+   --  it is False, a write that succeeds is no evidence at all that anything
+   --  received the bytes, and a caller wanting to know whether the child is
+   --  still there has to ask about the child.
+   --
+   --  Measured rather than reasoned: the case beside this in the test crate
+   --  starts a child on a terminal, waits for it to exit, writes a byte, and
+   --  asserts that what the host does matches what this says.
+   --
+   --  It takes nothing, because it is a fact about the host's terminals and
+   --  not about a particular pair.
+   --
+   --  @return True where a write to a terminal nothing holds fails.
+   function Write_Fails_When_Unheld return Boolean;
+
    --  The two sides of a pseudo-terminal.
    type Pair is record
       --  The parent's side, for writing keystrokes to the child.
