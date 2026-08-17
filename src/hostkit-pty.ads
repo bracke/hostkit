@@ -80,9 +80,11 @@ package Hostkit.Pty is
    --  received the bytes, and a caller wanting to know whether the child is
    --  still there has to ask about the child.
    --
-   --  Measured rather than reasoned: the case beside this in the test crate
-   --  starts a child on a terminal, waits for it to exit, writes a byte, and
-   --  asserts that what the host does matches what this says.
+   --  Measured rather than reasoned, on every host: the case beside this in
+   --  the test crate starts a child on a terminal, waits for it to exit,
+   --  writes a byte, and asserts that what the host does matches what this
+   --  says. Linux and Windows take the byte (Transfer_Ok, False); macOS
+   --  refuses it (Transfer_Error, True).
    --
    --  It takes nothing, because it is a fact about the host's terminals and
    --  not about a particular pair.

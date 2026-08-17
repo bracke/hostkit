@@ -146,22 +146,14 @@ package body Hostkit.Pty is
    -- Write_Fails_When_Unheld --
    ---------------------------
 
-   --  False, and this one is the answer nobody has measured yet.
+   --  False, measured: the case beside this writes a byte to a terminal whose
+   --  child has exited and gets Transfer_Ok here, as on Linux. The input side
+   --  is a pipe the pseudo-console holds, and closing the device side does not
+   --  close that pipe -- so the bytes are taken by something nobody will read
+   --  from, which is a success a caller must not read as delivery.
    --
-   --  The other two were: a Linux controller buffers the bytes, a macOS one
-   --  refuses them with EIO. Here the input side is a pipe the pseudo-console
-   --  holds, and what it does with a write after the child has gone is not
-   --  something this crate has watched happen.
-   --
-   --  False is the conservative half of that. A caller told True treats a
-   --  refused write as evidence that the child left, and would excuse a
-   --  genuine error on a host where writes fail for other reasons; a caller
-   --  told False reports the failure it saw, which is what every caller did
-   --  before this question existed.
-   --
-   --  The case beside this asserts the answer against what the host does, so
-   --  the first run on this host that disagrees will say so rather than
-   --  leaving the guess standing.
+   --  macOS is the host that answers the other way. A caller wanting to know
+   --  whether the child is still there asks about the child.
    function Write_Fails_When_Unheld return Boolean is (False);
 
    ------------------
