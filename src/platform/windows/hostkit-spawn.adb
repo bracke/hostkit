@@ -155,6 +155,31 @@ package body Hostkit.Spawn is
      (Handle : System.Address; Milliseconds : C_DWord) return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "WaitForSingleObject";
 
+   --  An exit code as this host gives it, in the range Ada asks for.
+   --
+   --  Windows exit codes are unsigned and thirty-two bits wide, and the ones
+   --  the system itself uses are at the top of that range: a process ended by
+   --  the console control path exits with 0xC000013A. Converting that to
+   --  Integer overflows and *raises*, which is not an answer -- and a wait
+   --  that raises is a wait a caller cannot use to find out that its child is
+   --  gone. Measured: a probe closing a pseudo-console got Constraint_Error
+   --  out of this function rather than a status.
+   --
+   --  Read as two's complement, which is how every tool on this host shows
+   --  those numbers -- 0xC000013A is -1073741510 -- so a caller comparing
+   --  against what a Windows debugger or `echo %ERRORLEVEL%` said sees the
+   --  same value.
+   function Held (Code : C_DWord) return Integer;
+
+   function Held (Code : C_DWord) return Integer is
+   begin
+      if Code <= C_DWord (Integer'Last) then
+         return Integer (Code);
+      end if;
+
+      return Integer (Long_Long_Integer (Code) - 2 ** 32);
+   end Held;
+
    function Get_Exit_Code_Process
      (Process : System.Address; Exit_Code : access C_DWord) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "GetExitCodeProcess";
@@ -551,7 +576,7 @@ package body Hostkit.Spawn is
       --  control has to degrade explicitly on this host rather than wait for a
       --  state that cannot arrive.
       Result.State := Wait_Exited;
-      Result.Exit_Code := Integer (Code);
+      Result.Exit_Code := Held (Code);
       return True;
    end Wait;
 

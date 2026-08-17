@@ -305,6 +305,12 @@ package Hostkit.Spawn is
       State : Wait_State := Wait_Running;
 
       --  Meaningful when State is Wait_Exited.
+      --
+      --  Windows exit codes are unsigned and thirty-two bits wide, and the
+      --  ones the system uses are at the top of that range -- a process ended
+      --  by the console control path exits with 0xC000013A. Those arrive here
+      --  read as two's complement, which is how every tool on that host shows
+      --  them, rather than overflowing: a wait that raises is not an answer.
       Exit_Code : Integer := -1;
 
       --  Meaningful when State is Wait_Signalled or Wait_Stopped, and only when
