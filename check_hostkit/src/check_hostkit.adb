@@ -246,7 +246,13 @@ begin
        To_Unbounded_String (Root & "/hostkit.gpr"),
        To_Unbounded_String (Root & "/src/hostkit.ads"),
        To_Unbounded_String (Root & "/tests/alire.toml"),
-       To_Unbounded_String (Root & "/tests/hostkit_tests.gpr")],
+       To_Unbounded_String (Root & "/tests/hostkit_tests.gpr"),
+
+       --  What changed, for the consumers that pin this crate by path and
+       --  therefore by commit. Required rather than encouraged: until there
+       --  is a tag, a consumer's release records a hostkit commit, and the
+       --  only way to know what came with it is a file that says.
+       To_Unbounded_String (Root & "/CHANGELOG.md")],
       "required hostkit release file missing");
 
    --  The on-ramp docs must actually carry the crate's contract and how to work it.
