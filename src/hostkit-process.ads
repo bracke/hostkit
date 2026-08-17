@@ -24,6 +24,23 @@ package Hostkit.Process is
    --
    --  Arguments go to the operating system as a vector, so a filename containing a
    --  space, a quote or a semicolon is just a filename.
+   --  End this process now, without unwinding anything.
+   --
+   --  For the one failure a program cannot clean up after: its output has gone.
+   --  Ada's own way out runs finalization on the way, and finalization closes
+   --  the standard files -- which flushes them, which fails again, which raises
+   --  inside a finalizer. That becomes PROGRAM_ERROR and a stack trace, printed
+   --  on the stream that already refused everything else, and a caller that had
+   --  carefully said nothing has said fifteen lines of addresses instead.
+   --
+   --  So this does not return and does not unwind: the status is handed to the
+   --  host and the process stops. Anything a caller must do before that -- a
+   --  file to close, a lock to give up -- it does first, because nothing here
+   --  will do it afterwards.
+   --
+   --  @param Status What to exit with.
+   procedure End_Now (Status : Integer) with No_Return;
+
    function Launch
      (Program   : String;
       Arguments : String_Vectors.Vector)

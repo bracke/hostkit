@@ -327,4 +327,16 @@ package body Hostkit.Process is
       return Hostkit.Native.Open_Native (Path);
    end Open_Native;
 
+   ---------------
+   -- End_Now --
+   ---------------
+
+   procedure End_Now (Status : Integer) is
+   begin
+      --  The host's own way out, which does not unwind and does not run an
+      --  Ada finalizer. See the note in the specification for why a caller
+      --  whose output has gone cannot afford the ordinary one.
+      GNAT.OS_Lib.OS_Exit (Status);
+   end End_Now;
+
 end Hostkit.Process;
