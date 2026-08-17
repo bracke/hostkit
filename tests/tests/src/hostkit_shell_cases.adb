@@ -1848,6 +1848,56 @@ package body Hostkit_Shell_Cases is
       Ada.Text_IO.Flush (Ada.Text_IO.Standard_Error);
    end Set_Up;
 
+   --  An exit code this host cannot hold in the shape the other two use.
+   --
+   --  Windows exit codes are unsigned and thirty-two bits wide, and the ones
+   --  the system itself uses sit at the top of that range -- a process ended
+   --  by the console control path exits with 0xC000013A. Converting one of
+   --  those to Integer overflows, and this crate used to raise rather than
+   --  answer: a wait that raises leaves a caller unable to find out that its
+   --  child is gone, which is the one thing a wait is for.
+   --
+   --  A program that ends with -1 is the cheapest way to reach that range: on
+   --  Windows it becomes 0xFFFFFFFF and comes back as -1, read as two's
+   --  complement the way every tool there shows it. On POSIX the same request
+   --  is masked to a byte and comes back as 255, which is what that host does
+   --  with a negative status and is asserted rather than papered over.
+   procedure Test_An_Exit_Code_Comes_Back_Readable
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_An_Exit_Code_Comes_Back_Readable
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Asked   : Hostkit.String_Vectors.Vector;
+      Options : Hostkit.Spawn.Options;
+      Child   : Hostkit.Spawn.Process_Handle;
+      Result  : Hostkit.Spawn.Status;
+
+      use type Hostkit.Host.Kind;
+
+      Wanted : constant Integer :=
+        (if Hostkit.Host.Current = Hostkit.Host.Windows then -1 else 255);
+   begin
+      Asked.Append (Ada.Strings.Unbounded.To_Unbounded_String ("-1"));
+
+      Assert (Hostkit.Spawn.Start (Companion ("leaver"), Asked, Options, Child)
+              = Hostkit.Spawn.Spawn_Ok,
+              "the leaver would not start");
+
+      Assert (Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Block, Result),
+              "the leaver was not waited for");
+
+      Assert (Result.State = Hostkit.Spawn.Wait_Exited,
+              "a program that ended with a status did not exit: "
+              & Hostkit.Spawn.Wait_State'Image (Result.State));
+
+      Assert (Result.Exit_Code = Wanted,
+              "an exit code came back as" & Integer'Image (Result.Exit_Code)
+              & " rather than" & Integer'Image (Wanted));
+   end Test_An_Exit_Code_Comes_Back_Readable;
+
    --  End_Now hands over a status and stops, without unwinding.
    --
    --  The one failure a program cannot clean up after is having nowhere to
@@ -2135,6 +2185,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_A_Child_Can_Own_A_Terminal'Access,
          "pty : a child in its own session is interrupted by Ctrl-C");
+      Register_Routine
+        (T, Test_An_Exit_Code_Comes_Back_Readable'Access,
+         "process : an exit code comes back readable rather than raising");
       Register_Routine
         (T, Test_End_Now_Hands_Over_A_Status'Access,
          "process : End_Now hands over a status and stops");
