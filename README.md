@@ -45,17 +45,37 @@ interface. The question to ask of a new subprogram is:
 | Package | Answers |
 |---|---|
 | `Hostkit.Host` | Which host is this program running on? (from the body the build chose, which no environment can spoof) |
-| `Hostkit.Fs` | Facts about a path the host answers differently — and that GNAT gets wrong on Windows |
+| `Hostkit.Fs` | Facts about a path the host answers differently — and that GNAT gets wrong on Windows; also where the host keeps the device that reads as nothing |
 | `Hostkit.Signals` | Signals, and — separately — whether the host can report that one arrived |
-| `Hostkit.Process` | Starting other programs |
+| `Hostkit.Process` | Starting other programs, and ending this one without unwinding |
 | `Hostkit.Native` | The parts of starting a program that only the host can answer (one body per OS) |
 | `Hostkit.Shell` | Running a command line through the host's shell |
 | `Hostkit.Local_Channel` | A byte channel to a local endpoint named by a path |
 | `Hostkit.Spawn` | Starting a program the way a shell has to: descriptors the caller made, a process group, a terminal's foreground, a session of its own, and no wait |
 | `Hostkit.Descriptors` | Pipes, duplication, inheritance, non-blocking mode, and reads that tell end-of-file from would-block |
 | `Hostkit.Pty` | Terminals for a child that did not inherit one -- a pseudo-terminal, or a pseudo-console where that is what the host has |
-| `Hostkit.Terminal_Control` | Terminal modes, window size, and the foreground process group |
+| `Hostkit.Terminal_Control` | Terminal modes, window size, the foreground process group, and whether an interrupt reaches a program that is busy |
 | `Hostkit.Locks` | Advisory file locks |
+
+Three of those answers exist because a shell asked and the honest answer was
+"that depends on the host":
+
+- **Whether an interrupt reaches a busy program.** `Set_Interruptible` arranges
+  for the host to notice Ctrl-C, and on POSIX that is the whole story: the
+  signal arrives between two instructions of whatever the program was doing. On
+  Windows a program spinning in a loop is never told — not late, not unnoticed;
+  the control routine does not run for it. A consumer whose reason for asking is
+  stopping a runaway loop has to know which host it is on, so it can watch the
+  terminal itself where being told is not on offer.
+- **The device that reads as nothing.** A caller that must give a program a
+  stream and has none — a job put into the background on a host with no job
+  control, which cannot share a keyboard with the shell that started it — needs
+  the program to see end of input rather than race for keystrokes.
+- **Ending without unwinding.** Ada's own way out runs finalization, and
+  finalization closes the standard files: it flushes them, and for a program
+  whose reader has gone that fails again, inside a finalizer, which is
+  `PROGRAM_ERROR` and a stack trace on the stream that already refused
+  everything. `End_Now` hands the status to the host and stops.
 
 The **specs (`src/hostkit*.ads`) are the reference documentation** — each subprogram is
 commented with what the host actually does, per OS. Start with `src/hostkit.ads`.
