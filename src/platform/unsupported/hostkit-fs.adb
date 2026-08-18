@@ -276,6 +276,26 @@ package body Hostkit.Fs is
    -- Null_Device --
    ------------------
 
+
+   -------------------
+   -- Creation_Mask --
+   -------------------
+
+   function Creation_Mask (Value : out Natural) return Boolean is
+   begin
+      Value := 0;
+      return False;
+   end Creation_Mask;
+
+   function Set_Creation_Mask
+     (Value : Natural; Previous : out Natural) return Boolean
+   is
+      pragma Unreferenced (Value);
+   begin
+      Previous := 0;
+      return False;
+   end Set_Creation_Mask;
+
    function Null_Device return String is
    begin
       --  A host this crate knows nothing about is not promised to have one,

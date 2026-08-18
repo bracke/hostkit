@@ -792,6 +792,63 @@ package body Hostkit_Shell_Cases is
    --  worth having in the log of a run on a host nobody develops on, and a
    --  case that only asserted would print nothing on the two hosts that agree
    --  with it and an assertion message on the third.
+   --  The creation mask, where the host has one.
+   --
+   --  POSIX has it and Windows has not, and the difference is the whole reason
+   --  this is in this crate: a shell that wants to expose `umask` needs to be
+   --  told which kind of host it is on rather than discovering it from a call
+   --  that answered zero.
+   --
+   --  Set, read back, and put back, because reading is the operation POSIX
+   --  does not have: umask() sets and returns the previous value together, so
+   --  reading means setting twice, and a test that did not restore what it
+   --  found would change the permissions of every file the rest of this suite
+   --  writes.
+   procedure Test_The_Creation_Mask_Is_The_Hosts_Own
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_The_Creation_Mask_Is_The_Hosts_Own
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Held     : Natural;
+      Previous : Natural;
+      Restored : Natural;
+
+      use type Hostkit.Host.Kind;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (not Hostkit.Fs.Creation_Mask (Held),
+                 "Windows has no creation mask and must say so");
+         Assert (not Hostkit.Fs.Set_Creation_Mask (8#022#, Previous),
+                 "and must refuse to set one rather than pretend");
+         return;
+      end if;
+
+      Assert (Hostkit.Fs.Creation_Mask (Held),
+              "a POSIX host has a creation mask");
+
+      Assert (Hostkit.Fs.Set_Creation_Mask (8#027#, Previous),
+              "and it can be set");
+      Assert (Previous = Held,
+              "setting it answers with what it was:" & Natural'Image (Previous)
+              & " for" & Natural'Image (Held));
+
+      declare
+         Now : Natural;
+      begin
+         Assert (Hostkit.Fs.Creation_Mask (Now),
+                 "and it can be read again");
+         Assert (Now = 8#027#,
+                 "what was set is what is there:" & Natural'Image (Now));
+      end;
+
+      --  Put back, so the rest of this suite writes the files it expects.
+      Assert (Hostkit.Fs.Set_Creation_Mask (Held, Restored),
+              "and it can be put back");
+   end Test_The_Creation_Mask_Is_The_Hosts_Own;
+
    procedure Test_A_Write_To_A_Terminal_Nothing_Holds
      (T : in out AUnit.Test_Cases.Test_Case'Class);
 
@@ -2278,6 +2335,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_A_Pipe_Has_No_Terminal_Answers'Access,
          "terminal : a pipe refuses every terminal question");
+      Register_Routine
+        (T, Test_The_Creation_Mask_Is_The_Hosts_Own'Access,
+         "the creation mask is the host's own, or the host says it has none");
       Register_Routine
         (T, Test_A_Write_To_A_Terminal_Nothing_Holds'Access,
          "a write to a terminal nothing holds is answered as this host says");

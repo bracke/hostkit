@@ -286,6 +286,37 @@ package Hostkit.Fs is
    --  @return "/dev/null", "NUL", or "" on a host without one.
    function Null_Device return String;
 
+   --  The permissions this host takes *away* from files a program creates.
+   --
+   --  POSIX calls it the umask, and every shell exposes it because it is the
+   --  one setting that decides whether the file a script just wrote can be
+   --  read by anybody else. It is per process and inherited by children, which
+   --  is why a shell has to be able to set it rather than hand each caller a
+   --  mode.
+   --
+   --  Windows has no such thing. Permissions there come from the ACL a
+   --  directory hands down, and there is no per-process subtraction to read or
+   --  to set -- so both of these answer False there rather than inventing a
+   --  number. A caller that needs a file to be private on every host asks
+   --  Restrict_To_Owner about the file it just made; that question has an
+   --  answer everywhere, and this one does not.
+   --
+   --  @param Value The mask, as the host's own bits.
+   --  @return False where this host has no creation mask.
+   function Creation_Mask (Value : out Natural) return Boolean;
+
+   --  Set it, and say what it was.
+   --
+   --  One call, because POSIX has one call: umask() sets and returns the
+   --  previous value together, and a read-then-write pair would be a window in
+   --  which another thread's file got the wrong permissions.
+   --
+   --  @param Value The new mask.
+   --  @param Previous What it was, when this returns True.
+   --  @return False where this host has no creation mask.
+   function Set_Creation_Mask
+     (Value : Natural; Previous : out Natural) return Boolean;
+
    --  The character this host writes between the entries of a search path.
    --
    --  A colon on POSIX and a semicolon on Windows, where a colon is part of a

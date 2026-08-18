@@ -43,6 +43,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 - `Hostkit.Signals`, `Hostkit.Locks`, `Hostkit.Watch`, `Hostkit.Trash`,
   `Hostkit.Local_Channel`, `Hostkit.Clock`, `Hostkit.Native`,
   `Hostkit.Windows_Command_Line`, `Hostkit.Filesystem_Rules`, `Hostkit.Shell`.
+- `Hostkit.Fs.Creation_Mask` and `Set_Creation_Mask` — the permissions a host
+  takes away from files a program creates. POSIX calls it the umask and every
+  shell exposes it; Windows has no such thing, so both answer False there
+  rather than inventing a number. Reading is done by setting and putting back,
+  because POSIX has no way to ask, and the comment says so where a reader will
+  wonder.
 - `Hostkit.Pty.Write_Fails_When_Unheld` — whether a write to a terminal fails
   once nothing holds the device side. Measured on all three hosts by a case
   that starts a child on a terminal, waits for it to exit and then writes:

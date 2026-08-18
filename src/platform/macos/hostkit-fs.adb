@@ -776,6 +776,38 @@ package body Hostkit.Fs is
    -- Null_Device --
    ------------------
 
+
+   -------------------
+   -- Creation_Mask --
+   -------------------
+
+   --  Read by setting and putting back, because POSIX has no way to ask. The
+   --  window between the two calls is real and unavoidable: a process that
+   --  created a file in it would get the mask this call is about to restore.
+   --  Nothing here can close it, and pretending otherwise -- caching the last
+   --  value this library set -- would answer confidently and wrongly about a
+   --  mask something else changed.
+   function C_Umask (Mask : Interfaces.C.unsigned) return Interfaces.C.unsigned
+     with Import, Convention => C, External_Name => "umask";
+
+   function Creation_Mask (Value : out Natural) return Boolean is
+      Held : constant Interfaces.C.unsigned := C_Umask (0);
+      Back : constant Interfaces.C.unsigned := C_Umask (Held);
+   begin
+      pragma Unreferenced (Back);
+      Value := Natural (Held);
+      return True;
+   end Creation_Mask;
+
+   function Set_Creation_Mask
+     (Value : Natural; Previous : out Natural) return Boolean
+   is
+      Held : constant Interfaces.C.unsigned := C_Umask (Interfaces.C.unsigned (Value));
+   begin
+      Previous := Natural (Held);
+      return True;
+   end Set_Creation_Mask;
+
    function Null_Device return String is
    begin
       --  A character device every POSIX host has, in the place every POSIX

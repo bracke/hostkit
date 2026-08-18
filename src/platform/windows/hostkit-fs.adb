@@ -837,6 +837,29 @@ package body Hostkit.Fs is
    -- Null_Device --
    ------------------
 
+
+   -------------------
+   -- Creation_Mask --
+   -------------------
+
+   --  Windows has none. Permissions come from the ACL a directory hands down,
+   --  and there is no per-process subtraction to read or to write -- so this
+   --  refuses rather than inventing a number a caller would then act on.
+   function Creation_Mask (Value : out Natural) return Boolean is
+   begin
+      Value := 0;
+      return False;
+   end Creation_Mask;
+
+   function Set_Creation_Mask
+     (Value : Natural; Previous : out Natural) return Boolean
+   is
+      pragma Unreferenced (Value);
+   begin
+      Previous := 0;
+      return False;
+   end Set_Creation_Mask;
+
    function Null_Device return String is
    begin
       --  The name the loader knows rather than a path: it is not a file in a
