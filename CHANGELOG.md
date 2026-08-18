@@ -49,6 +49,21 @@ recently enough to matter to somebody pinning it; the history before that is in
   rather than inventing a number. Reading is done by setting and putting back,
   because POSIX has no way to ask, and the comment says so where a reader will
   wonder.
+- `Hostkit.Limits` — the resource limits POSIX calls rlimits and every shell
+  exposes as `ulimit`: how many files may be open, how many processes a user
+  may have, how large a file, a core dump, the stack, the data segment or the
+  address space may grow, how much memory may be locked, and how many seconds
+  of processor time a process may use. Soft and hard bounds, read and set. The
+  numbers behind the names differ between hosts — `RLIMIT_NPROC` is 6 on Linux
+  and 7 on macOS, and `RLIMIT_AS` shares its number with `RLIMIT_RSS` on macOS
+  — which is why the table lives in a body per host; a consumer that copied one
+  header's numbers would have asked the other host about the wrong resource and
+  been answered without complaint. Windows has no per-process limits of this
+  kind (a job object is a different thing, attached to a set of processes
+  rather than inherited by them, and a process cannot lower its own), so
+  `Applies` answers False there and both accessors refuse. A case lowers the
+  open-file limit and opens files until the host refuses, which is what catches
+  a transposed table: reading and setting a wrong number succeeds.
 - `Hostkit.Pty.Write_Fails_When_Unheld` — whether a write to a terminal fails
   once nothing holds the device side. Measured on all three hosts by a case
   that starts a child on a terminal, waits for it to exit and then writes:

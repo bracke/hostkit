@@ -13,6 +13,7 @@ with Interfaces;
 with Hostkit;
 with Hostkit.Descriptors;
 with Hostkit.Fs;
+with Hostkit.Limits;
 with Hostkit.Locks;
 with Hostkit.Pty;
 with Hostkit.Host;
@@ -847,7 +848,233 @@ package body Hostkit_Shell_Cases is
       --  Put back, so the rest of this suite writes the files it expects.
       Assert (Hostkit.Fs.Set_Creation_Mask (Held, Restored),
               "and it can be put back");
+      Assert (Restored = 8#027#,
+              "putting it back answers with what this test had set:"
+              & Natural'Image (Restored));
    end Test_The_Creation_Mask_Is_The_Hosts_Own;
+
+   --  A resource limit is the host's own, or the host says it has none.
+   --
+   --  Open_Files, because it is the limit every POSIX host has a real number
+   --  for and the one a shell is most often asked to raise. Lowered rather
+   --  than raised: lowering a soft limit needs no privilege anywhere, raising
+   --  it past what the runner's hard limit happens to be would fail for a
+   --  reason that is about the runner and not about this library.
+   --
+   --  Put back at the end, because the rest of this suite opens files.
+   procedure Test_A_Resource_Limit_Is_The_Hosts_Own
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_A_Resource_Limit_Is_The_Hosts_Own
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      use type Hostkit.Host.Kind;
+      use type Hostkit.Limits.Amount;
+
+      Soft, Hard, Now : Hostkit.Limits.Amount;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (not Hostkit.Limits.Applies (Hostkit.Limits.Open_Files),
+                 "Windows has no resource limits and must say so");
+         Assert (not Hostkit.Limits.Limit
+                       (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Soft),
+                 "and must refuse to read one rather than invent a number");
+         Assert (not Hostkit.Limits.Set_Limit
+                       (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, 64),
+                 "and must refuse to set one");
+         return;
+      end if;
+
+      Assert (Hostkit.Limits.Applies (Hostkit.Limits.Open_Files),
+              "a POSIX host limits how many files may be open");
+
+      Assert (Hostkit.Limits.Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Soft),
+              "and the soft limit can be read");
+      Assert (Hostkit.Limits.Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Hard, Hard),
+              "and the hard limit can be read");
+
+      --  A descriptor count, not a byte count: a host that answered Unbounded
+      --  here would be a host that had stopped counting, and the number is
+      --  read back below rather than compared against anything expected.
+      Assert (Soft /= Hostkit.Limits.Unbounded,
+              "how many files may be open is a number this host knows");
+      Assert (Soft <= Hard or else Hard = Hostkit.Limits.Unbounded,
+              "and the soft limit is not above the ceiling:"
+              & Hostkit.Limits.Amount'Image (Soft) & " over"
+              & Hostkit.Limits.Amount'Image (Hard));
+
+      Assert (Hostkit.Limits.Set_Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Soft - 1),
+              "and the soft limit can be lowered");
+
+      Assert (Hostkit.Limits.Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Now),
+              "and read again");
+      Assert (Now = Soft - 1,
+              "what was set is what is there:"
+              & Hostkit.Limits.Amount'Image (Now) & " for"
+              & Hostkit.Limits.Amount'Image (Soft - 1));
+
+      --  The ceiling did not follow the soft limit down. Which is the whole
+      --  reason Set_Limit reads before it writes: the host's call takes both
+      --  numbers together, and writing the one a caller named would have
+      --  silently written the other.
+      declare
+         Ceiling : Hostkit.Limits.Amount;
+      begin
+         Assert (Hostkit.Limits.Limit
+                   (Hostkit.Limits.Open_Files, Hostkit.Limits.Hard, Ceiling),
+                 "and the ceiling can be read after lowering the soft limit");
+         Assert (Ceiling = Hard,
+                 "lowering the soft limit left the ceiling where it was:"
+                 & Hostkit.Limits.Amount'Image (Ceiling) & " for"
+                 & Hostkit.Limits.Amount'Image (Hard));
+      end;
+
+      Assert (Hostkit.Limits.Set_Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Soft),
+              "and it can be put back");
+   end Test_A_Resource_Limit_Is_The_Hosts_Own;
+
+   --  The open-file limit is the one that stops a file from opening.
+   --
+   --  What the reading tests cannot catch is a table that names the right
+   --  resources in the wrong order: getrlimit answers happily about whichever
+   --  resource the number it was given belongs to, so a transposed entry reads
+   --  and sets and looks like everything working. This one lowers the limit
+   --  and then opens files until the host refuses, which only happens if the
+   --  number really was the one that counts descriptors.
+   --
+   --  The limit is put back before anything is asserted. A suite that ran the
+   --  rest of its cases with sixteen descriptors would fail in places that
+   --  have nothing to do with this.
+   procedure Test_The_Open_File_Limit_Is_What_Stops_An_Open
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_The_Open_File_Limit_Is_What_Stops_An_Open
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      use type Hostkit.Host.Kind;
+      use type Hostkit.Limits.Amount;
+
+      Lowered : constant Hostkit.Limits.Amount := 16;
+
+      Was     : Hostkit.Limits.Amount;
+      Opened  : Natural := 0;
+      Refused : Boolean := False;
+      Put_Back : Boolean := False;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         --  No limits to lower; the case above says so.
+         return;
+      end if;
+
+      Assert (Hostkit.Limits.Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Was),
+              "the open-file limit can be read");
+
+      declare
+         Room : constant String :=
+           Hostkit.Fs.Create_Temporary_Directory ("hostkit-limit-test");
+
+         Held : array (1 .. 64) of Ada.Text_IO.File_Type;
+      begin
+         if Hostkit.Limits.Set_Limit
+              (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Lowered)
+         then
+            for Index in Held'Range loop
+               begin
+                  Ada.Text_IO.Create
+                    (Held (Index), Ada.Text_IO.Out_File,
+                     Hostkit.Fs.Join
+                       (Room,
+                        "f" & Ada.Strings.Fixed.Trim
+                                (Integer'Image (Index), Ada.Strings.Both)));
+                  Opened := Opened + 1;
+               exception
+                  when others =>
+                     Refused := True;
+                     exit;
+               end;
+            end loop;
+
+            for Index in 1 .. Opened loop
+               Ada.Text_IO.Close (Held (Index));
+            end loop;
+
+            Put_Back :=
+              Hostkit.Limits.Set_Limit
+                (Hostkit.Limits.Open_Files, Hostkit.Limits.Soft, Was);
+         end if;
+
+         Ada.Directories.Delete_Tree (Room);
+      end;
+
+      Assert (Put_Back,
+              "the open-file limit was lowered and put back");
+      Assert (Refused,
+              "a lowered open-file limit refuses an open;"
+              & Natural'Image (Opened) & " files opened under a limit of"
+              & Hostkit.Limits.Amount'Image (Lowered));
+   end Test_The_Open_File_Limit_Is_What_Stops_An_Open;
+
+   --  Every limit this library names is one this host answers about.
+   --
+   --  The numbers behind the names differ between hosts, and a wrong number is
+   --  not an error to the host: getrlimit on a resource that does not exist
+   --  answers EINVAL, but a number that belongs to another resource answers
+   --  successfully about the wrong thing. What this can check is that every
+   --  name reads, which a transposed table would fail.
+   procedure Test_Every_Named_Limit_Is_Answered
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_Every_Named_Limit_Is_Answered
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      use type Hostkit.Host.Kind;
+   begin
+      for Item in Hostkit.Limits.Resource loop
+         declare
+            Known : constant Boolean := Hostkit.Limits.Applies (Item);
+
+            Now, Ceiling : Hostkit.Limits.Amount;
+
+            --  Read before the assertions rather than inside them: the
+            --  arguments of one call are evaluated in whatever order the
+            --  compiler likes, so a message that named the value the same
+            --  call was writing would be a message about the value before it.
+            Read_Soft : constant Boolean :=
+              Hostkit.Limits.Limit (Item, Hostkit.Limits.Soft, Now);
+            Read_Hard : constant Boolean :=
+              Hostkit.Limits.Limit (Item, Hostkit.Limits.Hard, Ceiling);
+         begin
+            Assert (Known = (Hostkit.Host.Current /= Hostkit.Host.Windows),
+                    "a POSIX host has "
+                    & Hostkit.Limits.Resource'Image (Item)
+                    & " and Windows has none");
+
+            Assert (Read_Soft = Known,
+                    "reading "
+                    & Hostkit.Limits.Resource'Image (Item)
+                    & " agrees with whether this host has it, and it said"
+                    & Hostkit.Limits.Amount'Image (Now));
+
+            Assert (Read_Hard = Known,
+                    "and so does reading the ceiling of "
+                    & Hostkit.Limits.Resource'Image (Item)
+                    & ", which said"
+                    & Hostkit.Limits.Amount'Image (Ceiling));
+         end;
+      end loop;
+   end Test_Every_Named_Limit_Is_Answered;
 
    procedure Test_A_Write_To_A_Terminal_Nothing_Holds
      (T : in out AUnit.Test_Cases.Test_Case'Class);
@@ -2338,6 +2565,15 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_The_Creation_Mask_Is_The_Hosts_Own'Access,
          "the creation mask is the host's own, or the host says it has none");
+      Register_Routine
+        (T, Test_A_Resource_Limit_Is_The_Hosts_Own'Access,
+         "a resource limit is the host's own, or the host says it has none");
+      Register_Routine
+        (T, Test_The_Open_File_Limit_Is_What_Stops_An_Open'Access,
+         "the open-file limit is the one that stops a file from opening");
+      Register_Routine
+        (T, Test_Every_Named_Limit_Is_Answered'Access,
+         "every limit this library names is one this host answers about");
       Register_Routine
         (T, Test_A_Write_To_A_Terminal_Nothing_Holds'Access,
          "a write to a terminal nothing holds is answered as this host says");
