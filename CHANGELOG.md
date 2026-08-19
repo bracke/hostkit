@@ -81,6 +81,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- The macOS body reads macOS's own `struct passwd`. BSD keeps a change time and
+  a login class between the group id and the gecos field, and an expiry after
+  the shell; a record copied from the Linux body compiles, links, and reads the
+  wrong pointer. `Home_Directory` never showed it because it answers from `HOME`
+  first — `Home_Directory_Of`, which cannot, answered nothing for `root` on that
+  host and correctly on the other two. Found by the tri-platform run, on the
+  first commit that asked the question.
+
 - `Spawn.Wait` no longer raises `Constraint_Error` on a Windows exit code above
   `Integer'Last`. Windows exit codes are unsigned 32-bit; a program that ended
   with `-1` came back as `4294967295` and overflowed the conversion. It is now

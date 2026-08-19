@@ -618,14 +618,24 @@ package body Hostkit.Fs is
       function Getuid return Interfaces.C.unsigned
         with Import => True, Convention => C, External_Name => "getuid";
 
+      --  This host's own layout, which is not the one glibc uses: BSD keeps a
+      --  change time and a login class between the group id and the gecos
+      --  field, and an expiry after the shell. A record copied from the Linux
+      --  body compiles, links and reads the wrong pointer -- which is how the
+      --  first version of Home_Directory_Of answered nothing for root here
+      --  while answering correctly on Linux, and it is exactly the kind of
+      --  difference this crate exists to keep in one place per host.
       type Passwd is record
-         Name   : Interfaces.C.Strings.chars_ptr;
-         Passwd : Interfaces.C.Strings.chars_ptr;
-         Uid    : Interfaces.C.unsigned;
-         Gid    : Interfaces.C.unsigned;
-         Gecos  : Interfaces.C.Strings.chars_ptr;
-         Dir    : Interfaces.C.Strings.chars_ptr;
-         Shell  : Interfaces.C.Strings.chars_ptr;
+         Name    : Interfaces.C.Strings.chars_ptr;
+         Passwd  : Interfaces.C.Strings.chars_ptr;
+         Uid     : Interfaces.C.unsigned;
+         Gid     : Interfaces.C.unsigned;
+         Change  : Interfaces.C.long;
+         Class   : Interfaces.C.Strings.chars_ptr;
+         Gecos   : Interfaces.C.Strings.chars_ptr;
+         Dir     : Interfaces.C.Strings.chars_ptr;
+         Shell   : Interfaces.C.Strings.chars_ptr;
+         Expires : Interfaces.C.long;
       end record
         with Convention => C;
       type Passwd_Access is access all Passwd;
@@ -654,14 +664,24 @@ package body Hostkit.Fs is
    end Home_Directory;
 
    function Home_Directory_Of (User : String) return String is
+      --  This host's own layout, which is not the one glibc uses: BSD keeps a
+      --  change time and a login class between the group id and the gecos
+      --  field, and an expiry after the shell. A record copied from the Linux
+      --  body compiles, links and reads the wrong pointer -- which is how the
+      --  first version of Home_Directory_Of answered nothing for root here
+      --  while answering correctly on Linux, and it is exactly the kind of
+      --  difference this crate exists to keep in one place per host.
       type Passwd is record
-         Name   : Interfaces.C.Strings.chars_ptr;
-         Passwd : Interfaces.C.Strings.chars_ptr;
-         Uid    : Interfaces.C.unsigned;
-         Gid    : Interfaces.C.unsigned;
-         Gecos  : Interfaces.C.Strings.chars_ptr;
-         Dir    : Interfaces.C.Strings.chars_ptr;
-         Shell  : Interfaces.C.Strings.chars_ptr;
+         Name    : Interfaces.C.Strings.chars_ptr;
+         Passwd  : Interfaces.C.Strings.chars_ptr;
+         Uid     : Interfaces.C.unsigned;
+         Gid     : Interfaces.C.unsigned;
+         Change  : Interfaces.C.long;
+         Class   : Interfaces.C.Strings.chars_ptr;
+         Gecos   : Interfaces.C.Strings.chars_ptr;
+         Dir     : Interfaces.C.Strings.chars_ptr;
+         Shell   : Interfaces.C.Strings.chars_ptr;
+         Expires : Interfaces.C.long;
       end record
         with Convention => C;
       type Passwd_Access is access all Passwd;
