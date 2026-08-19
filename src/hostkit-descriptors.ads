@@ -295,6 +295,13 @@ package Hostkit.Descriptors is
    --  @param Item Descriptor to install.
    --  @param To Which stream it becomes.
    --  @return True when the assignment was made.
+   --  On Windows this changes the process's standard handles -- what a child
+   --  and any later reader of them find -- and does not move where this
+   --  program's *own* writes go: a runtime that opened its output once goes on
+   --  writing where it did. POSIX has no such split, because dup2 moves the
+   --  descriptor every writer already holds. A caller redirecting itself has
+   --  to know which of the two it is getting; adash's `redirect` refuses on
+   --  Windows for this reason.
    function Assign (Item : Descriptor; To : Standard_Stream) return Boolean;
 
    --  The host's own value behind a descriptor.

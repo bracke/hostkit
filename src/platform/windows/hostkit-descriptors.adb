@@ -627,10 +627,23 @@ package body Hostkit.Descriptors is
       --  Windows has no fork, so there is no moment between it and exec in
       --  which to rearrange anything: CreateProcess takes the three handles up
       --  front, in STARTUPINFO. Hostkit.Spawn passes them there and does not
-      --  call this. What this does is the other half of the same idea -- change
-      --  this process's own standard handles -- which is what a caller
-      --  redirecting its own output wants, and it also has to be inheritable to
-      --  be worth anything to a child.
+      --  call this. What this does is change this process's own standard
+      --  handles, and mark the new one inheritable so it is worth something to
+      --  a child.
+      --
+      --  What it does *not* do is move where this program's own writes go.
+      --  SetStdHandle changes what a later reader of the standard handles
+      --  finds; a runtime that opened its output once -- which every Ada and C
+      --  runtime does -- goes on writing where it always did. A consumer that
+      --  wanted `exec > file` for itself found exactly that: its own line came
+      --  out on the console with the file empty, and it now refuses on this
+      --  host rather than reporting success and moving nothing.
+      --
+      --  Making it true here means rebinding the C runtime descriptor as well
+      --  (_open_osfhandle then _dup2 onto 1 or 2), which is a change to this
+      --  body and not to the caller. Written down because the spec above
+      --  promises a caller redirecting its own output something this half of
+      --  it does not yet deliver.
       if Set_Handle_Information
            (To_Handle (Item), Handle_Flag_Inherit, Handle_Flag_Inherit) = 0
       then
