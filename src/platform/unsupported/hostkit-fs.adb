@@ -156,6 +156,17 @@ package body Hostkit.Fs is
       return "";
    end Home_Directory;
 
+   --  No answer here. A Windows profile folder belongs to whoever is logged
+   --  in, and there is no supported way to ask where another account's lives
+   --  without that account's credentials -- so this refuses rather than
+   --  guessing at C:\\Users\\<name>, which is a convention rather than a rule
+   --  and is wrong on a domain-joined machine.
+   function Home_Directory_Of (User : String) return String is
+      pragma Unreferenced (User);
+   begin
+      return "";
+   end Home_Directory_Of;
+
    function Application_Data_Directory return String is
    begin
       return "";

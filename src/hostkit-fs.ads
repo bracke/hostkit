@@ -353,6 +353,23 @@ package Hostkit.Fs is
    --  telling apart from "the home directory is the current directory".
    function Home_Directory return String;
 
+   --  Another user's home directory, by name.
+   --
+   --  What `~other` means in a shell, and the reason a shell cannot work it
+   --  out for itself: the answer is in the host's user database, which is
+   --  getpwnam on POSIX and nothing at all on Windows -- a Windows profile
+   --  folder belongs to whoever is logged in, and there is no supported way to
+   --  ask where another account's lives without their credentials.
+   --
+   --  Empty for a user this host does not know and empty on a host that cannot
+   --  answer, which a caller must not read as "the current directory": a shell
+   --  expanding `~someone` leaves the text alone when this says nothing, so a
+   --  path that was meant literally survives.
+   --
+   --  @param User The account name, as the host spells it.
+   --  @return The home directory, or "" where there is no answer.
+   function Home_Directory_Of (User : String) return String;
+
    --  Where this host keeps per-user application data: %APPDATA% on Windows,
    --  ~/Library/Application Support on macOS, $XDG_DATA_HOME or ~/.local/share
    --  elsewhere. The three are not interchangeable and nothing but the host

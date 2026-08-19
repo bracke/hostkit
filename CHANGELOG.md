@@ -49,6 +49,14 @@ recently enough to matter to somebody pinning it; the history before that is in
   rather than inventing a number. Reading is done by setting and putting back,
   because POSIX has no way to ask, and the comment says so where a reader will
   wonder.
+- `Hostkit.Fs.Home_Directory_Of` — another user's home directory by name, which
+  is what a shell needs for `~other` and cannot work out for itself: the answer
+  is in the host's user database (`getpwnam` on POSIX) and nowhere else. Windows
+  answers "" for every account: a profile folder belongs to whoever is logged in,
+  and there is no supported way to ask about another one without its credentials
+  — guessing at `C:\Users\<name>` is a convention rather than a rule and is
+  wrong on a domain-joined machine. A consumer that gets "" leaves the path as
+  the user wrote it.
 - `Hostkit.Limits` — the resource limits POSIX calls rlimits and every shell
   exposes as `ulimit`: how many files may be open, how many processes a user
   may have, how large a file, a core dump, the stack, the data segment or the

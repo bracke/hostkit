@@ -653,6 +653,46 @@ package body Hostkit.Fs is
          return "";
    end Home_Directory;
 
+   function Home_Directory_Of (User : String) return String is
+      type Passwd is record
+         Name   : Interfaces.C.Strings.chars_ptr;
+         Passwd : Interfaces.C.Strings.chars_ptr;
+         Uid    : Interfaces.C.unsigned;
+         Gid    : Interfaces.C.unsigned;
+         Gecos  : Interfaces.C.Strings.chars_ptr;
+         Dir    : Interfaces.C.Strings.chars_ptr;
+         Shell  : Interfaces.C.Strings.chars_ptr;
+      end record
+        with Convention => C;
+      type Passwd_Access is access all Passwd;
+
+      function Getpwnam (Name : Interfaces.C.char_array) return Passwd_Access
+        with Import => True, Convention => C, External_Name => "getpwnam";
+
+      use type Interfaces.C.Strings.chars_ptr;
+
+      Entry_Item : Passwd_Access;
+   begin
+      if User = "" then
+         return "";
+      end if;
+
+      --  The database rather than HOME: HOME is this process's idea of its own
+      --  home and says nothing about anybody else's.
+      Entry_Item := Getpwnam (Interfaces.C.To_C (User));
+
+      if Entry_Item = null
+        or else Entry_Item.Dir = Interfaces.C.Strings.Null_Ptr
+      then
+         return "";
+      end if;
+
+      return Interfaces.C.Strings.Value (Entry_Item.Dir);
+   exception
+      when others =>
+         return "";
+   end Home_Directory_Of;
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin

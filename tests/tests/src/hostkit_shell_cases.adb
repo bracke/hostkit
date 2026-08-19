@@ -853,6 +853,42 @@ package body Hostkit_Shell_Cases is
               & Natural'Image (Restored));
    end Test_The_Creation_Mask_Is_The_Hosts_Own;
 
+   --  Another user's home directory is the host's to answer, or refuse.
+   --
+   --  Asked about this user by name, because that is the one account a test
+   --  can be sure exists: the answer must match what Home_Directory says.
+   --  A name nobody has answers "", and so does every name on Windows -- where
+   --  a profile folder belongs to whoever is logged in and there is no
+   --  supported way to ask about another account.
+   procedure Test_Another_Users_Home_Is_The_Hosts_To_Answer
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_Another_Users_Home_Is_The_Hosts_To_Answer
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      use type Hostkit.Host.Kind;
+   begin
+      Assert (Hostkit.Fs.Home_Directory_Of
+                ("hostkit-no-such-account-anywhere") = "",
+              "a user this host does not have has no home directory");
+
+      Assert (Hostkit.Fs.Home_Directory_Of ("") = "",
+              "a nameless user has no home directory");
+
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (Hostkit.Fs.Home_Directory_Of ("Administrator") = "",
+                 "Windows answers about no account but the one logged in");
+         return;
+      end if;
+
+      --  root is the one account every POSIX host has, and the database is
+      --  what is being asked -- not HOME, which is this process's own.
+      Assert (Hostkit.Fs.Home_Directory_Of ("root") /= "",
+              "a POSIX host knows where root lives");
+   end Test_Another_Users_Home_Is_The_Hosts_To_Answer;
+
    --  A resource limit is the host's own, or the host says it has none.
    --
    --  Open_Files, because it is the limit every POSIX host has a real number
@@ -2565,6 +2601,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_The_Creation_Mask_Is_The_Hosts_Own'Access,
          "the creation mask is the host's own, or the host says it has none");
+      Register_Routine
+        (T, Test_Another_Users_Home_Is_The_Hosts_To_Answer'Access,
+         "another user's home directory is the host's to answer, or refuse");
       Register_Routine
         (T, Test_A_Resource_Limit_Is_The_Hosts_Own'Access,
          "a resource limit is the host's own, or the host says it has none");
