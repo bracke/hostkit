@@ -295,13 +295,14 @@ package Hostkit.Descriptors is
    --  @param Item Descriptor to install.
    --  @param To Which stream it becomes.
    --  @return True when the assignment was made.
-   --  On Windows this changes the process's standard handles -- what a child
-   --  and any later reader of them find -- and does not move where this
-   --  program's *own* writes go: a runtime that opened its output once goes on
-   --  writing where it did. POSIX has no such split, because dup2 moves the
-   --  descriptor every writer already holds. A caller redirecting itself has
-   --  to know which of the two it is getting; adash's `redirect` refuses on
-   --  Windows for this reason.
+   --  This program's own writing moves too, not only what a child is given.
+   --
+   --  On POSIX that is one call: dup2 moves the descriptor every writer in the
+   --  process already holds. Windows keeps two things -- the standard handle a
+   --  child is given, and the C runtime descriptor this program writes through
+   --  -- and this moves both, because moving the handle alone leaves every
+   --  Put_Line where it was. A consumer found that the hard way: its own line
+   --  on the console with the file it had redirected to empty.
    function Assign (Item : Descriptor; To : Standard_Stream) return Boolean;
 
    --  The host's own value behind a descriptor.

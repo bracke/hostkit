@@ -91,6 +91,29 @@ package body Hostkit.Descriptors is
 
    Duplicate_Same_Access : constant C_DWord := 2;
 
+   --  The C runtime's own side of a standard stream.
+   --
+   --  Windows keeps two things where POSIX keeps one: the standard *handle*,
+   --  which a child is given and a later GetStdHandle finds, and the runtime
+   --  *descriptor*, which is where this program's own writes go. Moving a
+   --  stream means moving both, and these three are the second half.
+   function Open_Osfhandle
+     (Handle : System.Address; Flags : Interfaces.C.int)
+      return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "_open_osfhandle";
+
+   function Duplicate_Descriptor
+     (From : Interfaces.C.int; Onto : Interfaces.C.int) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "_dup2";
+
+   function Close_Descriptor (Item : Interfaces.C.int) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "_close";
+
+   --  Everything the runtime is holding goes where it was written for, before
+   --  the stream underneath it moves.
+   function Flush_Runtime return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "_flushall";
+
    function Set_Handle_Information
      (Handle : System.Address;
       Mask   : C_DWord;
@@ -624,33 +647,78 @@ package body Hostkit.Descriptors is
          return False;
       end if;
 
-      --  Windows has no fork, so there is no moment between it and exec in
-      --  which to rearrange anything: CreateProcess takes the three handles up
-      --  front, in STARTUPINFO. Hostkit.Spawn passes them there and does not
-      --  call this. What this does is change this process's own standard
-      --  handles, and mark the new one inheritable so it is worth something to
-      --  a child.
+      --  Two halves, because this host keeps two things where POSIX keeps one.
       --
-      --  What it does *not* do is move where this program's own writes go.
-      --  SetStdHandle changes what a later reader of the standard handles
-      --  finds; a runtime that opened its output once -- which every Ada and C
-      --  runtime does -- goes on writing where it always did. A consumer that
-      --  wanted `exec > file` for itself found exactly that: its own line came
-      --  out on the console with the file empty, and it now refuses on this
-      --  host rather than reporting success and moving nothing.
+      --  The standard *handle* is what CreateProcess reads for a child and
+      --  what a later caller of GetStdHandle finds. SetStdHandle moves that.
       --
-      --  Making it true here means rebinding the C runtime descriptor as well
-      --  (_open_osfhandle then _dup2 onto 1 or 2), which is a change to this
-      --  body and not to the caller. Written down because the spec above
-      --  promises a caller redirecting its own output something this half of
-      --  it does not yet deliver.
+      --  The C runtime *descriptor* is where this program's own writes go: a
+      --  runtime opens its output once and keeps writing there, so moving the
+      --  handle alone leaves every Put_Line exactly where it was. A consumer
+      --  that wanted `exec > file` for itself found precisely that -- its own
+      --  line on the console with the file empty. So the descriptor is moved
+      --  too: a runtime descriptor is made for the handle and duplicated over
+      --  the standard one, which is what dup2 does on the other hosts in a
+      --  single call.
+      --
+      --  Order matters. The handle first, so that a child started between the
+      --  two calls gets the new one rather than the old; then the descriptor,
+      --  which only this program reads.
       if Set_Handle_Information
            (To_Handle (Item), Handle_Flag_Inherit, Handle_Flag_Inherit) = 0
       then
          return False;
       end if;
 
-      return Set_Std_Handle (Which, To_Handle (Item)) /= 0;
+      if Set_Std_Handle (Which, To_Handle (Item)) = 0 then
+         return False;
+      end if;
+
+      --  And the runtime's own descriptor.
+      declare
+         --  _open_osfhandle takes ownership of the handle it is given, so what
+         --  is handed over is a duplicate: the caller's descriptor stays the
+         --  caller's, and closing the temporary below cannot take the file out
+         --  from under the stream it was just assigned to.
+         Copy : aliased System.Address := System.Null_Address;
+
+         Made : constant Interfaces.C.int :=
+           (if Duplicate_Handle
+                 (Get_Current_Process, To_Handle (Item), Get_Current_Process,
+                  Copy'Access, 0, 1, Duplicate_Same_Access) /= 0
+            then Open_Osfhandle (Copy, 0)
+            else -1);
+
+         Target : constant Interfaces.C.int :=
+           (case To is
+               when Stream_Input  => 0,
+               when Stream_Output => 1,
+               when Stream_Error  => 2);
+
+      begin
+         if Made < 0 then
+            --  The handle moved and the descriptor did not. Reported rather
+            --  than left half done: a caller told this worked would write into
+            --  the old place and believe otherwise.
+            return False;
+         end if;
+
+         --  Three calls in the order they are written, which is the order they
+         --  have to happen in: flush what the runtime is holding for the old
+         --  destination, put the new descriptor over the standard one, and let
+         --  the temporary go. Declarations rather than statements so that the
+         --  two answers nobody acts on can say so.
+         declare
+            Flushed : constant Interfaces.C.int := Flush_Runtime;
+            Placed  : constant Interfaces.C.int :=
+              Duplicate_Descriptor (Made, Target);
+            Closed  : constant Interfaces.C.int := Close_Descriptor (Made);
+
+            pragma Unreferenced (Flushed, Closed);
+         begin
+            return Placed >= 0;
+         end;
+      end;
    end Assign;
 
    ------------------

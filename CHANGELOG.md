@@ -88,19 +88,17 @@ recently enough to matter to somebody pinning it; the history before that is in
   into a buffer nobody will read (`Transfer_Ok`). A consumer that did not know
   this read a refusal as a keystroke that never arrived.
 
-### Known
-
-- `Descriptors.Assign` on Windows changes the process's standard handles and not
-  where this program's own writes go. `SetStdHandle` is what the host offers;
-  a runtime that opened its output once goes on writing where it did, so
-  "redirect my own output" is half-answered there and whole-answered on POSIX,
-  where `dup2` moves the descriptor every writer holds. Found by a consumer
-  (adash's session redirection), whose command now refuses on that host rather
-  than reporting success and moving nothing. Making it true here means rebinding
-  the C runtime descriptor — `_open_osfhandle` then `_dup2` — in the Windows
-  body.
-
 ### Fixed
+
+- `Descriptors.Assign` moves this program's own writing on Windows, not only
+  what a child is given. `SetStdHandle` changes the standard handle; a runtime
+  that opened its output once goes on writing where it did, so a caller
+  redirecting itself got nothing — its own line on the console with the file it
+  had redirected to empty. The Windows body now duplicates the handle into a
+  runtime descriptor and puts that over the standard one (`_open_osfhandle`,
+  `_flushall`, `_dup2`), which is what `dup2` does in a single call elsewhere.
+  A case asserts it on every host by writing through `Ada.Text_IO` and reading
+  the file back, which is the thing that was silently untrue.
 
 - The macOS body reads macOS's own `struct passwd`. BSD keeps a change time and
   a login class between the group id and the gecos field, and an expiry after
