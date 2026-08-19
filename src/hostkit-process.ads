@@ -46,6 +46,37 @@ package Hostkit.Process is
       Arguments : String_Vectors.Vector)
       return Boolean;
 
+   --  Become this program: replace the running image, keeping the process.
+   --
+   --  What a shell's `exec` does, and the reason it is a different thing from
+   --  starting a program and waiting: the process id, the open descriptors,
+   --  the terminal's foreground group and whatever is waiting for this process
+   --  all stay pointed at the program that takes over. A launcher that started
+   --  a child and exited with its status would look the same from the outside
+   --  and be wrong in every one of those ways.
+   --
+   --  Never returns when it works: there is nothing to return to, because this
+   --  program has stopped existing. False means the host refused -- no such
+   --  program, not executable, or a host with no way to do this at all.
+   --
+   --  Windows has no such call. CreateProcess makes a *new* process, so
+   --  anything built on it changes the process id and leaves the original
+   --  either waiting or gone -- which is precisely what a caller using this is
+   --  trying to avoid. So it refuses there rather than pretending, and a
+   --  consumer says so to its user.
+   --
+   --  The environment is this process's own, which is what a replacement
+   --  means: a caller that wants a different one sets it before calling.
+   --
+   --  @param Program The program to become; a path, or a name to look up on
+   --         the search path.
+   --  @param Arguments What it is given, not counting its own name.
+   --  @return False, always, and only when the replacement did not happen.
+   function Become
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean;
+
    --  Run Program to completion and report its exit status. For a short-lived helper,
    --  where the status is the point.
    --  Where this host would find Program, or "" when it would not find it.

@@ -88,6 +88,15 @@ package body Hostkit.Process is
          return False;
    end Launch;
 
+   function Become
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean
+   is
+   begin
+      return Hostkit.Native.Become_Program (Program, Arguments);
+   end Become;
+
    function Locate (Program : String) return String is
       use type GNAT.OS_Lib.String_Access;
       Found : GNAT.OS_Lib.String_Access :=

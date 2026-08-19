@@ -45,6 +45,13 @@ private package Hostkit.Native is
       return Hostkit.Process.Process_Outcome;
 
    --  Ask a process, by id, to stop. See Hostkit.Process.Request_Stop.
+   --  Replace this process's image with a program. See Hostkit.Process.Become,
+   --  which is the documented face of this. Returns only on failure.
+   function Become_Program
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean;
+
    function Request_Stop (Process_Id : Integer) return Boolean;
 
    --  Wait for a descriptor to be ready. See Hostkit.Process.Wait_FD.

@@ -49,6 +49,15 @@ recently enough to matter to somebody pinning it; the history before that is in
   rather than inventing a number. Reading is done by setting and putting back,
   because POSIX has no way to ask, and the comment says so where a reader will
   wonder.
+- `Hostkit.Process.Become` — replace the running image, keeping the process:
+  what a shell's `exec` does. The process id, the open descriptors, the
+  terminal's foreground group and whatever is waiting for this process all stay
+  pointed at the program that takes over, which is the whole reason it is not
+  "start a child and exit with its status". `execvp` on POSIX, so a name is
+  looked up on the search path the way the host does it. Windows refuses:
+  CreateProcess makes a *new* process, so anything built on it changes the
+  process id and leaves the original waiting or gone — precisely what a caller
+  reaching for this is avoiding.
 - `Hostkit.Fs.Home_Directory_Of` — another user's home directory by name, which
   is what a shell needs for `~other` and cannot work out for itself: the answer
   is in the host's user database (`getpwnam` on POSIX) and nowhere else. Windows

@@ -46,6 +46,20 @@ package body Hostkit.Native is
       return Nothing;
    end Run_Captured;
 
+   --  Windows has no call that replaces a running image. CreateProcess makes a
+   --  *new* process, so anything built on it changes the process id and leaves
+   --  the original waiting or gone -- which is what a caller reaching for this
+   --  is trying to avoid. Refused rather than emulated.
+   function Become_Program
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean
+   is
+      pragma Unreferenced (Program, Arguments);
+   begin
+      return False;
+   end Become_Program;
+
    function Request_Stop (Process_Id : Integer) return Boolean is
       pragma Unreferenced (Process_Id);
    begin

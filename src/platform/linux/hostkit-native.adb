@@ -300,6 +300,59 @@ package body Hostkit.Native is
       return Result;
    end Run_Captured;
 
+   function Become_Program
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean
+   is
+      use Interfaces.C.Strings;
+      use type Interfaces.C.size_t;
+
+      --  execvp rather than execv: a shell's `exec` takes a name as readily as
+      --  a path, and the search is the host's to do -- ours would have to
+      --  re-derive the rules for an executable bit and a search path that this
+      --  host already knows.
+      function C_Execvp
+        (File : chars_ptr; Argv : chars_ptr_array) return Interfaces.C.int
+        with Import, Convention => C, External_Name => "execvp";
+
+      Count : constant Natural := Natural (Arguments.Length);
+
+      --  Argument zero is the program's own name, which is what every program
+      --  expects to find there and what `ps` shows. Then the arguments, then
+      --  the null the host reads as the end.
+      Argv : chars_ptr_array (0 .. Interfaces.C.size_t (Count) + 1) :=
+        [others => Null_Ptr];
+
+      Ignored : Interfaces.C.int;
+   begin
+      if Program = "" then
+         return False;
+      end if;
+
+      Argv (0) := New_String (Program);
+
+      for Index in 1 .. Count loop
+         Argv (Interfaces.C.size_t (Index)) :=
+           New_String
+             (Ada.Strings.Unbounded.To_String (Arguments.Element (Index)));
+      end loop;
+
+      Ignored := C_Execvp (Argv (0), Argv);
+
+      --  Only reachable because the call failed: on success this process is
+      --  the other program by now and there is nothing here to run. Freed
+      --  anyway, because a caller may go on to report the refusal and then do
+      --  something else.
+      for Index in Argv'Range loop
+         if Argv (Index) /= Null_Ptr then
+            Free (Argv (Index));
+         end if;
+      end loop;
+
+      return False;
+   end Become_Program;
+
    function Request_Stop (Process_Id : Integer) return Boolean is
       Sigterm : constant Interfaces.C.int := 15;
 
