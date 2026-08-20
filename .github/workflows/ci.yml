@@ -53,11 +53,18 @@ jobs:
           #  repository and stayed. It survived locally too, because an
           #  incremental build does not recompile the file that carries it --
           #  which is exactly why a fresh runner is the right place to ask.
+          #
+          #  This crate's own units only. `alr build` compiles the path
+          #  dependencies as well, and what one of those has to say about its
+          #  own sources belongs to its own repository -- not to a run that
+          #  cannot fix it.
           alr -n build 2>&1 | tee "${RUNNER_TEMP:-/tmp}/build-output.txt"
-          if grep -Eq "^[^ ]+\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " "${RUNNER_TEMP:-/tmp}/build-output.txt"
+          if grep -Eq "^hostkit[a-z0-9_.-]*\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " \
+             "${RUNNER_TEMP:-/tmp}/build-output.txt"
           then
             echo "The build said something. A clean build says nothing:"
-            grep -E "^[^ ]+\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " "${RUNNER_TEMP:-/tmp}/build-output.txt"
+            grep -E "^hostkit[a-z0-9_.-]*\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " \
+              "${RUNNER_TEMP:-/tmp}/build-output.txt"
             exit 1
           fi
 
