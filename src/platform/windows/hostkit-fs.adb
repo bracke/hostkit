@@ -843,11 +843,6 @@ package body Hostkit.Fs is
                   or else Ends_With (".bat") or else Ends_With (".cmd"));
    end Starts_When_Named;
 
-   ------------------
-   -- Null_Device --
-   ------------------
-
-
    -------------------
    -- Creation_Mask --
    -------------------
@@ -869,6 +864,10 @@ package body Hostkit.Fs is
       Previous := 0;
       return False;
    end Set_Creation_Mask;
+
+   ------------------
+   -- Null_Device --
+   ------------------
 
    function Null_Device return String is
    begin
