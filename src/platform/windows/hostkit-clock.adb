@@ -1,5 +1,4 @@
 with Ada.Calendar.Formatting;
-with Ada.Strings.Unbounded;
 with Interfaces.C;
 
 package body Hostkit.Clock is

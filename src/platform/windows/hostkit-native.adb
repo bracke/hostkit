@@ -1,4 +1,3 @@
-with Hostkit.Process;
 with Hostkit.Windows_Command_Line;
 with Ada.Calendar;
 with Ada.Strings.UTF_Encoding.Wide_Strings;
@@ -549,7 +548,6 @@ package body Hostkit.Native is
       when others =>
          return Hostkit.Process.Wait_Error;
    end Wait_FD;
-
 
    function Native_Backend_Label return String is
    begin

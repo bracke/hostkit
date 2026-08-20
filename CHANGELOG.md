@@ -90,6 +90,22 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **The Windows and macOS bodies build without a word, which nobody could see
+  until CI asked.** `alr build` exits 0 with warnings on its output, and a
+  platform body only compiles on the platform that owns it — so twenty-four
+  complaints had collected in the two bodies a Linux machine never builds:
+  redundant `with` clauses, `use type` clauses shadowed by the same clause at
+  the top of the file, blank lines in pairs, a `()` aggregate GNAT now calls
+  obsolescent, an assignment overwritten before it was read, a `char_array`
+  that could be constant, and an orphaned comment header. The build step reads
+  its own output now and fails on any line naming a file and a position.
+
+- **The Windows executable-extension test allocates nothing.** Both bodies that
+  ask whether a name runs — `Fs.Is_Executable` and `Metadata`'s own — built an
+  array of `access constant String` from six `new String'(".exe")` allocations
+  on **every call**, none of which anything frees, to hold six literals known
+  at compile time. The extension is taken from the last dot and compared.
+
 - `Descriptors.Assign` moves this program's own writing on Windows, not only
   what a child is given. `SetStdHandle` changes the standard handle; a runtime
   that opened its output once goes on writing where it did, so a caller

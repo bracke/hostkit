@@ -1,5 +1,6 @@
 with Ada.Characters.Handling;
 with Ada.Directories;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Containers.Vectors;
 
@@ -434,38 +435,24 @@ package body Hostkit.Metadata is
       --  Windows does not decide what runs from an ACL. Every ordinary file is
       --  granted FILE_EXECUTE in its DACL, so folding that bit into the mode said
       --  that everything is executable -- and the file manager duly classified a
-      --  .tar.gz as a program. What runs here is decided by the extension.
-      Runnable : constant array (1 .. 6) of access constant String :=
-        [new String'(".exe"), new String'(".com"), new String'(".bat"),
-         new String'(".cmd"), new String'(".ps1"), new String'(".msi")];
+      --  .tar.gz as a program. What runs here is decided by the extension,
+      --  and tested without allocating one.
+      --
+      --  This was an array of `access constant String` filled with `new
+      --  String'(".exe")` and the rest: six allocations that nothing ever
+      --  frees, made afresh on every call, to hold six literals known at
+      --  compile time. GNAT warns about the anonymous access allocator, and it
+      --  is right to.
+      Dot : constant Natural :=
+        Ada.Strings.Fixed.Index (Path, ".", Ada.Strings.Backward);
+
+      Suffix : constant String :=
+        (if Dot = 0 then ""
+         else Ada.Characters.Handling.To_Lower (Path (Dot .. Path'Last)));
    begin
-      for Suffix of Runnable loop
-         declare
-            Text : constant String := Suffix.all;
-         begin
-            if Path'Length >= Text'Length then
-               declare
-                  Tail : constant String :=
-                    Path (Path'Last - Text'Length + 1 .. Path'Last);
-                  Lower : String := Tail;
-               begin
-                  for Index in Lower'Range loop
-                     if Lower (Index) in 'A' .. 'Z' then
-                        Lower (Index) :=
-                          Character'Val
-                            (Character'Pos (Lower (Index)) + 32);
-                     end if;
-                  end loop;
-
-                  if Lower = Text then
-                     return True;
-                  end if;
-               end;
-            end if;
-         end;
-      end loop;
-
-      return False;
+      return Suffix = ".exe" or else Suffix = ".com" or else Suffix = ".bat"
+        or else Suffix = ".cmd" or else Suffix = ".ps1"
+        or else Suffix = ".msi";
    end Runs_On_Windows;
 
    function Rights_To_Triplet (Rights : C_DWord) return Natural;

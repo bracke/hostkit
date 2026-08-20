@@ -173,8 +173,6 @@ package body Hostkit.Host is
    -----------------
 
    function Is_Terminal (Stream : Stream_Kind) return Boolean is
-      use type Interfaces.C.int;
-
       Descriptor : constant Interfaces.C.int :=
         (case Stream is
             when Standard_Input  => 0,

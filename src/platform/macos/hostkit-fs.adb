@@ -832,11 +832,6 @@ package body Hostkit.Fs is
    function Starts_When_Named (Path : String) return Boolean
    is (Is_Executable (Path));
 
-   ------------------
-   -- Null_Device --
-   ------------------
-
-
    -------------------
    -- Creation_Mask --
    -------------------
@@ -867,6 +862,10 @@ package body Hostkit.Fs is
       Previous := Natural (Held);
       return True;
    end Set_Creation_Mask;
+
+   ------------------
+   -- Null_Device --
+   ------------------
 
    function Null_Device return String is
    begin

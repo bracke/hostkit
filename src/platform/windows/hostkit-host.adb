@@ -218,8 +218,6 @@ package body Hostkit.Host is
    -----------------
 
    function Is_Terminal (Stream : Stream_Kind) return Boolean is
-      use type Interfaces.C.int;
-
       --  STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE.
       Which : constant Interfaces.C.unsigned_long :=
         (case Stream is

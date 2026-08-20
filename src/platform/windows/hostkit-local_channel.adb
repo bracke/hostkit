@@ -2,8 +2,6 @@ with Ada.Strings.UTF_Encoding.Wide_Strings;
 
 with Interfaces.C;
 
-with Hostkit.Process;
-
 with System.Storage_Elements;
 with System;
 

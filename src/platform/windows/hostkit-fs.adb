@@ -94,9 +94,19 @@ package body Hostkit.Fs is
    --  a file manager duly classified a .tar.gz as a program. What runs here is decided
    --  by the extension.
    function Is_Executable (Path : String) return Boolean is
-      Runnable : constant array (1 .. 6) of access constant String :=
-        [new String'(".exe"), new String'(".com"), new String'(".bat"),
-         new String'(".cmd"), new String'(".ps1"), new String'(".msi")];
+      --  The extensions Windows runs, tested without allocating one.
+      --
+      --  This was an array of `access constant String` filled with `new
+      --  String'(".exe")` and the rest: six allocations that nothing ever
+      --  frees, made afresh on every call, to hold six literals known at
+      --  compile time. GNAT warns about the anonymous access allocator, and it
+      --  is right to.
+      Dot : constant Natural :=
+        Ada.Strings.Fixed.Index (Path, ".", Ada.Strings.Backward);
+
+      Suffix : constant String :=
+        (if Dot = 0 then ""
+         else Ada.Characters.Handling.To_Lower (Path (Dot .. Path'Last)));
 
       C_Path     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Attributes : constant C_DWord := Get_File_Attributes (C_Path);
@@ -109,20 +119,9 @@ package body Hostkit.Fs is
          return False;
       end if;
 
-      for Suffix of Runnable loop
-         declare
-            Text : constant String := Suffix.all;
-         begin
-            if Path'Length >= Text'Length
-              and then Ada.Characters.Handling.To_Lower
-                         (Path (Path'Last - Text'Length + 1 .. Path'Last)) = Text
-            then
-               return True;
-            end if;
-         end;
-      end loop;
-
-      return False;
+      return Suffix = ".exe" or else Suffix = ".com" or else Suffix = ".bat"
+        or else Suffix = ".cmd" or else Suffix = ".ps1"
+        or else Suffix = ".msi";
    exception
       when others =>
          return False;
@@ -712,7 +711,7 @@ package body Hostkit.Fs is
 
    function Temp_Directory return String is
       use type Interfaces.C.size_t;
-      Buf : Interfaces.C.char_array (0 .. 519) := (others => Interfaces.C.nul);
+      Buf : Interfaces.C.char_array (0 .. 519) := [others => Interfaces.C.nul];
       N   : constant C_DWord := Get_Temp_Path (C_DWord (Buf'Length), Buf'Address);
    begin
       --  GetTempPathA returns 0 on failure, or the length required if the

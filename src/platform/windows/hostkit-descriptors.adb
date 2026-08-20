@@ -563,8 +563,6 @@ package body Hostkit.Descriptors is
       Handle      : System.Address;
       Attributes  : aliased Security_Attributes;
    begin
-      Item := Invalid;
-
       Attributes.Length := C_DWord (Security_Attributes'Size / 8);
       Attributes.Inherit_Handle := 0;
 
