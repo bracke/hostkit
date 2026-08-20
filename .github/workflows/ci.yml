@@ -44,7 +44,22 @@ jobs:
 
       - name: Build the library
         shell: bash
-        run: alr --non-interactive build
+        run: |
+          set -o pipefail
+
+          #  A clean build says nothing, and until now nobody was checking
+          #  that here: `alr build` exits 0 with warnings on its output, so a
+          #  (style) complaint or an unused `use` clause reached the
+          #  repository and stayed. It survived locally too, because an
+          #  incremental build does not recompile the file that carries it --
+          #  which is exactly why a fresh runner is the right place to ask.
+          alr -n build 2>&1 | tee "${RUNNER_TEMP:-/tmp}/build-output.txt"
+          if grep -Eq "^[^ ]+\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " "${RUNNER_TEMP:-/tmp}/build-output.txt"
+          then
+            echo "The build said something. A clean build says nothing:"
+            grep -E "^[^ ]+\\.(ad[bs]|c|h):[0-9]+:[0-9]+: " "${RUNNER_TEMP:-/tmp}/build-output.txt"
+            exit 1
+          fi
 
       - name: Build and run the test suite
         shell: bash

@@ -513,7 +513,8 @@ package body Hostkit.Native is
          return Interfaces.C.int
       with Import => True, Convention => C, External_Name => "getgrouplist";
 
-      C_Name        : Interfaces.C.char_array := Interfaces.C.To_C (User_Name);
+      C_Name        : constant Interfaces.C.char_array :=
+        Interfaces.C.To_C (User_Name);
       Passwd_Entry  : constant access Passwd := Getpwnam (C_Name);
       Native_Groups : aliased C_Group_Id_List (1 .. Groups'Length) := [others => 0];
       Count         : aliased Interfaces.C.int := Interfaces.C.int (Groups'Length);
