@@ -17,6 +17,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Hostkit.Command_Line` — the arguments this process was actually started
+  with. Windows starts a process with one command-line *string*, and the
+  vector a program sees is whatever its C runtime parsed out of it — some
+  runtimes expand a wildcard against the current directory on the way, so a
+  tool whose arguments are patterns answers about the wrong thing. This asks
+  the system (`GetCommandLineW` plus `CommandLineToArgvW`, which expands
+  nothing) and splits it here; elsewhere the kernel's vector is untouched and
+  `Ada.Command_Line` is the answer.
 - `Hostkit.Host` — which host this program is running on, answered by the body
   the build chose rather than by anything an environment can spoof.
 - `Hostkit.Fs` — path facts the host answers differently (and that GNAT gets

@@ -26,6 +26,7 @@ with Hostkit.Shell;
 with Hostkit.Trash;
 with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
+with Hostkit.Command_Line;
 
 package body Hostkit_Suite is
    use AUnit.Assertions;
@@ -1526,11 +1527,42 @@ package body Hostkit_Suite is
       Hostkit.Descriptors.Close (Handle);
    end Test_The_Null_Device_Reads_As_Nothing;
 
+   --  The suite is started with no arguments, so the two answers must agree
+   --  on that -- and on a host where the command line has to be asked for and
+   --  split (Windows: GetCommandLineW plus CommandLineToArgvW), agreeing at
+   --  all is what proves that path works. Where it cannot be asked, the body
+   --  falls back to the runtime and the two are the same by construction.
+   procedure Test_Command_Line_Arguments
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+   begin
+      Assert
+        (Hostkit.Command_Line.Argument_Count
+           = Ada.Command_Line.Argument_Count,
+         "the argument count must be the one the process was started with;"
+         & " asked" & Natural'Image (Hostkit.Command_Line.Argument_Count)
+         & ", runtime" & Natural'Image (Ada.Command_Line.Argument_Count));
+
+      for Index in 1 .. Ada.Command_Line.Argument_Count loop
+         Assert
+           (Hostkit.Command_Line.Argument (Index)
+              = Ada.Command_Line.Argument (Index),
+            "argument" & Natural'Image (Index)
+            & " must be the one the process was started with; asked '"
+            & Hostkit.Command_Line.Argument (Index) & "', runtime '"
+            & Ada.Command_Line.Argument (Index) & "'");
+      end loop;
+   end Test_Command_Line_Arguments;
+
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
       Register_Routine
         (T, Test_Quoting'Access, "shell : the quoting matches the shell it quotes for");
+      Register_Routine
+        (T, Test_Command_Line_Arguments'Access,
+         "process : the arguments are the ones the process was started with");
       Register_Routine
         (T, Test_Windows_Command_Line_Quoting'Access,
          "process : the Windows CRT argument quoting round-trips");
