@@ -118,6 +118,22 @@ package Hostkit.Process is
    --  @return True when the request reached the process.
    function Request_Stop (Process_Id : Integer) return Boolean;
 
+   --  Whether a process on this machine is there, as far as the host can say.
+   type Presence is (Present, Absent, Unknown);
+
+   --  Whether a process on this machine, by id, is still there -- one we did not start
+   --  and cannot wait on, such as the holder of a lock or a lease that may have died.
+   --
+   --  POSIX asks with signal 0, which delivers nothing: success, or EPERM (there, and not
+   --  ours to signal), is Present; ESRCH is Absent. Windows opens the process for its exit
+   --  code: STILL_ACTIVE or access denied is Present, ERROR_INVALID_PARAMETER (no such
+   --  process) is Absent.
+   --
+   --  @return Unknown whenever the host did not say -- an error other than those, a host
+   --    that cannot ask, an id that is no process id. What an unknown means is the
+   --    caller's to decide.
+   function Presence_Of (Process_Id : Integer) return Presence;
+
    type Wait_Outcome is (Wait_Ready, Wait_Timed_Out, Wait_Error);
 
    --  Wait until a file descriptor -- a subprocess's stdio pipe, typically -- is ready to be

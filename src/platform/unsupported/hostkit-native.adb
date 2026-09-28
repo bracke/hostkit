@@ -66,6 +66,12 @@ package body Hostkit.Native is
       return False;
    end Request_Stop;
 
+   function Presence_Of (Process_Id : Integer) return Hostkit.Process.Presence is
+      pragma Unreferenced (Process_Id);
+   begin
+      return Hostkit.Process.Unknown;
+   end Presence_Of;
+
    function Wait_FD
      (FD         : Integer;
       For_Write  : Boolean;

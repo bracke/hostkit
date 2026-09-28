@@ -54,6 +54,9 @@ private package Hostkit.Native is
 
    function Request_Stop (Process_Id : Integer) return Boolean;
 
+   --  Whether a process, by id, is still there. See Hostkit.Process.Presence_Of.
+   function Presence_Of (Process_Id : Integer) return Hostkit.Process.Presence;
+
    --  Wait for a descriptor to be ready. See Hostkit.Process.Wait_FD.
    function Wait_FD
      (FD         : Integer;

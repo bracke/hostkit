@@ -17,6 +17,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Hostkit.Process.Presence_Of` — whether a process on this machine, by id, is
+  still there: `Present`, `Absent`, or `Unknown` where the host did not say.
+  POSIX asks with signal 0 (EPERM still counts as there, ESRCH as gone);
+  Windows opens the process for its exit code. For a process one did not start
+  and cannot wait on — the holder of a lock or a lease that may have died.
 - `Hostkit.Command_Line` — the arguments this process was actually started
   with. Windows starts a process with one command-line *string*, and the
   vector a program sees is whatever its C runtime parsed out of it — some

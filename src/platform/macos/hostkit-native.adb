@@ -372,6 +372,28 @@ package body Hostkit.Native is
          return False;
    end Request_Stop;
 
+   --  kill with signal 0 checks the process and delivers nothing. EPERM is 1 and ESRCH
+   --  is 3 on macOS.
+   function Presence_Of (Process_Id : Integer) return Hostkit.Process.Presence is
+      Permission_Denied : constant := 1;
+      No_Such_Process   : constant := 3;
+
+      function Kill (Pid : Interfaces.C.int; Signal : Interfaces.C.int) return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "kill";
+   begin
+      if Kill (Interfaces.C.int (Process_Id), 0) = 0 then
+         return Hostkit.Process.Present;
+      end if;
+      case GNAT.OS_Lib.Errno is
+         when Permission_Denied => return Hostkit.Process.Present;
+         when No_Such_Process   => return Hostkit.Process.Absent;
+         when others            => return Hostkit.Process.Unknown;
+      end case;
+   exception
+      when others =>
+         return Hostkit.Process.Unknown;
+   end Presence_Of;
+
    --  poll() one descriptor for readability or writability, with a timeout in milliseconds
    --  (negative waits indefinitely). This is what an SSH or git helper's pipe is waited on.
    function Wait_FD

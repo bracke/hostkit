@@ -243,6 +243,18 @@ package body Hostkit.Process is
          return False;
    end Request_Stop;
 
+   function Presence_Of (Process_Id : Integer) return Presence is
+   begin
+      if Process_Id <= 0 then
+         return Unknown;
+      end if;
+
+      return Hostkit.Native.Presence_Of (Process_Id);
+   exception
+      when others =>
+         return Unknown;
+   end Presence_Of;
+
    function Wait_FD
      (FD         : Integer;
       For_Write  : Boolean;

@@ -482,6 +482,55 @@ package body Hostkit.Native is
          return False;
    end Request_Stop;
 
+   --  OpenProcess for the least it can ask, then its exit code: STILL_ACTIVE (259) while it
+   --  runs. A process that is not there fails to open with ERROR_INVALID_PARAMETER (87); one
+   --  we may not open fails with access denied (5), and is there.
+   function Presence_Of (Process_Id : Integer) return Hostkit.Process.Presence is
+      Query_Limited_Information : constant C_DWord := 16#1000#;
+      Still_Active              : constant C_DWord := 259;
+      Access_Denied             : constant C_DWord := 5;
+      Invalid_Parameter         : constant C_DWord := 87;
+
+      function Open_Process
+        (Access_Way : C_DWord;
+         Inherit    : Interfaces.C.int;
+         Process_Id : C_DWord)
+         return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "OpenProcess";
+
+      function Get_Exit_Code_Process
+        (Handle : System.Address; Code : access C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "GetExitCodeProcess";
+
+      function Get_Last_Error return C_DWord
+        with Import => True, Convention => Stdcall, External_Name => "GetLastError";
+
+      Handle  : System.Address;
+      Code    : aliased C_DWord := 0;
+      Read    : Interfaces.C.int;
+      Ignored : Interfaces.C.int;
+   begin
+      Handle := Open_Process (Query_Limited_Information, 0, C_DWord (Process_Id));
+      if Handle = System.Null_Address then
+         declare
+            Error : constant C_DWord := Get_Last_Error;
+         begin
+            return (if Error = Invalid_Parameter then Hostkit.Process.Absent
+                    elsif Error = Access_Denied then Hostkit.Process.Present
+                    else Hostkit.Process.Unknown);
+         end;
+      end if;
+      Read := Get_Exit_Code_Process (Handle, Code'Access);
+      Ignored := Close_Handle (Handle);
+      if Read = 0 then
+         return Hostkit.Process.Unknown;
+      end if;
+      return (if Code = Still_Active then Hostkit.Process.Present else Hostkit.Process.Absent);
+   exception
+      when others =>
+         return Hostkit.Process.Unknown;
+   end Presence_Of;
+
    --  Windows cannot poll a pipe descriptor -- poll and select are for sockets. Turn the CRT
    --  descriptor into the pipe HANDLE and ask the pipe directly whether bytes are waiting
    --  (PeekNamedPipe), in a short loop until they are or the deadline passes. Write readiness
