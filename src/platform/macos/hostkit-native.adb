@@ -245,7 +245,11 @@ package body Hostkit.Native is
             Redirect (Stdout_Path, 1);
          end if;
 
-         if Stderr_Path /= "" then
+         --  One file for both is one open file: two opens of it would each
+         --  write from their own place, over each other.
+         if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then
+            Ignored := Dup2 (1, 2);
+         elsif Stderr_Path /= "" then
             Redirect (Stderr_Path, 2);
          end if;
 

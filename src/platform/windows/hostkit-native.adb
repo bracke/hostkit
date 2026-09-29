@@ -335,7 +335,13 @@ package body Hostkit.Native is
 
       In_Handle  : System.Address := Feed (Stdin_Path);
       Out_Handle : System.Address := Capture (Stdout_Path);
-      Err_Handle : System.Address := Capture (Stderr_Path);
+
+      --  One file for both is one handle: two would each write from their
+      --  own place, over each other.
+      Err_Handle : System.Address :=
+        (if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then Invalid_Handle
+         else Capture (Stderr_Path));
+      Shared_Err : constant Boolean := Stderr_Path /= "" and then Stderr_Path = Stdout_Path;
 
       Startup     : aliased Startup_Info;
       Information : aliased Process_Information;
@@ -407,7 +413,8 @@ package body Hostkit.Native is
            (if Out_Handle /= Invalid_Handle then Out_Handle
             else Get_Std_Handle (Std_Output_Handle));
          Startup.Std_Error :=
-           (if Err_Handle /= Invalid_Handle then Err_Handle
+           (if Shared_Err and then Out_Handle /= Invalid_Handle then Out_Handle
+            elsif Err_Handle /= Invalid_Handle then Err_Handle
             else Get_Std_Handle (Std_Error_Handle));
       end if;
 

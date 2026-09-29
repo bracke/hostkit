@@ -118,6 +118,9 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **`Run_Captured` with one file for both streams** no longer loses output:
+  standard output and standard error were each opened on the file and wrote
+  over each other; the second is now the first, duplicated.
 - **The Windows and macOS bodies build without a word, which nobody could see
   until CI asked.** `alr build` exits 0 with warnings on its output, and a
   platform body only compiles on the platform that owns it — so twenty-four
