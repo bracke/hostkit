@@ -246,7 +246,13 @@ package Hostkit.Terminal_Control is
       --  Stop and start drawing the cursor. A redraw that leaves it visible
       --  makes it flicker across the line on every keystroke.
       Hide_Cursor,
-      Show_Cursor);
+      Show_Cursor,
+
+      --  Draw on a screen of its own, and go back to the one there was, as
+      --  it was: what a full-screen list does so that nothing it drew --
+      --  and no line it scrolled -- is left behind once it is gone.
+      Enter_Alternate_Screen,
+      Leave_Alternate_Screen);
 
    --  Whether this host can move a terminal's cursor.
    --

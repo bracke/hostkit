@@ -1918,6 +1918,19 @@ package body Hostkit_Shell_Cases is
             Assert (False, "could not read back what the cursor action wrote");
       end case;
 
+      --  A screen of its own, and back: both reach the terminal.
+      Assert (Hostkit.Terminal_Control.Control
+                (Item.Device, Hostkit.Terminal_Control.Enter_Alternate_Screen)
+              and then Hostkit.Terminal_Control.Control
+                         (Item.Device, Hostkit.Terminal_Control.Leave_Alternate_Screen),
+              "the alternate screen was refused by a pseudo-terminal");
+      case D.Read (Item.From_Child, Into, Last) is
+         when D.Transfer_Ok =>
+            Assert (Last >= Into'First, "switching screens wrote no bytes to the terminal");
+         when others =>
+            Assert (False, "could not read back what switching screens wrote");
+      end case;
+
       Hostkit.Pty.Close (Item);
    end Test_Cursor_Control_Writes_To_A_Pseudo_Terminal;
 

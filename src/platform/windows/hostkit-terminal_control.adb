@@ -376,6 +376,8 @@ package body Hostkit.Terminal_Control is
             when Move_Down            => return Escape & "[" & Number (Count) & "B";
             when Hide_Cursor          => return Escape & "[?25l";
             when Show_Cursor          => return Escape & "[?25h";
+            when Enter_Alternate_Screen => return Escape & "[?1049h";
+            when Leave_Alternate_Screen => return Escape & "[?1049l";
          end case;
       end Sequence;
 

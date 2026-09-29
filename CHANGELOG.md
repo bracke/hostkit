@@ -17,6 +17,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Terminal_Control.Enter_Alternate_Screen` and
+  `Leave_Alternate_Screen`:** a full-screen list draws on a screen of its own
+  and leaves the one there was as it was -- no line it scrolled left behind.
+
 - **`Run_Captured (..., Whole_Group => True)`** starts the program as a
   process group of its own and, on a deadline or a cancellation, stops the
   whole group: a shell killed on its deadline no longer leaves what it
