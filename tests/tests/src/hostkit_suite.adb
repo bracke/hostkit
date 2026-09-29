@@ -492,6 +492,45 @@ package body Hostkit_Suite is
       Assert (Outcome.Timed_Out, "and the deadline ended it, rather than the program");
    end Test_Timeout_Kills;
 
+   --  Stopped as a group, a program takes what it started with it: a shell
+   --  killed on a deadline leaves no child of its own running.
+   procedure Test_Group_Stops_Whole (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Process.Presence;
+
+      Pid_Path  : constant String := Ada.Directories.Compose (Scratch, "group-child.pid");
+      Arguments : Hostkit.String_Vectors.Vector;
+      Outcome   : Hostkit.Process.Process_Outcome;
+      File      : Ada.Text_IO.File_Type;
+      Child     : Integer := 0;
+      Gone      : Boolean := False;
+   begin
+      --  Where there is no POSIX shell there is no group to stop.
+      if not Ada.Directories.Exists ("/bin/sh") then
+         return;
+      end if;
+      Arguments.Append (To_Unbounded_String ("-c"));
+      Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; wait"));
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program     => "/bin/sh",
+           Arguments   => Arguments,
+           Stdin_Path  => "/dev/null",
+           Timeout_Ms  => 500,
+           Whole_Group => True);
+      Assert (Outcome.Started and then Outcome.Timed_Out, "the shell was not stopped on its deadline");
+
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_Path);
+      Child := Integer'Value (Ada.Text_IO.Get_Line (File));
+      Ada.Text_IO.Close (File);
+      for Try in 1 .. 100 loop
+         Gone := Hostkit.Process.Presence_Of (Child) = Hostkit.Process.Absent;
+         exit when Gone;
+         delay 0.01;
+      end loop;
+      Assert (Gone, "what the shell started outlived it");
+   end Test_Group_Stops_Whole;
+
    procedure Test_Accessible_By_Others (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
 
@@ -1650,6 +1689,9 @@ package body Hostkit_Suite is
         (T, Test_Captured_Input'Access, "process : a captured run reads the file it was given");
       Register_Routine
         (T, Test_Timeout_Kills'Access, "process : a program that will not stop is stopped");
+      Register_Routine
+        (T, Test_Group_Stops_Whole'Access,
+         "process : stopped as a group, a program takes what it started with it");
       Register_Routine
         (T, Test_The_Host_Answers_For_Its_Own_Trash'Access,
          "trash : a host with no trash of its own declines and leaves the file alone");

@@ -78,7 +78,8 @@ package body Hostkit.Native is
       Timeout_Ms        : Natural;
       Cancelled         : Hostkit.Process.Cancel_Check;
       Poll              : Hostkit.Process.Poll_Hook;
-      Started_Notice    : Hostkit.Process.Started_Hook)
+      Started_Notice    : Hostkit.Process.Started_Hook;
+      Whole_Group       : Boolean := False)
       return Hostkit.Process.Process_Outcome
    is
       use type Interfaces.C.Strings.chars_ptr;
@@ -109,6 +110,8 @@ package body Hostkit.Native is
         with Import => True, Convention => C, External_Name => "execvp";
       function Kill (Pid : C_Int; Signal : C_Int) return C_Int
         with Import => True, Convention => C, External_Name => "kill";
+      function Set_Group (Pid, Group : C_Int) return C_Int
+        with Import => True, Convention => C, External_Name => "setpgid";
       procedure Underscore_Exit (Status : C_Int)
         with Import => True, Convention => C, External_Name => "_exit";
 
@@ -223,6 +226,10 @@ package body Hostkit.Native is
       if Child = 0 then
          --  The child. Nothing here may return: on any failure it must _exit, or two
          --  copies of the caller would carry on running.
+         if Whole_Group then
+            Ignored := Set_Group (0, 0);
+         end if;
+
          if Stdin_Path /= "" then
             Feed (Stdin_Path);
          end if;
@@ -259,6 +266,12 @@ package body Hostkit.Native is
       --  The parent.
       Result.Started := True;
 
+      --  Set here too: whichever of the two runs first, the group is made
+      --  before anything is sent to it.
+      if Whole_Group then
+         Ignored := Set_Group (Child, Child);
+      end if;
+
       if Started_Notice /= null then
          Started_Notice.all (Integer (Child));
       end if;
@@ -280,12 +293,16 @@ package body Hostkit.Native is
 
          if not Killed and then Should_Stop then
             Killed := True;
-            Ignored := Kill (Child, Sigterm);
+            Ignored := Kill ((if Whole_Group then -Child else Child), Sigterm);
             delay 0.05;
 
-            --  Asking did not work; now it is not a request.
+            --  Asking did not work; now it is not a request. The group is
+            --  made to stop whatever its leader did: a shell may have gone
+            --  and left what it started.
             if Waitpid (Child, Status'Address, WNOHANG) /= Child then
-               Ignored := Kill (Child, Sigkill);
+               Ignored := Kill ((if Whole_Group then -Child else Child), Sigkill);
+            elsif Whole_Group then
+               Ignored := Kill (-Child, Sigkill);
             end if;
          end if;
 

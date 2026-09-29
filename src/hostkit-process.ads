@@ -245,6 +245,12 @@ package Hostkit.Process is
    --  @param Stderr_Path File to capture standard error into; inherited when empty.
    --  @param Timeout_Ms How long to wait before killing it; 0 waits indefinitely.
    --  @param Cancelled Asked while waiting; True kills the process.
+   --  @param Whole_Group Start the program as a process group of its own, and
+   --                     on a deadline or a cancellation stop the whole group:
+   --                     what it started itself -- a shell's children -- ends
+   --                     with it. POSIX only; elsewhere the program alone.
+   --                     Its standard input should then be a file: a group
+   --                     not in the terminal's foreground cannot read it.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
    --          rather than the program deciding to stop.
    function Run_Captured
@@ -257,7 +263,8 @@ package Hostkit.Process is
       Timeout_Ms        : Natural := 0;
       Cancelled         : Cancel_Check := null;
       Poll              : Poll_Hook := null;
-      Started           : Started_Hook := null)
+      Started           : Started_Hook := null;
+      Whole_Group       : Boolean := False)
       return Process_Outcome;
 
    --  Start whatever the host thinks this path is: a document in its default
