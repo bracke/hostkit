@@ -118,6 +118,9 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **A lock is not handed to a program this one starts** (`O_CLOEXEC`): a
+  child that outlived the session kept the lock's file open and held it for
+  nobody.
 - **`Run_Captured` with one file for both streams** no longer loses output:
   standard output and standard error were each opened on the file and wrote
   over each other; the second is now the first, duplicated.

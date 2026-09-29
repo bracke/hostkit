@@ -11,6 +11,9 @@ package body Hostkit.Locks is
 
    O_Wronly : constant C_Int := 8#1#;
    O_Creat  : constant C_Int := 8#100#;
+   --  Not handed to a program this one starts: a lock a child kept open
+   --  would outlive this session and hold the file for nobody.
+   O_Cloexec : constant C_Int := 8#2000000#;
 
    --  flock(2) operations. flock rather than fcntl's F_SETLK: fcntl locks are
    --  the POSIX ones, but their struct flock differs between hosts and would
@@ -75,7 +78,7 @@ package body Hostkit.Locks is
       --  No O_TRUNC. A lock taken on the state file itself must not destroy the
       --  state it is protecting -- which is what a caller would get if this
       --  opened the file the way a writer does.
-      Opened := C_Open (Path_C, O_Wronly + O_Creat, 8#600#);
+      Opened := C_Open (Path_C, O_Wronly + O_Creat + O_Cloexec, 8#600#);
       Interfaces.C.Strings.Free (Path_C);
 
       if Opened < 0 then
