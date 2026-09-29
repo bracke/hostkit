@@ -24,7 +24,7 @@ recently enough to matter to somebody pinning it; the history before that is in
 - **`Run_Captured (..., Whole_Group => True)`** starts the program as a
   process group of its own and, on a deadline or a cancellation, stops the
   whole group: a shell killed on its deadline no longer leaves what it
-  started running. POSIX only; elsewhere the program alone, as before.
+  started running. A process group on POSIX, a job on Windows.
 
 - **`Hostkit.Durability`**: `Sync_File` and `Sync_Directory` put a file's
   contents, or a directory's entries, on the device -- `fsync` on Linux,

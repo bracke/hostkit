@@ -227,6 +227,33 @@ package body Hostkit.Native is
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "TerminateProcess";
 
+   --  A job is Windows' process group: every process started by one in it
+   --  is in it too, and ending the job ends them all.
+   function Create_Job_Object
+     (Attributes : System.Address;
+      Name       : System.Address)
+      return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "CreateJobObjectW";
+
+   function Assign_Process_To_Job_Object
+     (Job     : System.Address;
+      Process : System.Address)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "AssignProcessToJobObject";
+
+   function Terminate_Job_Object
+     (Job       : System.Address;
+      Exit_Code : Interfaces.C.unsigned)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "TerminateJobObject";
+
+   function Resume_Thread (Thread : System.Address) return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "ResumeThread";
+
+   --  Started suspended, so that it is in its job before it can start
+   --  anything of its own.
+   Create_Suspended : constant C_DWord := 16#0000_0004#;
+
    --  Run a program with its output captured, under a deadline.
    --
    --  Windows has no fork: CreateProcessW takes the redirections up front, as handles in
@@ -250,7 +277,6 @@ package body Hostkit.Native is
       Whole_Group       : Boolean := False)
       return Hostkit.Process.Process_Outcome
    is
-      pragma Unreferenced (Whole_Group);
       --  CreateProcessW takes a command line, not a vector, so the arguments have
       --  to be quoted into one with the C runtime rules every Windows program
       --  parses back out. That quoting is pure text and easy to get subtly wrong,
@@ -320,6 +346,12 @@ package body Hostkit.Native is
       Ignored     : Interfaces.C.int;
       Result      : Hostkit.Process.Process_Outcome;
 
+      --  The job it and what it starts are in, where the whole of it is to
+      --  be stopped; null otherwise, or where no job could be made.
+      Job         : System.Address :=
+        (if Whole_Group then Create_Job_Object (System.Null_Address, System.Null_Address)
+         else System.Null_Address);
+
       function Should_Stop return Boolean is
          Elapsed : constant Duration := Ada.Calendar.Clock - Started_At;
       begin
@@ -387,7 +419,7 @@ package body Hostkit.Native is
             --  The capture handles are inheritable and this is what lets the child have
             --  them. Without it its output goes nowhere and the files stay empty.
             Inherit_Handles    => 1,
-            Creation_Flags     => 0,
+            Creation_Flags     => (if Job /= System.Null_Address then Create_Suspended else 0),
             Environment        => System.Null_Address,
             Current_Directory  =>
               (if Working_Directory = "" then System.Null_Address else Wide_Dir'Address),
@@ -395,7 +427,23 @@ package body Hostkit.Native is
             Information        => Information'Access) = 0
       then
          Close_Captures;
+         if Job /= System.Null_Address then
+            Ignored := Close_Handle (Job);
+         end if;
          return Result;
+      end if;
+
+      --  Into its job, then let go: a process that cannot be put in one
+      --  runs as a lone process would, and is stopped alone.
+      if Job /= System.Null_Address then
+         if Assign_Process_To_Job_Object (Job, Information.Process) = 0 then
+            Ignored := Close_Handle (Job);
+            Job := System.Null_Address;
+         end if;
+         --  One that cannot be let go would wait for ever: ended now.
+         if Resume_Thread (Information.Thread) = C_DWord'Last then
+            Ignored := Terminate_Process (Information.Process, 1);
+         end if;
       end if;
 
       Result.Started := True;
@@ -416,8 +464,13 @@ package body Hostkit.Native is
 
          if not Killed and then Should_Stop then
             Killed := True;
-            --  Nothing to ask with here. TerminateProcess is the request and the answer.
-            Ignored := Terminate_Process (Information.Process, 1);
+            --  Nothing to ask with here. TerminateProcess is the request and the answer;
+            --  a job's end is its whole group's.
+            if Job /= System.Null_Address then
+               Ignored := Terminate_Job_Object (Job, 1);
+            else
+               Ignored := Terminate_Process (Information.Process, 1);
+            end if;
          end if;
 
          if Poll /= null then
@@ -435,6 +488,9 @@ package body Hostkit.Native is
 
       Ignored := Close_Handle (Information.Thread);
       Ignored := Close_Handle (Information.Process);
+      if Job /= System.Null_Address then
+         Ignored := Close_Handle (Job);
+      end if;
 
       return Result;
    end Run_Captured;

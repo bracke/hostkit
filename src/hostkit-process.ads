@@ -248,9 +248,11 @@ package Hostkit.Process is
    --  @param Whole_Group Start the program as a process group of its own, and
    --                     on a deadline or a cancellation stop the whole group:
    --                     what it started itself -- a shell's children -- ends
-   --                     with it. POSIX only; elsewhere the program alone.
-   --                     Its standard input should then be a file: a group
-   --                     not in the terminal's foreground cannot read it.
+   --                     with it. On POSIX a process group, on Windows a
+   --                     job; where neither can be made, the program alone.
+   --                     On POSIX its standard input should then be a file:
+   --                     a group not in the terminal's foreground cannot
+   --                     read it.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
    --          rather than the program deciding to stop.
    function Run_Captured
