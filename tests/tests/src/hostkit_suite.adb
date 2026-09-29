@@ -18,6 +18,7 @@ with Hostkit.Filesystem_Rules;
 with Ada.Streams;
 
 with Hostkit.Descriptors;
+with Hostkit.Durability;
 with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Metadata;
@@ -1555,11 +1556,44 @@ package body Hostkit_Suite is
       end loop;
    end Test_Command_Line_Arguments;
 
+   --  What was written is put on the device: a file's contents and a
+   --  directory's entries, where the host can say so; where it cannot, it
+   --  says that, never that it did.
+   procedure Test_Writes_Are_Made_Durable (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Durability.Outcome;
+      Directory : constant String := Ada.Directories.Full_Name ("obj/durability");
+      Path      : constant String := Directory & "/written.txt";
+      File      : Ada.Text_IO.File_Type;
+      Written   : Hostkit.Durability.Outcome;
+      Listed    : Hostkit.Durability.Outcome;
+   begin
+      Ada.Directories.Create_Path (Directory);
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put_Line (File, "kept");
+      Ada.Text_IO.Close (File);
+      Written := Hostkit.Durability.Sync_File (Path);
+      Listed := Hostkit.Durability.Sync_Directory (Directory);
+      AUnit.Assertions.Assert
+        (Written = Hostkit.Durability.Synced,
+         "a written file was not synced: " & Hostkit.Durability.Outcome'Image (Written));
+      AUnit.Assertions.Assert
+        (Listed /= Hostkit.Durability.Failed,
+         "a directory's entries could not be synced: "
+         & Hostkit.Durability.Outcome'Image (Listed));
+      AUnit.Assertions.Assert
+        (Hostkit.Durability.Sync_File (Directory & "/not-there.txt") = Hostkit.Durability.Failed,
+         "a file that is not there was said to be synced");
+   end Test_Writes_Are_Made_Durable;
+
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is
       use AUnit.Test_Cases.Registration;
    begin
       Register_Routine
         (T, Test_Quoting'Access, "shell : the quoting matches the shell it quotes for");
+      Register_Routine
+        (T, Test_Writes_Are_Made_Durable'Access,
+         "durability : what was written is put on the device, or it is said that it cannot be");
       Register_Routine
         (T, Test_Command_Line_Arguments'Access,
          "process : the arguments are the ones the process was started with");

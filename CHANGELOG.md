@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Durability`**: `Sync_File` and `Sync_Directory` put a file's
+  contents, or a directory's entries, on the device -- `fsync` on Linux,
+  `F_FULLFSYNC` on macOS (`fsync` where the file system does not take it),
+  `_commit` on Windows. A directory on Windows, and any host the crate does
+  not know, answer `Not_Supported`, never `Synced`.
+
 - `Hostkit.Process.Presence_Of` — whether a process on this machine, by id, is
   still there: `Present`, `Absent`, or `Unknown` where the host did not say.
   POSIX asks with signal 0 (EPERM still counts as there, ESRCH as gone);
