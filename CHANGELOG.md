@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Terminal_Control.Keep_Input_On_Interrupt`: whether Ctrl-C leaves what was typed
+  ahead in the terminal's queue. POSIX throws it away with the signal unless
+  `NOFLSH` is set; a program that lets its user type the next command while it
+  works, and stops that work at Ctrl-C, sets it for the work and clears it
+  after. Linux only; elsewhere it answers False rather than claim the input is
+  kept.
 - **`Fs.Move_No_Replace`**: move an entry atomically without replacing one
   already at the target -- `renameat2 (RENAME_NOREPLACE)` on Linux,
   `renamex_np (RENAME_EXCL)` on macOS, `MoveFileExW` without replacement on

@@ -371,6 +371,46 @@ package body Hostkit.Terminal_Control is
       end;
    end Control;
 
+   -----------------------------
+   -- Keep_Input_On_Interrupt --
+   -----------------------------
+
+   function Keep_Input_On_Interrupt
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      Keep     : Boolean) return Boolean
+   is
+      Settings : Mode_Storage := [others => 0];
+
+      --  c_lflag, the fourth 32-bit field of a termios, and NOFLSH in it.
+      Local_Flags : constant := 3;
+      No_Flush    : constant := 8#200#;
+   begin
+      if not Hostkit.Descriptors.Is_Valid (Terminal) then
+         return False;
+      end if;
+
+      if Tcgetattr (To_Fd (Terminal), Settings'Address) /= 0 then
+         return False;
+      end if;
+
+      declare
+         use type Interfaces.Unsigned_32;
+
+         Words : array (0 .. 3) of Interfaces.Unsigned_32
+           with Import, Address => Settings'Address;
+         Wanted : constant Interfaces.Unsigned_32 :=
+           (if Keep then Words (Local_Flags) or No_Flush
+            else Words (Local_Flags) and not Interfaces.Unsigned_32'(No_Flush));
+      begin
+         if Wanted = Words (Local_Flags) then
+            return True;
+         end if;
+         Words (Local_Flags) := Wanted;
+      end;
+
+      return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
+   end Keep_Input_On_Interrupt;
+
    -----------------------
    -- Set_Interruptible --
    -----------------------

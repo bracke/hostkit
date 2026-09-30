@@ -95,6 +95,20 @@ package body Hostkit.Terminal_Control is
       return False;
    end Control;
 
+   -----------------------------
+   -- Keep_Input_On_Interrupt --
+   -----------------------------
+
+   function Keep_Input_On_Interrupt
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      Keep     : Boolean) return Boolean
+   is
+      pragma Unreferenced (Terminal, Keep);
+   begin
+      --  Not arranged here: False, not a claim that typed input is kept.
+      return False;
+   end Keep_Input_On_Interrupt;
+
    function Set_Interruptible
      (Terminal : Hostkit.Descriptors.Descriptor) return Boolean
    is

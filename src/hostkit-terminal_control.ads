@@ -133,6 +133,25 @@ package Hostkit.Terminal_Control is
    --  @return True when the host discarded it.
    function Discard_Input (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
 
+   --  Whether an interrupt key leaves what was typed ahead in place.
+   --
+   --  On POSIX the line discipline throws away the input it holds when it
+   --  turns Ctrl-C into a signal, unless NOFLSH is set. A program that lets
+   --  its user type the next command while it works, and stops the work at
+   --  Ctrl-C, loses those lines with it; one that wants Ctrl-C at its prompt
+   --  to drop the line being typed wants the opposite. This sets which.
+   --
+   --  Where the host is not known to flush, or this cannot be arranged, it
+   --  answers False rather than claiming the input is kept.
+   --
+   --  @param Terminal The terminal.
+   --  @param Keep True to keep typed input past an interrupt, False to let
+   --    it be thrown away.
+   --  @return True when the terminal now does as asked.
+   function Keep_Input_On_Interrupt
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      Keep     : Boolean) return Boolean;
+
    --  Arrange for this terminal to turn an interrupt key into an interrupt.
    --
    --  What a shell wants of its terminal *between* line reads: while a program

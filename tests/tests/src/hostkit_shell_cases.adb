@@ -668,6 +668,8 @@ package body Hostkit_Shell_Cases is
               "a pipe was put into raw mode");
       Assert (not Hostkit.Terminal_Control.Discard_Input (Ends.Read_End),
               "a pipe had its typed input discarded as a terminal's");
+      Assert (not Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Ends.Read_End, Keep => True),
+              "a pipe was told to keep its typed input past an interrupt");
 
       if Hostkit.Terminal_Control.Supports_Foreground_Group then
          Assert (not Hostkit.Terminal_Control.Foreground_Group (Ends.Read_End, Group),
@@ -2093,6 +2095,12 @@ package body Hostkit_Shell_Cases is
               "could not set raw mode");
       Assert (Hostkit.Terminal_Control.Discard_Input (Item.Device),
               "could not discard a terminal's unread input");
+      --  Typed input kept past an interrupt where the host is known to
+      --  flush it, and let go again; a pipe is no terminal to arrange.
+      if Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Item.Device, Keep => True) then
+         Assert (Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Item.Device, Keep => False),
+                 "typed input kept past an interrupt could not be let go again");
+      end if;
 
       --  Raw is a different terminal from the one that was saved. Asked before
       --  the restore because a Set_Raw that changed nothing would make the
