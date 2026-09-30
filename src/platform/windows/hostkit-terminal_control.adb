@@ -43,6 +43,9 @@ package body Hostkit.Terminal_Control is
      (Handle : System.Address; Mode : C_DWord) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "SetConsoleMode";
 
+   function Flush_Console_Input_Buffer (Handle : System.Address) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "FlushConsoleInputBuffer";
+
    --  COORD, SMALL_RECT and CONSOLE_SCREEN_BUFFER_INFO. All shorts, so the
    --  layout is the same on 32- and 64-bit Windows alike.
    type Coord is record
@@ -198,6 +201,16 @@ package body Hostkit.Terminal_Control is
 
       return Set_Console_Mode (To_Handle (Terminal), Stored_Mode (From)) /= 0;
    end Restore_Mode;
+
+   -------------------
+   -- Discard_Input --
+   -------------------
+
+   function Discard_Input (Terminal : Hostkit.Descriptors.Descriptor) return Boolean is
+   begin
+      return Hostkit.Descriptors.Is_Valid (Terminal)
+        and then Flush_Console_Input_Buffer (To_Handle (Terminal)) /= 0;
+   end Discard_Input;
 
    -------------
    -- Set_Raw --

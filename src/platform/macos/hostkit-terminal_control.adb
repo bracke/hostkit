@@ -58,6 +58,13 @@ package body Hostkit.Terminal_Control is
    procedure Cfmakeraw (Settings : System.Address)
      with Import => True, Convention => C, External_Name => "cfmakeraw";
 
+   --  tcflush's queue selector for input not yet read: 1 here, which the
+   --  other POSIX host numbers differently.
+   TCIFLUSH : constant C_Int := 1;
+
+   function Tcflush (Fd : C_Int; Queue : C_Int) return C_Int
+     with Import => True, Convention => C, External_Name => "tcflush";
+
    function Ioctl
      (Fd : C_Int; Request : Interfaces.C.unsigned_long; Argument : System.Address)
       return C_Int
@@ -201,6 +208,16 @@ package body Hostkit.Terminal_Control is
 
       return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
    end Set_Raw;
+
+   -------------------
+   -- Discard_Input --
+   -------------------
+
+   function Discard_Input (Terminal : Hostkit.Descriptors.Descriptor) return Boolean is
+   begin
+      return Hostkit.Descriptors.Is_Valid (Terminal)
+        and then Tcflush (To_Fd (Terminal), TCIFLUSH) = 0;
+   end Discard_Input;
 
    ----------
    -- Size --

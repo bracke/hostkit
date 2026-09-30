@@ -52,6 +52,12 @@ package body Hostkit.Terminal_Control is
       return False;
    end Set_Raw;
 
+   function Discard_Input (Terminal : Hostkit.Descriptors.Descriptor) return Boolean is
+      pragma Unreferenced (Terminal);
+   begin
+      return False;
+   end Discard_Input;
+
    function Size
      (Terminal : Hostkit.Descriptors.Descriptor;
       Into     : out Window_Size) return Boolean

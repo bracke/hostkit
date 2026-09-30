@@ -666,6 +666,8 @@ package body Hostkit_Shell_Cases is
               "a pipe let its terminal settings be saved");
       Assert (not Hostkit.Terminal_Control.Set_Raw (Ends.Read_End),
               "a pipe was put into raw mode");
+      Assert (not Hostkit.Terminal_Control.Discard_Input (Ends.Read_End),
+              "a pipe had its typed input discarded as a terminal's");
 
       if Hostkit.Terminal_Control.Supports_Foreground_Group then
          Assert (not Hostkit.Terminal_Control.Foreground_Group (Ends.Read_End, Group),
@@ -2089,6 +2091,8 @@ package body Hostkit_Shell_Cases is
               "could not save the terminal settings");
       Assert (Hostkit.Terminal_Control.Set_Raw (Item.Device),
               "could not set raw mode");
+      Assert (Hostkit.Terminal_Control.Discard_Input (Item.Device),
+              "could not discard a terminal's unread input");
 
       --  Raw is a different terminal from the one that was saved. Asked before
       --  the restore because a Set_Raw that changed nothing would make the

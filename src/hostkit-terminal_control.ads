@@ -123,6 +123,16 @@ package Hostkit.Terminal_Control is
    --  @return True when raw mode was set.
    function Set_Raw (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
 
+   --  Throw away what was typed at this terminal and not yet read.
+   --
+   --  What a program ending while it waits for a line does, so that a half
+   --  typed line goes with it rather than to the shell that reads next. Safe
+   --  to call from a signal handler: one call to the host, nothing else.
+   --
+   --  @param Terminal A descriptor open on the terminal.
+   --  @return True when the host discarded it.
+   function Discard_Input (Terminal : Hostkit.Descriptors.Descriptor) return Boolean;
+
    --  Arrange for this terminal to turn an interrupt key into an interrupt.
    --
    --  What a shell wants of its terminal *between* line reads: while a program
