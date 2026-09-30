@@ -112,6 +112,28 @@ package body Hostkit.Native is
         with Import => True, Convention => C, External_Name => "kill";
       function Set_Group (Pid, Group : C_Int) return C_Int
         with Import => True, Convention => C, External_Name => "setpgid";
+
+      --  prctl (PR_SET_PDEATHSIG, SIGTERM): the child is told when the thread
+      --  that forked it ends, however it ends -- kill -9 included.
+      function Set_Death_Signal (Option : C_Int; Signal : Interfaces.C.unsigned_long) return C_Int
+        with Import => True, Convention => C_Variadic_1, External_Name => "prctl";
+      function Parent_Id return C_Int
+        with Import => True, Convention => C, External_Name => "getppid";
+      function Own_Id return C_Int
+        with Import => True, Convention => C, External_Name => "getpid";
+      PR_SET_PDEATHSIG : constant C_Int := 1;
+
+      --  sigprocmask (SIG_SETMASK, empty): a caller that takes signals on a
+      --  thread of its own -- Ada.Interrupts does -- blocks them everywhere
+      --  else, and a child inherits the mask across exec: unblocked, so that
+      --  what it runs can be told to stop at all.
+      type Signal_Set is array (1 .. 128) of Interfaces.C.unsigned_char with Convention => C;
+      function Set_Mask (How : C_Int; Set : access constant Signal_Set; Old : System.Address) return C_Int
+        with Import => True, Convention => C, External_Name => "sigprocmask";
+      SIG_SETMASK : constant C_Int := 2;
+      No_Signals  : aliased constant Signal_Set := [others => 0];
+      Sig_Term_Number  : constant := 15;
+      Forked_By        : constant C_Int := Own_Id;
       procedure Underscore_Exit (Status : C_Int)
         with Import => True, Convention => C, External_Name => "_exit";
 
@@ -126,6 +148,17 @@ package body Hostkit.Native is
       Argv      : C_Argv (0 .. Count + 1);
       Program_C : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Program);
+
+      --  A group run is started through a shell that stands for the whole
+      --  group: told the caller has died -- the death signal -- it kills
+      --  every process in it, what the program started too, which the
+      --  death signal alone never reaches. Its standard input is the
+      --  program's, handed on past the shell's rule for a job in the
+      --  background.
+      Group_Script : constant String :=
+        "trap 'kill -KILL 0' TERM HUP; exec 3<&0; ""$@"" <&3 & wait $!; exit $?";
+      Wrap      : C_Argv (0 .. Count + 5);
+      Shell_C   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
 
       Child      : C_Int;
       Status     : aliased C_Int := 0;
@@ -145,6 +178,15 @@ package body Hostkit.Native is
 
          if Program_C /= Interfaces.C.Strings.Null_Ptr then
             Interfaces.C.Strings.Free (Program_C);
+         end if;
+         for Index in Wrap'Range loop
+            --  Its program and arguments are Argv's own strings, freed above.
+            if Index in 0 .. 3 and then Wrap (Index) /= Interfaces.C.Strings.Null_Ptr then
+               Interfaces.C.Strings.Free (Wrap (Index));
+            end if;
+         end loop;
+         if Shell_C /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (Shell_C);
          end if;
       end Free_Argv;
 
@@ -215,6 +257,17 @@ package body Hostkit.Native is
            Interfaces.C.Strings.New_String (To_String (Arguments.Element (Index)));
       end loop;
       Argv (Count + 1) := Interfaces.C.Strings.Null_Ptr;
+      Wrap := [others => Interfaces.C.Strings.Null_Ptr];
+      if Whole_Group then
+         Shell_C := Interfaces.C.Strings.New_String ("/bin/sh");
+         Wrap (0) := Interfaces.C.Strings.New_String ("sh");
+         Wrap (1) := Interfaces.C.Strings.New_String ("-c");
+         Wrap (2) := Interfaces.C.Strings.New_String (Group_Script);
+         Wrap (3) := Interfaces.C.Strings.New_String ("sh");
+         for Index in 0 .. Count loop
+            Wrap (Index + 4) := Argv (Index);
+         end loop;
+      end if;
 
       Child := Fork;
 
@@ -226,8 +279,18 @@ package body Hostkit.Native is
       if Child = 0 then
          --  The child. Nothing here may return: on any failure it must _exit, or two
          --  copies of the caller would carry on running.
+         Ignored := Set_Mask (SIG_SETMASK, No_Signals'Access, System.Null_Address);
+
          if Whole_Group then
             Ignored := Set_Group (0, 0);
+
+            --  A group run on the caller's behalf does not outlive it: were
+            --  the caller killed outright, what it started would run on with
+            --  nobody to stop it. Gone already before this was said: gone.
+            Ignored := Set_Death_Signal (PR_SET_PDEATHSIG, Sig_Term_Number);
+            if Parent_Id /= Forked_By then
+               Underscore_Exit (127);
+            end if;
          end if;
 
          if Stdin_Path /= "" then
@@ -260,7 +323,11 @@ package body Hostkit.Native is
             end;
          end if;
 
-         if Execvp (Program_C, Argv (0)'Address) /= 0 then
+         if Whole_Group then
+            if Execvp (Shell_C, Wrap (0)'Address) /= 0 then
+               Underscore_Exit (127);
+            end if;
+         elsif Execvp (Program_C, Argv (0)'Address) /= 0 then
             Underscore_Exit (127);
          end if;
 

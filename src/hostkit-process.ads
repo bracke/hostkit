@@ -252,7 +252,9 @@ package Hostkit.Process is
    --                     job; where neither can be made, the program alone.
    --                     On POSIX its standard input should then be a file:
    --                     a group not in the terminal's foreground cannot
-   --                     read it.
+   --                     read it. On Linux the program is also killed when
+   --                     the caller dies, whatever kills it; elsewhere it
+   --                     runs on until it ends.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
    --          rather than the program deciding to stop.
    function Run_Captured

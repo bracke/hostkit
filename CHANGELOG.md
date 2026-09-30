@@ -118,6 +118,15 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **A group run no longer outlives its caller on Linux.** `Run_Captured`
+  with `Whole_Group` starts the program through a small shell that stands
+  for the group, and asks the kernel (`PR_SET_PDEATHSIG`) to tell it when
+  the caller dies -- `kill -9` included; told, it kills every process in the
+  group, what the program started as well. The child's signal mask is also
+  cleared before `exec`: a caller that takes its signals on a thread of its
+  own (Ada.Interrupts) blocked them in everything it ran, which then could
+  not be told to stop. Elsewhere a group run still ends only when it ends.
+
 - **A lock is not handed to a program this one starts** (`O_CLOEXEC`): a
   child that outlived the session kept the lock's file open and held it for
   nobody.
