@@ -113,6 +113,17 @@ package body Hostkit.Fs is
       return False;
    end Replace_File;
 
+   --  The host refuses an existing target in the same atomic move.
+   function Move_No_Replace
+     (Source : String;
+      Target : String)
+      return Boolean
+   is
+      pragma Unreferenced (Source, Target);
+   begin
+      return False;
+   end Move_No_Replace;
+
    function Read_Link_Target
      (Path   : String;
       Target : out Ada.Strings.Unbounded.Unbounded_String)

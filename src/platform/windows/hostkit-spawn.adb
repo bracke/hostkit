@@ -607,4 +607,15 @@ package body Hostkit.Spawn is
       return False;
    end Wait_Any;
 
+   procedure Release (Item : in out Process_Handle) is
+      Ignored : Interfaces.C.int;
+      pragma Unreferenced (Ignored);
+   begin
+      if Is_Valid (Item) then
+         Ignored := Close_Handle
+           (System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address (Item.Id)));
+      end if;
+      Item := Invalid_Process;
+   end Release;
+
 end Hostkit.Spawn;

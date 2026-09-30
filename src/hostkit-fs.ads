@@ -187,6 +187,14 @@ package Hostkit.Fs is
       Target : String)
       return Boolean;
 
+   --  Move Source to Target atomically without replacing an existing entry.
+   --  Linux uses renameat2(RENAME_NOREPLACE), macOS renamex_np(RENAME_EXCL),
+   --  and Windows MoveFileExW without replacement. Unsupported hosts refuse.
+   --  @param Source Entry to move, including symbolic links.
+   --  @param Target New pathname, which must not exist.
+   --  @return True only when Source moved and Target was previously absent.
+   function Move_No_Replace (Source : String; Target : String) return Boolean;
+
    --  Read the literal target of the symbolic link (or junction) at Path.
    --
    --  POSIX has readlink. Windows has no such call: a link is a reparse point, so this

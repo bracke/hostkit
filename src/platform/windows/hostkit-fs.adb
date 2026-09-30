@@ -246,6 +246,31 @@ package body Hostkit.Fs is
          return False;
    end Replace_File;
 
+   --  The host refuses an existing target in the same atomic move.
+   function Move_No_Replace
+     (Source : String;
+      Target : String)
+      return Boolean
+   is
+      function Move_File_Ex
+        (Existing : System.Address;
+         New_Name : System.Address;
+         Flags    : C_DWord)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
+
+      Wide_Source : aliased Wide_String := Wide (Source);
+      Wide_Target : aliased Wide_String := Wide (Target);
+   begin
+      return Move_File_Ex
+               (Wide_Source'Address,
+                Wide_Target'Address,
+                0) /= 0;
+   exception
+      when others =>
+         return False;
+   end Move_No_Replace;
+
    --  Windows has no readlink: a link is a reparse point. Open it without following it
    --  (FILE_FLAG_OPEN_REPARSE_POINT) and pull the target out of the reparse data. The
    --  print name is the human target ("real.txt"); the substitute name is a fallback.

@@ -17,6 +17,13 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Fs.Move_No_Replace`**: move an entry atomically without replacing one
+  already at the target -- `renameat2 (RENAME_NOREPLACE)` on Linux,
+  `renamex_np (RENAME_EXCL)` on macOS, `MoveFileExW` without replacement on
+  Windows; unsupported hosts refuse.
+- **`Spawn.Release`**: let go of a finished, collected process's handle --
+  Windows closes it; on POSIX nothing is left after the wait.
+
 - **`Terminal_Control.Enter_Alternate_Screen` and
   `Leave_Alternate_Screen`:** a full-screen list draws on a screen of its own
   and leaves the one there was as it was -- no line it scrolled left behind.

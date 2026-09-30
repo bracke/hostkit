@@ -473,6 +473,34 @@ package body Hostkit.Fs is
          return False;
    end Replace_File;
 
+   --  The host refuses an existing target in the same atomic move.
+   function Move_No_Replace
+     (Source : String;
+      Target : String)
+      return Boolean
+   is
+      function C_Rename
+        (Old_Path : Interfaces.C.Strings.chars_ptr;
+         New_Path : Interfaces.C.Strings.chars_ptr;
+         Flags    : Interfaces.C.unsigned)
+         return Interfaces.C.int
+        with Import => True, Convention => C, External_Name => "renamex_np";
+
+      C_Source : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Source);
+      C_Target : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Target);
+      Status   : Interfaces.C.int;
+   begin
+      Status := C_Rename (C_Source, C_Target, 4);
+      Interfaces.C.Strings.Free (C_Source);
+      Interfaces.C.Strings.Free (C_Target);
+      return Status = 0;
+   exception
+      when others =>
+         return False;
+   end Move_No_Replace;
+
    --  POSIX readlink: read the link's own target, not the resolved path.
    function Read_Link_Target
      (Path   : String;

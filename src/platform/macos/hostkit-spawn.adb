@@ -645,4 +645,10 @@ package body Hostkit.Spawn is
       return False;
    end Wait_Any;
 
+   procedure Release (Item : in out Process_Handle) is
+   begin
+      --  waitpid already released the kernel child identity; invalidate its number.
+      Item := Invalid_Process;
+   end Release;
+
 end Hostkit.Spawn;

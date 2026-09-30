@@ -348,6 +348,12 @@ package Hostkit.Spawn is
       Mode   : Wait_Mode;
       Result : out Status) return Boolean;
 
+   --  Release a handle after its process has finished and been collected by Wait.
+   --  Windows closes the owned process handle; POSIX has no handle left after reaping.
+   --  This does not wait for or stop a process.
+   --  @param Item Finished process handle; set to Invalid_Process.
+   procedure Release (Item : in out Process_Handle);
+
    --  Ask what became of any child that has changed state.
    --
    --  What a shell calls before a prompt, to find the background job that
