@@ -15,6 +15,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ## [Unreleased]
 
+### Fixed
+
+- `Fs.Own_Executable` on Linux: a program replaced on disk while it runs is
+  named without the kernel's ` (deleted)` suffix, so starting itself again
+  starts the new copy.
+
 ### Added
 
 - `Terminal_Control.Show_Control_Keys`: whether the terminal echoes a control

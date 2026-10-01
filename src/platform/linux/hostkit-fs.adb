@@ -642,11 +642,24 @@ package body Hostkit.Fs is
       Link   : constant String := "/proc/self/exe";
       Target : Ada.Strings.Unbounded.Unbounded_String;
    begin
-      --  The kernel's own answer, and it is the resolved path already.
+      --  The kernel's own answer, and it is the resolved path already --
+      --  save that a program replaced on disk while it runs is named with
+      --  " (deleted)" after it. The path is the one a new copy lies at, so
+      --  starting itself again starts that, not a name that is no file.
       if not Read_Link_Target (Link, Target) then
          return "";
       end if;
-      return Ada.Strings.Unbounded.To_String (Target);
+      declare
+         Path    : constant String := Ada.Strings.Unbounded.To_String (Target);
+         Deleted : constant String := " (deleted)";
+      begin
+         if Path'Length > Deleted'Length
+           and then Path (Path'Last - Deleted'Length + 1 .. Path'Last) = Deleted
+         then
+            return Path (Path'First .. Path'Last - Deleted'Length);
+         end if;
+         return Path;
+      end;
    exception
       when others =>
          return "";
