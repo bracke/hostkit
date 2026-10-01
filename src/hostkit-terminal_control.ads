@@ -167,6 +167,21 @@ package Hostkit.Terminal_Control is
      (Terminal : Hostkit.Descriptors.Descriptor;
       On       : Boolean) return Boolean;
 
+   --  Whether the terminal echoes a control key as a caret and a letter.
+   --
+   --  A line discipline that echoes Esc as ^[ puts marks in a line its
+   --  program reads Esc from as a key of its own -- to drop an answer, say
+   --  -- that the user never meant as text. Turning it off leaves the key
+   --  read as before, unshown.
+   --
+   --  @param Terminal The terminal.
+   --  @param On True to show control keys, False not to.
+   --  @return True when the terminal now does as asked; False where this
+   --    cannot be arranged.
+   function Show_Control_Keys
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      On       : Boolean) return Boolean;
+
    --  Arrange for this terminal to turn an interrupt key into an interrupt.
    --
    --  What a shell wants of its terminal *between* line reads: while a program

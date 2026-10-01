@@ -17,6 +17,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Terminal_Control.Show_Control_Keys`: whether the terminal echoes a control
+  key as a caret and a letter (ECHOCTL), so a program that reads Esc as a key
+  of its own does not leave `^[` on the line. Linux only; elsewhere it answers
+  False.
 - `Terminal_Control.Set_Echo`: whether the terminal shows what is typed. A
   program that lets its user type ahead while it writes output of its own
   turns echo off for that time and shows the line when it reads it. Linux

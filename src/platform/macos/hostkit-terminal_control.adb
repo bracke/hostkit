@@ -395,6 +395,20 @@ package body Hostkit.Terminal_Control is
       return False;
    end Set_Echo;
 
+   -----------------------
+   -- Show_Control_Keys --
+   -----------------------
+
+   function Show_Control_Keys
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      On       : Boolean) return Boolean
+   is
+      pragma Unreferenced (Terminal, On);
+   begin
+      --  Not arranged here: False, not a claim that the echo changed.
+      return False;
+   end Show_Control_Keys;
+
    -----------------------------
    -- Keep_Input_On_Interrupt --
    -----------------------------

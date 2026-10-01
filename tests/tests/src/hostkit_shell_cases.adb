@@ -670,6 +670,8 @@ package body Hostkit_Shell_Cases is
               "a pipe had its typed input discarded as a terminal's");
       Assert (not Hostkit.Terminal_Control.Set_Echo (Ends.Read_End, On => False),
               "a pipe had its echo turned off as a terminal's");
+      Assert (not Hostkit.Terminal_Control.Show_Control_Keys (Ends.Read_End, On => False),
+              "a pipe had its control keys hidden as a terminal's");
       Assert (not Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Ends.Read_End, Keep => True),
               "a pipe was told to keep its typed input past an interrupt");
 
@@ -2102,6 +2104,10 @@ package body Hostkit_Shell_Cases is
       if Hostkit.Terminal_Control.Set_Echo (Item.Device, On => False) then
          Assert (Hostkit.Terminal_Control.Set_Echo (Item.Device, On => True),
                  "echo turned off could not be turned on again");
+      end if;
+      if Hostkit.Terminal_Control.Show_Control_Keys (Item.Device, On => False) then
+         Assert (Hostkit.Terminal_Control.Show_Control_Keys (Item.Device, On => True),
+                 "control keys hidden could not be shown again");
       end if;
       if Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Item.Device, Keep => True) then
          Assert (Hostkit.Terminal_Control.Keep_Input_On_Interrupt (Item.Device, Keep => False),
