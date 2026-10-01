@@ -152,6 +152,21 @@ package Hostkit.Terminal_Control is
      (Terminal : Hostkit.Descriptors.Descriptor;
       Keep     : Boolean) return Boolean;
 
+   --  Whether the terminal shows what is typed as it is typed.
+   --
+   --  A program that lets its user type ahead while it writes output of its
+   --  own turns echo off for that time, so the typing does not land in the
+   --  middle of the output, and shows the line itself when it reads it.
+   --  The line discipline still collects the line; only its echo stops.
+   --
+   --  @param Terminal The terminal.
+   --  @param On True to echo, False not to.
+   --  @return True when the terminal now does as asked; False where this
+   --    cannot be arranged.
+   function Set_Echo
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      On       : Boolean) return Boolean;
+
    --  Arrange for this terminal to turn an interrupt key into an interrupt.
    --
    --  What a shell wants of its terminal *between* line reads: while a program

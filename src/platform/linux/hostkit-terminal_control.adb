@@ -371,6 +371,46 @@ package body Hostkit.Terminal_Control is
       end;
    end Control;
 
+   --------------
+   -- Set_Echo --
+   --------------
+
+   function Set_Echo
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      On       : Boolean) return Boolean
+   is
+      Settings : Mode_Storage := [others => 0];
+
+      --  c_lflag, the fourth 32-bit field of a termios, and ECHO in it.
+      Local_Flags : constant := 3;
+      Echo        : constant := 8#10#;
+   begin
+      if not Hostkit.Descriptors.Is_Valid (Terminal) then
+         return False;
+      end if;
+
+      if Tcgetattr (To_Fd (Terminal), Settings'Address) /= 0 then
+         return False;
+      end if;
+
+      declare
+         use type Interfaces.Unsigned_32;
+
+         Words : array (0 .. 3) of Interfaces.Unsigned_32
+           with Import, Address => Settings'Address;
+         Wanted : constant Interfaces.Unsigned_32 :=
+           (if On then Words (Local_Flags) or Echo
+            else Words (Local_Flags) and not Interfaces.Unsigned_32'(Echo));
+      begin
+         if Wanted = Words (Local_Flags) then
+            return True;
+         end if;
+         Words (Local_Flags) := Wanted;
+      end;
+
+      return Tcsetattr (To_Fd (Terminal), TCSADRAIN, Settings'Address) = 0;
+   end Set_Echo;
+
    -----------------------------
    -- Keep_Input_On_Interrupt --
    -----------------------------

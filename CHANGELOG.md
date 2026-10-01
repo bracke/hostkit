@@ -17,6 +17,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Terminal_Control.Set_Echo`: whether the terminal shows what is typed. A
+  program that lets its user type ahead while it writes output of its own
+  turns echo off for that time and shows the line when it reads it. Linux
+  only; elsewhere it answers False.
 - `Terminal_Control.Keep_Input_On_Interrupt`: whether Ctrl-C leaves what was typed
   ahead in the terminal's queue. POSIX throws it away with the signal unless
   `NOFLSH` is set; a program that lets its user type the next command while it

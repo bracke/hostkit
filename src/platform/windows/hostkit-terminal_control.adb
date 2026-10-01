@@ -437,6 +437,20 @@ package body Hostkit.Terminal_Control is
       end;
    end Control;
 
+   --------------
+   -- Set_Echo --
+   --------------
+
+   function Set_Echo
+     (Terminal : Hostkit.Descriptors.Descriptor;
+      On       : Boolean) return Boolean
+   is
+      pragma Unreferenced (Terminal, On);
+   begin
+      --  Not arranged here: False, not a claim that echo changed.
+      return False;
+   end Set_Echo;
+
    -----------------------------
    -- Keep_Input_On_Interrupt --
    -----------------------------
