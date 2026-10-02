@@ -6,6 +6,7 @@ with GNAT.OS_Lib;
 
 with Hostkit.Native;
 with Hostkit.Shell;
+with Hostkit.Windows_Command_Line;
 
 package body Hostkit.Process is
    use Ada.Strings.Unbounded;
@@ -63,9 +64,20 @@ package body Hostkit.Process is
    is
       Args    : GNAT.OS_Lib.Argument_List_Access := null;
       Started : GNAT.OS_Lib.Process_Id;
+      Exit_Status : Integer;
    begin
       if Program = "" then
          return False;
+      end if;
+
+      --  GNAT's Non_Blocking_Spawn argument-vector path is not reliable on
+      --  native Windows.  Use the same directly quoted CreateProcessW seam as
+      --  captured and shell launches there; closing its handles still gives
+      --  the detached semantics promised by this operation.
+      if Hostkit.Native.Supports_Raw_Command_Line then
+         return Hostkit.Native.Run_Command_Line
+           (Hostkit.Windows_Command_Line.Build (Program, Arguments),
+            Wait => False, Exit_Status => Exit_Status);
       end if;
 
       Args := To_Argument_List (Arguments);
