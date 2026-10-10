@@ -212,6 +212,21 @@ package Hostkit.Metadata is
    --  @return True when both exist and are the same file.
    function Same_File (Left : String; Right : String) return Boolean;
 
+   --  A stamp of Path's contents as the filesystem records them: equal while
+   --  nothing has written to the file, different after any write -- its
+   --  modification and status-change times to the nanosecond, its size and
+   --  its file number. For telling whether a file changed without reading
+   --  it; never compared across hosts.
+   --
+   --  @param Path Path to inspect.
+   --  @param Available True when the host gave a stamp; False where it has
+   --    no times that fine, and the caller must look another way.
+   --  @return The stamp when Available; "" otherwise.
+   function Change_Stamp
+     (Path      : String;
+      Available : out Boolean)
+      return String;
+
    --  The filesystem device identifier that contains Path.
    --
    --  POSIX find -xdev needs to compare the device id of a starting point with

@@ -410,6 +410,37 @@ package body Hostkit.Metadata is
 
    Statx_Ino : constant C_Unsigned := 16#100#;
 
+   Statx_Mtime : constant C_Unsigned := 16#40#;
+   Statx_Ctime : constant C_Unsigned := 16#80#;
+   Statx_Size  : constant C_Unsigned := 16#200#;
+
+   function Change_Stamp
+     (Path      : String;
+      Available : out Boolean)
+      return String
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Status : C_Int;
+      Wanted : constant C_Unsigned := Statx_Mtime or Statx_Ctime or Statx_Size or Statx_Ino;
+   begin
+      Available := False;
+      Status := Statx (At_FDCWD, C_Path, 0, Wanted, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 or else (C_Unsigned (Info.Mask) and Wanted) /= Wanted then
+         return "";
+      end if;
+      Available := True;
+      return C_S64'Image (Info.Modified_Time.Seconds) & "." & C_U32'Image (Info.Modified_Time.Nanoseconds)
+        & C_S64'Image (Info.Change_Time.Seconds) & "." & C_U32'Image (Info.Change_Time.Nanoseconds)
+        & C_U64'Image (Info.Size) & C_U64'Image (Info.Inode);
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         Available := False;
+         return "";
+   end Change_Stamp;
+
    function Same_File (Left : String; Right : String) return Boolean is
       L_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Left);
       R_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Right);

@@ -990,6 +990,18 @@ package body Hostkit.Metadata is
       File_Ownership (Path, User_Id, Group_Id, Ownership_Available);
    end File_Mode_And_Ownership;
 
+   --  No stamp this fine is read here yet: unknown, never a guess.
+   function Change_Stamp
+     (Path      : String;
+      Available : out Boolean)
+      return String
+   is
+      pragma Unreferenced (Path);
+   begin
+      Available := False;
+      return "";
+   end Change_Stamp;
+
    function Same_File (Left : String; Right : String) return Boolean is
       --  Windows filesystems are case-insensitive, so two paths that normalise
       --  to the same absolute string ignoring case name the same file.
