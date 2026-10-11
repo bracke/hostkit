@@ -30,6 +30,10 @@ recently enough to matter to somebody pinning it; the history before that is in
   a held descriptor/handle, optionally requiring a previously captured entry
   identity, and return the old value from that same entry. Symbolic links and
   Windows reparse points are refused.
+- **`Hostkit.Private_Paths`**: create an owner-only directory, safely harden an
+  existing owned directory without following a link, and restrict an already
+  open regular file. POSIX bodies remove inherited ACLs; Windows writes a
+  protected owner-only DACL.
 - `Terminal_Control.Show_Control_Keys`: whether the terminal echoes a control
   key as a caret and a letter (ECHOCTL), so a program that reads Esc as a key
   of its own does not leave `^[` on the line. Linux only; elsewhere it answers
