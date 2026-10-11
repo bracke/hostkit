@@ -59,6 +59,7 @@ interface. The question to ask of a new subprogram is:
 | `Hostkit.Pty` | Terminals for a child that did not inherit one -- a pseudo-terminal, or a pseudo-console where that is what the host has |
 | `Hostkit.Terminal_Control` | Terminal modes, window size, the foreground process group, and whether an interrupt reaches a program that is busy |
 | `Hostkit.Locks` | Advisory file locks |
+| `Hostkit.Lease_Files` | No-follow, identity-bound lease files combining process-held locks with durable positioned I/O |
 
 Three of those answers exist because a shell asked and the honest answer was
 "that depends on the host":

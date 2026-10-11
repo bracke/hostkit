@@ -30,6 +30,9 @@ recently enough to matter to somebody pinning it; the history before that is in
   a held descriptor/handle, optionally requiring a previously captured entry
   identity, and return the old value from that same entry. Symbolic links and
   Windows reparse points are refused.
+- **`Hostkit.Lease_Files`**: securely create or open an owner-held lease without
+  following links, take shared or exclusive process-lifetime locks, perform
+  durable positioned I/O, and verify that a pathname still names the held file.
 - **`Hostkit.Private_Paths`**: create an owner-only directory, safely harden an
   existing owned directory without following a link, and restrict an already
   open regular file. POSIX bodies remove inherited ACLs; Windows writes a
