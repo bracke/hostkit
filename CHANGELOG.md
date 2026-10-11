@@ -23,6 +23,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Parent_Watch.End_With_Parent`**: a child program that should not
+  outlive the one that started it ends when that one does -- Linux by the
+  kernel's parent-death signal, macOS by a detached thread watching the
+  parent; False where the host cannot.
 - **`Directory_Listing.List`**: a directory's entries with the kind the
   directory records for each (file, directory, link, other) without
   following a link or asking each entry; `Unknown` where the filesystem or
