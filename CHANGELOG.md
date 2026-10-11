@@ -23,6 +23,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Directory_Listing.List`**: a directory's entries with the kind the
+  directory records for each (file, directory, link, other) without
+  following a link or asking each entry; `Unknown` where the filesystem or
+  host does not say, for the caller to ask itself.
 - **`Metadata.Entry_Identity_Of` and `Entry_Revision_Of`**: stable,
   no-follow facts for detecting replacement and change without treating a
   symbolic link as its target. Windows keeps the complete 128-bit file ID.
