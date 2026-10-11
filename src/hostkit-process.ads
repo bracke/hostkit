@@ -134,6 +134,21 @@ package Hostkit.Process is
    --    caller's to decide.
    function Presence_Of (Process_Id : Integer) return Presence;
 
+   --  What tells this process apart from a later one given the same id: a
+   --  process id is reused once its process is gone, and "a process with
+   --  that id is there" is not "the one recorded is there".
+   --
+   --  Linux: the boot's id and the process's start time, from
+   --  /proc/sys/kernel/random/boot_id and /proc/PID/stat -- the same two
+   --  for one process for its whole life, and never for another.
+   --
+   --  @return The identity, to be recorded with the id and compared before
+   --    a recorded process is taken to be the one there; "" where the host
+   --    cannot say -- another host, no such process, a file that would not
+   --    read. Unknown is not the same process: a caller that would signal
+   --    on it must not.
+   function Identity_Of (Process_Id : Integer) return String;
+
    type Wait_Outcome is (Wait_Ready, Wait_Timed_Out, Wait_Error);
 
    --  Wait until a file descriptor -- a subprocess's stdio pipe, typically -- is ready to be

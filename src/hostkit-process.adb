@@ -1,6 +1,8 @@
 with Ada.Streams.Stream_IO;
 with Ada.Environment_Variables;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 
 with GNAT.OS_Lib;
 
@@ -268,6 +270,61 @@ package body Hostkit.Process is
       when others =>
          return Unknown;
    end Presence_Of;
+
+   function Identity_Of (Process_Id : Integer) return String is
+      --  The first line of a file, or "" where it will not read.
+      function First_Line (Path : String) return String is
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+         declare
+            Line : constant String := Ada.Text_IO.Get_Line (File);
+         begin
+            Ada.Text_IO.Close (File);
+            return Line;
+         end;
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then
+               Ada.Text_IO.Close (File);
+            end if;
+            return "";
+      end First_Line;
+
+      Image : constant String := Ada.Strings.Fixed.Trim (Integer'Image (Process_Id), Ada.Strings.Both);
+   begin
+      if Process_Id <= 0 then
+         return "";
+      end if;
+      declare
+         Stat : constant String := First_Line ("/proc/" & Image & "/stat");
+         Boot : constant String := First_Line ("/proc/sys/kernel/random/boot_id");
+         --  Past the name in parentheses, which may hold spaces and
+         --  parentheses of its own: the fields after the last ')'.
+         Close : constant Natural := Ada.Strings.Fixed.Index (Stat, ")", Ada.Strings.Backward);
+         Field : Natural := 2;
+         Start : Natural;
+      begin
+         if Stat = "" or else Boot = "" or else Close = 0 then
+            return "";
+         end if;
+         --  The start time is the 22nd field: the 20th after the name.
+         Start := Close + 2;
+         for Index in Close + 2 .. Stat'Last + 1 loop
+            if Index > Stat'Last or else Stat (Index) = ' ' then
+               Field := Field + 1;
+               if Field = 22 then
+                  return Boot & ":" & Stat (Start .. Index - 1);
+               end if;
+               Start := Index + 1;
+            end if;
+         end loop;
+         return "";
+      end;
+   exception
+      when others =>
+         return "";
+   end Identity_Of;
 
    function Wait_FD
      (FD         : Integer;
