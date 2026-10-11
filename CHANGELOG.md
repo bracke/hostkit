@@ -34,6 +34,10 @@ recently enough to matter to somebody pinning it; the history before that is in
   existing owned directory without following a link, and restrict an already
   open regular file. POSIX bodies remove inherited ACLs; Windows writes a
   protected owner-only DACL.
+- **`Hostkit.Metadata_Copy`**: no-follow capture and application of entry
+  timestamps and complete copy metadata. POSIX preserves ownership, modes,
+  ACLs, and extended attributes while refusing file capabilities; Windows
+  preserves the metadata its filesystem exposes for this operation.
 - `Terminal_Control.Show_Control_Keys`: whether the terminal echoes a control
   key as a caret and a letter (ECHOCTL), so a program that reads Esc as a key
   of its own does not leave `^[` on the line. Linux only; elsewhere it answers
