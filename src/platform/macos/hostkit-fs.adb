@@ -1,4 +1,5 @@
 with Ada.Calendar;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Strings.Fixed;
 with Ada.Environment_Variables;
 with System;
@@ -567,6 +568,331 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Delete_Link;
+
+   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
+      use Ada.Strings.Unbounded;
+      use type Interfaces.C.Strings.chars_ptr;
+      use type System.Address;
+
+      Max_Depth : constant := 2_048;
+      Max_Entries : constant := 100_000;
+      Max_Name_Bytes : constant := 64 * 1_024 * 1_024;
+      O_Rdonly : constant C_Int := 0;
+      O_Nofollow : constant C_Int := 16#100#;
+      O_Directory : constant C_Int := 16#0010_0000#;
+      O_Cloexec : constant C_Int := 16#0100_0000#;
+      At_Symlink_Nofollow : constant C_Int := 16#20#;
+      At_Removedir : constant C_Int := 16#80#;
+      Directory_Type : constant C_U16 := 8#040000#;
+
+      type Dirent is record
+         Inode, Seek_Offset : Interfaces.C.unsigned_long;
+         Record_Length, Name_Length : C_U16;
+         Kind : Interfaces.C.unsigned_char;
+         Name : Interfaces.C.char_array (0 .. 1_023);
+      end record with Convention => C;
+      pragma Compile_Time_Error
+        (Dirent'Size /= 1_048 * 8, "Darwin dirent must be 1048 bytes");
+
+      type Identity is record
+         Device : C_S32 := 0;
+         Inode : Interfaces.C.unsigned_long := 0;
+         Mode : C_U16 := 0;
+         Available : Boolean := False;
+      end record;
+      package Name_Vectors is new Ada.Containers.Indefinite_Vectors
+        (Index_Type => Positive, Element_Type => String);
+
+      function C_Open (Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "open";
+      function C_Openat
+        (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "openat";
+      function C_Close (Fd : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "close";
+      function C_Dup (Fd : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "dup";
+      function C_Fdopendir (Fd : C_Int) return System.Address
+        with Import, Convention => C, External_Name => "fdopendir";
+      function C_Readdir (Directory : System.Address) return System.Address
+        with Import, Convention => C, External_Name => "readdir$INODE64";
+      function C_Closedir (Directory : System.Address) return C_Int
+        with Import, Convention => C, External_Name => "closedir";
+      function C_Fstat (Fd : C_Int; Info : access Stat_Record) return C_Int
+        with Import, Convention => C, External_Name => "fstat$INODE64";
+      function C_Fstatat
+        (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr;
+         Info : access Stat_Record; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "fstatat$INODE64";
+      function C_Unlinkat
+        (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "unlinkat";
+      function Errno_Location return System.Address
+        with Import, Convention => C, External_Name => "__error";
+
+      function Errno return C_Int is
+         Value : C_Int with Import, Address => Errno_Location;
+      begin
+         return Value;
+      end Errno;
+      procedure Clear_Errno is
+         Value : C_Int with Import, Address => Errno_Location;
+      begin
+         Value := 0;
+      end Clear_Errno;
+      procedure Close (Fd : in out C_Int) is
+         Ignored : C_Int;
+      begin
+         if Fd >= 0 then
+            Ignored := C_Close (Fd);
+            Fd := -1;
+         end if;
+      end Close;
+      procedure Free (Item : in out Interfaces.C.Strings.chars_ptr) is
+      begin
+         if Item /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (Item);
+         end if;
+      end Free;
+      function To_Identity (Info : Stat_Record; Ok : Boolean) return Identity is
+        ((if Ok then (Info.Device, Info.Inode, Info.Mode, True) else (others => <>)));
+      function Info_Of (Fd : C_Int) return Identity is
+         Info : aliased Stat_Record;
+         Ok : Boolean;
+      begin
+         Ok := Fd >= 0 and then C_Fstat (Fd, Info'Access) = 0;
+         return To_Identity (Info, Ok);
+      end Info_Of;
+      function Info_At (Fd : C_Int; Name : String) return Identity is
+         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
+         Info : aliased Stat_Record;
+         Ok : Boolean;
+      begin
+         Ok := C_Fstatat (Fd, C_Name, Info'Access, At_Symlink_Nofollow) = 0;
+         Free (C_Name);
+         return To_Identity (Info, Ok);
+      exception
+         when others =>
+            Free (C_Name);
+            return (others => <>);
+      end Info_At;
+      function Same (Left, Right : Identity) return Boolean is
+        (Left.Available and then Right.Available and then Left.Device = Right.Device
+         and then Left.Inode = Right.Inode);
+      function Is_Directory (Item : Identity) return Boolean is
+        (Item.Available and then (Item.Mode and File_Type_Mask) = Directory_Type);
+
+      function Read_Names (Held : C_Int; Names : in out Name_Vectors.Vector) return Boolean is
+         Scan : C_Int := C_Dup (Held);
+         Directory : System.Address := System.Null_Address;
+         Pointer : System.Address;
+         Name_Bytes : Natural := 0;
+         Ignored : C_Int;
+      begin
+         if Scan < 0 then
+            return False;
+         end if;
+         Directory := C_Fdopendir (Scan);
+         if Directory = System.Null_Address then
+            Close (Scan);
+            return False;
+         end if;
+         Scan := -1;
+         Clear_Errno;
+         loop
+            Pointer := C_Readdir (Directory);
+            exit when Pointer = System.Null_Address;
+            declare
+               Item : Dirent with Import, Address => Pointer;
+               Name : constant String := Interfaces.C.To_Ada (Item.Name);
+            begin
+               if Name /= "." and then Name /= ".." then
+                  if Natural (Names.Length) >= Max_Entries
+                    or else Name'Length > Max_Name_Bytes - Name_Bytes
+                  then
+                     Ignored := C_Closedir (Directory);
+                     return False;
+                  end if;
+                  Names.Append (Name);
+                  Name_Bytes := Name_Bytes + Name'Length;
+               end if;
+            end;
+            Clear_Errno;
+         end loop;
+         declare
+            Ok : constant Boolean := Errno = 0;
+         begin
+            Ignored := C_Closedir (Directory);
+            return Ok;
+         end;
+      exception
+         when others =>
+            if Directory /= System.Null_Address then
+               Ignored := C_Closedir (Directory);
+            else
+               Close (Scan);
+            end if;
+            return False;
+      end Read_Names;
+
+      function Delete_Held
+        (Held : in out C_Int; Held_Info : Identity; Own_Name : String;
+         Expected_Parent : Identity; Depth : Natural) return Boolean
+      is
+         Names : Name_Vectors.Vector;
+         Ok : Boolean;
+      begin
+         if Depth > Max_Depth or else not Read_Names (Held, Names) then
+            Close (Held);
+            return False;
+         end if;
+         for Name of Names loop
+            declare
+               Observed : constant Identity := Info_At (Held, Name);
+               C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
+               Child : C_Int := -1;
+            begin
+               if not Observed.Available then
+                  Ok := False;
+               elsif not Is_Directory (Observed) then
+                  Ok := C_Unlinkat (Held, C_Name, 0) = 0;
+               else
+                  Child := C_Openat (Held, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
+                  declare
+                     Child_Info : constant Identity := Info_Of (Child);
+                  begin
+                     Ok := Child >= 0 and then Is_Directory (Child_Info)
+                       and then Same (Observed, Child_Info);
+                     if Ok then
+                        Close (Held);
+                        Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
+                        Held := Child;
+                        if Ok then
+                           Ok := Same (Held_Info, Info_Of (Held));
+                        end if;
+                     else
+                        Close (Child);
+                     end if;
+                  end;
+               end if;
+               Free (C_Name);
+               if not Ok then
+                  Close (Held);
+                  return False;
+               end if;
+            exception
+               when others =>
+                  Free (C_Name);
+                  Close (Child);
+                  Close (Held);
+                  return False;
+            end;
+         end loop;
+         declare
+            Dotdot : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String ("..");
+            Parent : C_Int := C_Openat (Held, Dotdot, O_Rdonly + O_Directory + O_Cloexec);
+            Current : constant Identity := Info_At (Parent, Own_Name);
+            C_Own : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Own_Name);
+         begin
+            Free (Dotdot);
+            Ok := Parent >= 0 and then Same (Expected_Parent, Info_Of (Parent))
+              and then Is_Directory (Current) and then Same (Held_Info, Current);
+            Close (Held);
+            if Ok then
+               Ok := C_Unlinkat (Parent, C_Own, At_Removedir) = 0;
+            end if;
+            Free (C_Own);
+            if not Ok then
+               Close (Parent);
+               return False;
+            end if;
+            Held := Parent;
+            return True;
+         exception
+            when others =>
+               Free (Dotdot);
+               Free (C_Own);
+               Close (Held);
+               Close (Parent);
+               return False;
+         end;
+      end Delete_Held;
+
+      function Delete_At (Parent : in out C_Int; Name : String) return Boolean is
+         Observed : constant Identity := Info_At (Parent, Name);
+         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
+         Child : C_Int := -1;
+         Ok : Boolean;
+      begin
+         if not Observed.Available then
+            Ok := False;
+         elsif not Is_Directory (Observed) then
+            Ok := C_Unlinkat (Parent, C_Name, 0) = 0;
+         else
+            Child := C_Openat (Parent, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
+            declare
+               Child_Info : constant Identity := Info_Of (Child);
+               Parent_Info : constant Identity := Info_Of (Parent);
+            begin
+               Ok := Child >= 0 and then Is_Directory (Child_Info)
+                 and then Same (Observed, Child_Info) and then Parent_Info.Available;
+               if Ok then
+                  Close (Parent);
+                  Ok := Delete_Held (Child, Child_Info, Name, Parent_Info, 0);
+                  Parent := Child;
+               else
+                  Close (Child);
+               end if;
+            end;
+         end if;
+         Free (C_Name);
+         Close (Parent);
+         return Ok;
+      exception
+         when others =>
+            Free (C_Name);
+            Close (Child);
+            Close (Parent);
+            return False;
+      end Delete_At;
+
+      Trimmed : Unbounded_String := To_Unbounded_String (Path);
+   begin
+      if Path = "" then
+         return Tree_Delete_Failed;
+      end if;
+      while Length (Trimmed) > 1 and then Element (Trimmed, Length (Trimmed)) = '/' loop
+         Delete (Trimmed, Length (Trimmed), Length (Trimmed));
+      end loop;
+      declare
+         Value : constant String := To_String (Trimmed);
+         Slash : constant Natural := Ada.Strings.Fixed.Index (Value, "/", Ada.Strings.Backward);
+         Name : constant String := (if Slash = 0 then Value else Value (Slash + 1 .. Value'Last));
+         Parent_Name : constant String :=
+           (if Slash = 0 then "." elsif Slash = Value'First then "/" else Value (Value'First .. Slash - 1));
+         C_Parent : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Parent_Name);
+         Parent : C_Int := -1;
+         Ok : Boolean;
+      begin
+         if Name = "" or else Name = "." or else Name = ".." then
+            Free (C_Parent);
+            return Tree_Delete_Failed;
+         end if;
+         Parent := C_Open (C_Parent, O_Rdonly + O_Directory + O_Cloexec);
+         Free (C_Parent);
+         Ok := Parent >= 0 and then Delete_At (Parent, Name);
+         Close (Parent);
+         return (if Ok then Tree_Deleted else Tree_Delete_Failed);
+      exception
+         when others =>
+            Free (C_Parent);
+            Close (Parent);
+            return Tree_Delete_Failed;
+      end;
+   exception
+      when others =>
+         return Tree_Delete_Failed;
+   end Delete_Tree_No_Follow;
 
    --  POSIX realpath: resolve every symbolic link in Path and collapse "." and "..",
    --  returning the canonical absolute path. This is what Ada.Directories.Full_Name

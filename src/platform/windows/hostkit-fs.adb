@@ -1,5 +1,6 @@
 with Ada.Calendar;
 with Ada.Characters.Handling;
+with Ada.Containers.Indefinite_Vectors;
 with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
@@ -444,6 +445,262 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Delete_Link;
+
+   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
+      use type Interfaces.Unsigned_64;
+      use type Interfaces.Unsigned_32;
+      use type Interfaces.C.unsigned_short;
+      use type System.Address;
+      use type System.Storage_Elements.Integer_Address;
+
+      subtype C_U16 is Interfaces.C.unsigned_short;
+      type U16_Array is array (Natural range <>) of aliased C_U16
+        with Convention => C;
+      type Byte_Array is array (Natural range <>) of aliased Interfaces.Unsigned_8
+        with Convention => C;
+      type Directory_Header is record
+         Next_Offset : Interfaces.Unsigned_32;
+         Name_Length : Interfaces.Unsigned_32;
+         File_Id     : Interfaces.Unsigned_64;
+      end record;
+      for Directory_Header use record
+         Next_Offset at 0 range 0 .. 31;
+         Name_Length at 60 range 0 .. 31;
+         File_Id     at 96 range 0 .. 63;
+      end record;
+      for Directory_Header'Size use 104 * 8;
+      type Handle_Info is record
+         Attributes : C_DWord;
+         Creation_Low, Creation_High, Access_Low, Access_High : C_DWord;
+         Write_Low, Write_High, Volume : C_DWord;
+         Size_High, Size_Low, Links, Index_High, Index_Low : C_DWord;
+      end record with Convention => C;
+      type Disposition_Info is record
+         Delete_File : Interfaces.C.int;
+      end record with Convention => C;
+      type Child (Length : Natural) is record
+         Name : U16_Array (1 .. Length);
+         Id   : Interfaces.Unsigned_64;
+      end record;
+      package Child_Vectors is new Ada.Containers.Indefinite_Vectors
+        (Index_Type => Positive, Element_Type => Child);
+
+      Max_Depth : constant := 2_048;
+      Max_Entries : constant := 100_000;
+      Max_Name_Bytes : constant := 64 * 1_024 * 1_024;
+      Invalid_Handle : constant System.Address :=
+        System.Storage_Elements.To_Address (-1);
+      Delete_Access : constant C_DWord := 16#0001_0000#;
+      File_List_Directory : constant C_DWord := 1;
+      File_Read_Attributes : constant C_DWord := 16#80#;
+      Share_All : constant C_DWord := 7;
+      Open_Existing : constant C_DWord := 3;
+      Backup_Semantics : constant C_DWord := 16#0200_0000#;
+      Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
+      Id_Both_Directory_Info : constant Interfaces.C.int := 10;
+      Id_Both_Directory_Restart_Info : constant Interfaces.C.int := 11;
+      File_Disposition_Info : constant Interfaces.C.int := 4;
+      Error_No_More_Files : constant C_DWord := 18;
+
+      function Create_File_W
+        (Name : System.Address; Access_Mode, Share : C_DWord;
+         Security : System.Address; Disposition, Flags : C_DWord;
+         Template : System.Address) return System.Address
+        with Import, Convention => Stdcall, External_Name => "CreateFileW";
+      function Close_Handle (Handle : System.Address) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "CloseHandle";
+      function Get_File_Information
+        (Handle : System.Address; Info : access Handle_Info) return Interfaces.C.int
+        with Import, Convention => Stdcall,
+             External_Name => "GetFileInformationByHandle";
+      function Get_File_Information_Ex
+        (Handle : System.Address; Kind : Interfaces.C.int;
+         Info : System.Address; Size : C_DWord) return Interfaces.C.int
+        with Import, Convention => Stdcall,
+             External_Name => "GetFileInformationByHandleEx";
+      function Set_File_Information
+        (Handle : System.Address; Kind : Interfaces.C.int;
+         Info : System.Address; Size : C_DWord) return Interfaces.C.int
+        with Import, Convention => Stdcall,
+             External_Name => "SetFileInformationByHandle";
+      function Get_Final_Path
+        (Handle : System.Address; Name : System.Address;
+         Size, Flags : C_DWord) return C_DWord
+        with Import, Convention => Stdcall,
+             External_Name => "GetFinalPathNameByHandleW";
+      function Get_Last_Error return C_DWord
+        with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+      function File_Index (Info : Handle_Info) return Interfaces.Unsigned_64 is
+        (Interfaces.Unsigned_64 (Info.Index_High) * 2 ** 32
+         + Interfaces.Unsigned_64 (Info.Index_Low));
+
+      function Read_Children
+        (Directory : System.Address; Items : in out Child_Vectors.Vector)
+         return Boolean
+      is
+         Buffer : aliased Byte_Array (0 .. 65_535);
+         Kind : Interfaces.C.int := Id_Both_Directory_Restart_Info;
+         Name_Bytes : Natural := 0;
+      begin
+         loop
+            if Get_File_Information_Ex
+              (Directory, Kind, Buffer'Address, C_DWord (Buffer'Length)) = 0
+            then
+               return Get_Last_Error = Error_No_More_Files;
+            end if;
+            Kind := Id_Both_Directory_Info;
+            declare
+               Offset : Natural := 0;
+            begin
+               loop
+                  declare
+                     Header : Directory_Header
+                       with Import, Address => Buffer (Offset)'Address;
+                     Length : constant Natural := Natural (Header.Name_Length) / 2;
+                     Item : Child (Length);
+                     Dot : Boolean := False;
+                  begin
+                     if Offset + 104 + Natural (Header.Name_Length) > Buffer'Length then
+                        return False;
+                     end if;
+                     for Index in 1 .. Length loop
+                        declare
+                           Unit : C_U16 with Import,
+                             Address => Buffer (Offset + 104 + (Index - 1) * 2)'Address;
+                        begin
+                           Item.Name (Index) := Unit;
+                        end;
+                     end loop;
+                     Dot := (Length = 1 and then Item.Name (1) = Character'Pos ('.'))
+                       or else (Length = 2 and then Item.Name (1) = Character'Pos ('.')
+                                and then Item.Name (2) = Character'Pos ('.'));
+                     if not Dot then
+                        if Natural (Items.Length) >= Max_Entries
+                          or else Natural (Header.Name_Length) > Max_Name_Bytes - Name_Bytes
+                        then
+                           return False;
+                        end if;
+                        Item.Id := Header.File_Id;
+                        Items.Append (Item);
+                        Name_Bytes := Name_Bytes + Natural (Header.Name_Length);
+                     end if;
+                     exit when Header.Next_Offset = 0;
+                     if Natural (Header.Next_Offset) > Buffer'Length - Offset then
+                        return False;
+                     end if;
+                     Offset := Offset + Natural (Header.Next_Offset);
+                  end;
+               end loop;
+            end;
+         end loop;
+      exception
+         when others =>
+            return False;
+      end Read_Children;
+
+      function Child_Path (Parent : System.Address; Name : U16_Array) return U16_Array is
+         Length : constant C_DWord := Get_Final_Path
+           (Parent, System.Null_Address, 0, 0);
+      begin
+         if Length = 0 then
+            return [1 .. 0 => 0];
+         end if;
+         declare
+            Result : U16_Array (0 .. Natural (Length) + Name'Length + 1) := [others => 0];
+            Written : constant C_DWord := Get_Final_Path
+              (Parent, Result'Address, Length + 1, 0);
+            Next : Natural := Natural (Written);
+         begin
+            if Written = 0 or else Written > Length then
+               return [1 .. 0 => 0];
+            end if;
+            if Next > 0 and then Result (Next - 1) /= Character'Pos ('\') then
+               Result (Next) := Character'Pos ('\');
+               Next := Next + 1;
+            end if;
+            for Unit of Name loop
+               Result (Next) := Unit;
+               Next := Next + 1;
+            end loop;
+            Result (Next) := 0;
+            return Result (0 .. Next);
+         end;
+      end Child_Path;
+
+      function Delete_Held (Held : System.Address; Depth : Natural) return Boolean is
+         Info : aliased Handle_Info;
+         Items : Child_Vectors.Vector;
+         Ok : Boolean := Depth <= Max_Depth
+           and then Get_File_Information (Held, Info'Access) /= 0;
+         Ignored : Interfaces.C.int;
+      begin
+         if Ok and then (Info.Attributes and File_Attribute_Directory) /= 0
+           and then (Info.Attributes and File_Attribute_Reparse_Point) = 0
+         then
+            Ok := Read_Children (Held, Items);
+            for Item of Items loop
+               exit when not Ok;
+               declare
+                  Name : constant U16_Array := Child_Path (Held, Item.Name);
+                  Child_Handle : System.Address :=
+                    (if Name'Length = 0 then Invalid_Handle else
+                       Create_File_W
+                         (Name'Address,
+                          Delete_Access + File_Read_Attributes + File_List_Directory,
+                          Share_All, System.Null_Address, Open_Existing,
+                          Backup_Semantics + Open_Reparse_Point,
+                          System.Null_Address));
+                  Child_Info : aliased Handle_Info;
+               begin
+                  Ok := Child_Handle /= Invalid_Handle
+                    and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
+                    and then Child_Info.Volume = Info.Volume
+                    and then File_Index (Child_Info) = Item.Id;
+                  if Ok then
+                     Ok := Delete_Held (Child_Handle, Depth + 1);
+                     Child_Handle := Invalid_Handle;
+                  elsif Child_Handle /= Invalid_Handle then
+                     Ignored := Close_Handle (Child_Handle);
+                  end if;
+               end;
+            end loop;
+         end if;
+         if Ok then
+            declare
+               Disposition : aliased Disposition_Info := (Delete_File => 1);
+            begin
+               Ok := Set_File_Information
+                 (Held, File_Disposition_Info, Disposition'Address,
+                  C_DWord (Disposition_Info'Size / 8)) /= 0;
+            end;
+         end if;
+         Ignored := Close_Handle (Held);
+         return Ok;
+      exception
+         when others =>
+            Ignored := Close_Handle (Held);
+            return False;
+      end Delete_Held;
+
+      Name : aliased Wide_String := Wide (Path);
+      Held : System.Address;
+   begin
+      if Path = "" then
+         return Tree_Delete_Failed;
+      end if;
+      Held := Create_File_W
+        (Name'Address, Delete_Access + File_Read_Attributes + File_List_Directory,
+         Share_All, System.Null_Address, Open_Existing,
+         Backup_Semantics + Open_Reparse_Point, System.Null_Address);
+      if Held = Invalid_Handle then
+         return Tree_Delete_Failed;
+      end if;
+      return (if Delete_Held (Held, 0) then Tree_Deleted else Tree_Delete_Failed);
+   exception
+      when others =>
+         return Tree_Delete_Failed;
+   end Delete_Tree_No_Follow;
 
    --  Windows has no realpath. Open the path -- following links, so no
    --  FILE_FLAG_OPEN_REPARSE_POINT here -- and ask the kernel for the final, canonical

@@ -48,6 +48,9 @@ recently enough to matter to somebody pinning it; the history before that is in
   already at the target -- `renameat2 (RENAME_NOREPLACE)` on Linux,
   `renamex_np (RENAME_EXCL)` on macOS, `MoveFileExW` without replacement on
   Windows; unsupported hosts refuse.
+- **`Fs.Delete_Tree_No_Follow`**: recursively remove an entry while anchoring
+  traversal to open descriptors or handles and verifying child identities.
+  Symbolic links and Windows reparse points are removed, never followed.
 - **`Spawn.Release`**: let go of a finished, collected process's handle --
   Windows closes it; on POSIX nothing is left after the wait.
 

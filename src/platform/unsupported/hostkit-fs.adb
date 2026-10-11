@@ -141,6 +141,12 @@ package body Hostkit.Fs is
       return False;
    end Delete_Link;
 
+   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
+      pragma Unreferenced (Path);
+   begin
+      return Tree_Delete_Unsupported;
+   end Delete_Tree_No_Follow;
+
    function Real_Path (Path : String) return String is
       pragma Unreferenced (Path);
    begin

@@ -225,6 +225,17 @@ package Hostkit.Fs is
    --          or directory is left alone) or the host refused to remove it.
    function Delete_Link (Path : String) return Boolean;
 
+   type Delete_Tree_Outcome is
+     (Tree_Deleted,
+      Tree_Delete_Failed,
+      Tree_Delete_Unsupported);
+
+   --  Remove Path and everything below it without ever following a symbolic
+   --  link or reparse point. Traversal is anchored to open directory handles
+   --  and entry identities so replacing a child during deletion cannot redirect
+   --  the operation outside the requested tree.
+   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome;
+
    --  Resolve Path to its canonical absolute form, following symbolic links and
    --  reparse points -- POSIX realpath, Windows GetFinalPathNameByHandleW.
    --  Ada.Directories.Full_Name cannot be used: on POSIX it resolves links, but on
