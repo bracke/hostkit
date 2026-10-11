@@ -1,4 +1,5 @@
 with Ada.Calendar;
+with Interfaces;
 
 --  What the filesystem says about a file, when the hosts do not say it the same way.
 --
@@ -22,6 +23,68 @@ with Ada.Calendar;
 --  and Set_Ownership below says why: it is the write half of File_Ownership and
 --  only means anything for the ids this package handed out.
 package Hostkit.Metadata is
+
+   subtype Identity_Field is Interfaces.Unsigned_64;
+
+   --  A no-follow identity for one directory entry. The generation fields
+   --  carry birth time on POSIX and the upper half of a 128-bit file ID on
+   --  Windows. Available is False rather than returning an inode alone when
+   --  the host cannot distinguish reuse of that inode.
+   type Entry_Identity is record
+      Available       : Boolean := False;
+      Volume          : Identity_Field := 0;
+      File_Number     : Identity_Field := 0;
+      Generation_High : Identity_Field := 0;
+      Generation_Low  : Identity_Field := 0;
+   end record;
+
+   --  Metadata used to tell whether an entry changed without following it.
+   --  Fields that a host does not have are zero; Available says whether the
+   --  complete host-specific revision was obtained.
+   type Entry_Revision is record
+      Available            : Boolean := False;
+      Modified_Seconds     : Identity_Field := 0;
+      Modified_Nanoseconds : Identity_Field := 0;
+      Changed_Seconds      : Identity_Field := 0;
+      Changed_Nanoseconds  : Identity_Field := 0;
+      Size                 : Identity_Field := 0;
+      Mode                 : Identity_Field := 0;
+      User_Id              : Identity_Field := 0;
+      Group_Id             : Identity_Field := 0;
+   end record;
+
+   --  Inspect Path itself, including a symbolic link rather than its target.
+   function Entry_Identity_Of (Path : String) return Entry_Identity;
+   function Entry_Revision_Of (Path : String) return Entry_Revision;
+
+   type Metadata_Update_Kind is (Update_Permissions, Update_Ownership);
+
+   type Metadata_Update_Result is record
+      Success        : Boolean := False;
+      Previous       : Identity_Field := 0;
+      Previous_Group : Identity_Field := 0;
+      Identity       : Entry_Identity;
+   end record;
+
+   --  Change metadata through a handle that pins Path to one filesystem entry.
+   --  Symbolic links are refused. When Check_Expected is True, the mutation is
+   --  performed only when the held entry has Expected's identity. Previous
+   --  values and the identity are captured from that same held entry, so a
+   --  pathname replacement cannot redirect a history or undo operation.
+   --
+   --  Owner_Name and Group_Name are used only on hosts whose native ownership
+   --  API needs names as well as the ids Hostkit reported. Max_Previous lets a
+   --  narrower caller refuse an undo value it could not retain losslessly.
+   function Update_Entry_Metadata
+     (Path           : String;
+      Expected       : Entry_Identity;
+      Check_Expected : Boolean;
+      Kind           : Metadata_Update_Kind;
+      Value          : Identity_Field;
+      Group          : Identity_Field;
+      Max_Previous   : Identity_Field;
+      Owner_Name     : String := "";
+      Group_Name     : String := "") return Metadata_Update_Result;
 
    --  What a filesystem has room for. All byte and inode counts saturate: a value
    --  beyond this host's range is clamped to 'Last rather than wrapping.

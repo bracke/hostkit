@@ -1,3 +1,4 @@
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Interfaces.C;
 
@@ -12,6 +13,7 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Unsigned_64;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_Unsigned is Interfaces.C.unsigned;
@@ -111,6 +113,22 @@ package body Hostkit.Metadata is
       Mode     : C_Unsigned)
       return C_Int
      with Import, Convention => C, External_Name => "chmod";
+
+   function C_Open
+     (Pathname : Interfaces.C.Strings.chars_ptr;
+      Flags    : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "open";
+
+   function C_Close (Fd : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "close";
+
+   function C_Fchownat
+     (Fd    : C_Int;
+      Path  : Interfaces.C.Strings.chars_ptr;
+      Owner : C_U32;
+      Group : C_U32;
+      Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "fchownat";
 
    type Timeval is record
       Seconds      : C_S64;
@@ -440,6 +458,166 @@ package body Hostkit.Metadata is
          Available := False;
          return "";
    end Change_Stamp;
+
+   function Entry_Identity_Of (Path : String) return Entry_Identity is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Wanted : constant C_Unsigned := Statx_Ino or Statx_Btime;
+      Status : C_Int;
+   begin
+      Status := Statx (At_FDCWD, C_Path, At_Symlink_Nofollow, Wanted, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 or else (Info.Mask and Wanted) /= Wanted then
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Interfaces.Shift_Left (Identity_Field (Info.File_Major), 32)
+           or Identity_Field (Info.File_Minor),
+         File_Number     => Identity_Field (Info.Inode),
+         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
+         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Entry_Identity_Of;
+
+   function Update_Entry_Metadata
+     (Path           : String;
+      Expected       : Entry_Identity;
+      Check_Expected : Boolean;
+      Kind           : Metadata_Update_Kind;
+      Value          : Identity_Field;
+      Group          : Identity_Field;
+      Max_Previous   : Identity_Field;
+      Owner_Name     : String := "";
+      Group_Name     : String := "") return Metadata_Update_Result
+   is
+      pragma Unreferenced (Owner_Name, Group_Name);
+      O_Path        : constant C_Int := 16#20_0000#;
+      O_Nofollow    : constant C_Int := 16#02_0000#;
+      O_Cloexec     : constant C_Int := 16#08_0000#;
+      At_Empty_Path : constant C_Int := 16#1000#;
+      File_Type     : constant C_U16 := 16#F000#;
+      Link_Type     : constant C_U16 := 16#A000#;
+      Wanted        : constant C_Unsigned :=
+        Statx_Ino or Statx_Btime or Statx_Mode or Statx_Uid or Statx_Gid;
+      C_Path        : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Empty         : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String ("");
+      Fd            : C_Int := -1;
+      Info          : aliased Statx_Record;
+      Answer        : Metadata_Update_Result;
+
+      procedure Close is
+         Ignored : C_Int;
+      begin
+         if Fd >= 0 then
+            Ignored := C_Close (Fd);
+            Fd := -1;
+         end if;
+      end Close;
+   begin
+      Fd := C_Open (C_Path, O_Path + O_Nofollow + O_Cloexec);
+      Interfaces.C.Strings.Free (C_Path);
+      if Fd < 0
+        or else Statx
+          (Fd, Empty, C_Unsigned (At_Empty_Path) or At_Symlink_Nofollow,
+           Wanted, Info'Access) /= 0
+        or else (Info.Mask and Wanted) /= Wanted
+        or else (Info.Mode and File_Type) = Link_Type
+      then
+         Interfaces.C.Strings.Free (Empty);
+         Close;
+         return Answer;
+      end if;
+
+      Answer.Identity :=
+        (Available       => True,
+         Volume          => Interfaces.Shift_Left
+           (Identity_Field (Info.File_Major), 32)
+           or Identity_Field (Info.File_Minor),
+         File_Number     => Identity_Field (Info.Inode),
+         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
+         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+      if Check_Expected and then Answer.Identity /= Expected then
+         Interfaces.C.Strings.Free (Empty);
+         Close;
+         return Answer;
+      end if;
+
+      if Kind = Update_Ownership then
+         Answer.Previous := Identity_Field (Info.User_Id);
+         Answer.Previous_Group := Identity_Field (Info.Group_Id);
+         if Value > Identity_Field (C_U32'Last)
+           or else Group > Identity_Field (C_U32'Last)
+           or else Answer.Previous > Max_Previous
+           or else Answer.Previous_Group > Max_Previous
+         then
+            Interfaces.C.Strings.Free (Empty);
+            Close;
+            return Answer;
+         end if;
+         Answer.Success := C_Fchownat
+           (Fd, Empty, C_U32 (Value), C_U32 (Group),
+            At_Empty_Path + C_Int (At_Symlink_Nofollow)) = 0;
+      else
+         Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);
+         declare
+            Held : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String
+                ("/proc/self/fd/" & Ada.Strings.Fixed.Trim
+                   (C_Int'Image (Fd), Ada.Strings.Both));
+         begin
+            Answer.Success := Chmod
+              (Held, C_Unsigned (Value mod 8#10000#)) = 0;
+            Interfaces.C.Strings.Free (Held);
+         exception
+            when others =>
+               Safe_Free (Held);
+               raise;
+         end;
+      end if;
+      Interfaces.C.Strings.Free (Empty);
+      Close;
+      return Answer;
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         Safe_Free (Empty);
+         Close;
+         return (others => <>);
+   end Update_Entry_Metadata;
+
+   function Entry_Revision_Of (Path : String) return Entry_Revision is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Wanted : constant C_Unsigned :=
+        Statx_Mode or Statx_Uid or Statx_Gid or Statx_Mtime or Statx_Ctime or Statx_Size;
+      Status : C_Int;
+   begin
+      Status := Statx (At_FDCWD, C_Path, At_Symlink_Nofollow, Wanted, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 or else (Info.Mask and Wanted) /= Wanted then
+         return (others => <>);
+      end if;
+      return
+        (Available            => True,
+         Modified_Seconds     => Identity_Field (Info.Modified_Time.Seconds),
+         Modified_Nanoseconds => Identity_Field (Info.Modified_Time.Nanoseconds),
+         Changed_Seconds      => Identity_Field (Info.Change_Time.Seconds),
+         Changed_Nanoseconds  => Identity_Field (Info.Change_Time.Nanoseconds),
+         Size                 => Identity_Field (Info.Size),
+         Mode                 => Identity_Field (Info.Mode),
+         User_Id              => Identity_Field (Info.User_Id),
+         Group_Id             => Identity_Field (Info.Group_Id));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Entry_Revision_Of;
 
    function Same_File (Left : String; Right : String) return Boolean is
       L_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Left);

@@ -23,6 +23,13 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Metadata.Entry_Identity_Of` and `Entry_Revision_Of`**: stable,
+  no-follow facts for detecting replacement and change without treating a
+  symbolic link as its target. Windows keeps the complete 128-bit file ID.
+- **`Metadata.Update_Entry_Metadata`**: change permissions or ownership through
+  a held descriptor/handle, optionally requiring a previously captured entry
+  identity, and return the old value from that same entry. Symbolic links and
+  Windows reparse points are refused.
 - `Terminal_Control.Show_Control_Keys`: whether the terminal echoes a control
   key as a caret and a letter (ECHOCTL), so a program that reads Esc as a key
   of its own does not leave `^[` on the line. Linux only; elsewhere it answers

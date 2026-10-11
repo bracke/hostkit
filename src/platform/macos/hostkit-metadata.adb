@@ -1,4 +1,5 @@
 with Ada.Strings.Unbounded;
+with Ada.Strings.Fixed;
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
@@ -13,6 +14,7 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Unsigned_64;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_U16 is Interfaces.C.unsigned_short;
@@ -135,6 +137,11 @@ package body Hostkit.Metadata is
       Buffer : access Stat_Record) return C_Int
      with Import, Convention => C, External_Name => "stat$INODE64";
 
+   function C_Lstat
+     (Path   : Interfaces.C.Strings.chars_ptr;
+      Buffer : access Stat_Record) return C_Int
+     with Import, Convention => C, External_Name => "lstat$INODE64";
+
    function C_Statfs
      (Path   : Interfaces.C.Strings.chars_ptr;
       Buffer : access Statfs_Record) return C_Int
@@ -144,6 +151,51 @@ package body Hostkit.Metadata is
      (Path : Interfaces.C.Strings.chars_ptr;
       Mode : C_U16) return C_Int
      with Import, Convention => C, External_Name => "chmod";
+
+   function C_Open
+     (Path : Interfaces.C.Strings.chars_ptr;
+      Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "open";
+
+   function C_Close (Fd : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "close";
+
+   function C_Fstat
+     (Fd : C_Int; Buffer : access Stat_Record) return C_Int
+     with Import, Convention => C, External_Name => "fstat$INODE64";
+
+   function C_Fstatat
+     (Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
+      Buffer : access Stat_Record; Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "fstatat$INODE64";
+
+   function C_Fchmod (Fd : C_Int; Mode : C_U16) return C_Int
+     with Import, Convention => C, External_Name => "fchmod";
+
+   function C_Fchmodat
+     (Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
+      Mode : C_U16; Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "fchmodat";
+
+   function C_Fchown (Fd : C_Int; Owner, Group : C_U32) return C_Int
+     with Import, Convention => C, External_Name => "fchown";
+
+   function C_Linkat
+     (Old_Fd : C_Int; Old_Path : Interfaces.C.Strings.chars_ptr;
+      New_Fd : C_Int; New_Path : Interfaces.C.Strings.chars_ptr;
+      Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "linkat";
+
+   function C_Unlinkat
+     (Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
+      Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "unlinkat";
+
+   function C_Rmdir (Path : Interfaces.C.Strings.chars_ptr) return C_Int
+     with Import, Convention => C, External_Name => "rmdir";
+
+   function C_Mkdtemp (Template : System.Address) return Interfaces.C.Strings.chars_ptr
+     with Import, Convention => C, External_Name => "mkdtemp";
 
    type Timeval is record
       Seconds      : C_S64;
@@ -421,6 +473,239 @@ package body Hostkit.Metadata is
       Available := False;
       return "";
    end Change_Stamp;
+
+   function Entry_Identity_Of (Path : String) return Entry_Identity is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Stat_Record;
+      Status : C_Int;
+   begin
+      Status := C_Lstat (C_Path, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Identity_Field (Info.Device),
+         File_Number     => Identity_Field (Info.Inode),
+         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
+         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Entry_Identity_Of;
+
+   function Update_Entry_Metadata
+     (Path           : String;
+      Expected       : Entry_Identity;
+      Check_Expected : Boolean;
+      Kind           : Metadata_Update_Kind;
+      Value          : Identity_Field;
+      Group          : Identity_Field;
+      Max_Previous   : Identity_Field;
+      Owner_Name     : String := "";
+      Group_Name     : String := "") return Metadata_Update_Result
+   is
+      pragma Unreferenced (Owner_Name, Group_Name);
+      O_Rdonly    : constant C_Int := 0;
+      O_Evtonly   : constant C_Int := 16#8000#;
+      O_Nofollow  : constant C_Int := 16#0100#;
+      O_Directory : constant C_Int := 16#10_0000#;
+      O_Cloexec   : constant C_Int := 16#100_0000#;
+      At_Fdcwd    : constant C_Int := -2;
+      At_Nofollow : constant C_Int := 16#20#;
+      File_Type   : constant C_U16 := 16#F000#;
+      Link_Type   : constant C_U16 := 16#A000#;
+
+      function Identity_Of (Info : Stat_Record) return Entry_Identity is
+        (Available       => True,
+         Volume          => Identity_Field (Info.Device),
+         File_Number     => Identity_Field (Info.Inode),
+         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
+         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+
+      function Link_Fallback
+        (Fallback_Expected : Entry_Identity;
+         Must_Match        : Boolean) return Metadata_Update_Result
+      is
+         Slash : constant Natural :=
+           Ada.Strings.Fixed.Index (Path, "/", Ada.Strings.Backward);
+         Parent : constant String :=
+           (if Slash = 0 then "."
+            elsif Slash = Path'First then "/"
+            else Path (Path'First .. Slash - 1));
+         Template : aliased Interfaces.C.char_array :=
+           Interfaces.C.To_C (Parent & "/.hostkit-mode-XXXXXX");
+         Created : Interfaces.C.Strings.chars_ptr;
+         C_Temp : Interfaces.C.Strings.chars_ptr :=
+           Interfaces.C.Strings.Null_Ptr;
+         C_Path : Interfaces.C.Strings.chars_ptr :=
+           Interfaces.C.Strings.New_String (Path);
+         C_Inode : Interfaces.C.Strings.chars_ptr :=
+           Interfaces.C.Strings.New_String ("inode");
+         Directory : C_Int := -1;
+         Linked : Boolean := False;
+         Info : aliased Stat_Record;
+         Answer : Metadata_Update_Result;
+         Ignored : C_Int;
+
+         procedure Clean is
+         begin
+            if Linked and then Directory >= 0 then
+               Ignored := C_Unlinkat (Directory, C_Inode, 0);
+               Linked := False;
+            end if;
+            if Directory >= 0 then
+               Ignored := C_Close (Directory);
+               Directory := -1;
+            end if;
+            if C_Temp /= Interfaces.C.Strings.Null_Ptr then
+               Ignored := C_Rmdir (C_Temp);
+            end if;
+            Safe_Free (C_Temp);
+            Safe_Free (C_Path);
+            Safe_Free (C_Inode);
+         end Clean;
+      begin
+         Created := C_Mkdtemp (Template'Address);
+         if Created = Interfaces.C.Strings.Null_Ptr then
+            Clean;
+            return Answer;
+         end if;
+         C_Temp := Interfaces.C.Strings.New_String
+           (Interfaces.C.Strings.Value (Created));
+         Directory := C_Open
+           (C_Temp, O_Rdonly + O_Directory + O_Cloexec);
+         Linked := Directory >= 0 and then C_Linkat
+           (At_Fdcwd, C_Path, Directory, C_Inode, 0) = 0;
+         if not Linked
+           or else C_Fstatat
+             (Directory, C_Inode, Info'Access, At_Nofollow) /= 0
+           or else (Info.Mode and File_Type) = Link_Type
+         then
+            Clean;
+            return Answer;
+         end if;
+         Answer.Identity := Identity_Of (Info);
+         if Must_Match and then Answer.Identity /= Fallback_Expected then
+            Clean;
+            return Answer;
+         end if;
+         Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);
+         Answer.Success := C_Fchmodat
+           (Directory, C_Inode, C_U16 (Value mod 8#10000#), 0) = 0;
+         Clean;
+         return Answer;
+      exception
+         when others =>
+            Clean;
+            return (others => <>);
+      end Link_Fallback;
+
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Fd     : C_Int := -1;
+      Info   : aliased Stat_Record;
+      Answer : Metadata_Update_Result;
+      Ignored : C_Int;
+
+      procedure Close is
+      begin
+         if Fd >= 0 then
+            Ignored := C_Close (Fd);
+            Fd := -1;
+         end if;
+      end Close;
+   begin
+      Fd := C_Open (C_Path, O_Evtonly + O_Nofollow + O_Cloexec);
+      Interfaces.C.Strings.Free (C_Path);
+      if Fd < 0 then
+         if Kind = Update_Permissions then
+            return Link_Fallback (Expected, Check_Expected);
+         end if;
+         return Answer;
+      end if;
+      if C_Fstat (Fd, Info'Access) /= 0
+        or else (Info.Mode and File_Type) = Link_Type
+      then
+         Close;
+         return Answer;
+      end if;
+      Answer.Identity := Identity_Of (Info);
+      if Check_Expected and then Answer.Identity /= Expected then
+         Close;
+         return Answer;
+      end if;
+
+      if Kind = Update_Ownership then
+         Answer.Previous := Identity_Field (Info.User_Id);
+         Answer.Previous_Group := Identity_Field (Info.Group_Id);
+         if Value <= Identity_Field (C_U32'Last)
+           and then Group <= Identity_Field (C_U32'Last)
+           and then Answer.Previous <= Max_Previous
+           and then Answer.Previous_Group <= Max_Previous
+         then
+            Answer.Success := C_Fchown
+              (Fd, C_U32 (Value), C_U32 (Group)) = 0;
+         end if;
+      else
+         Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);
+         Answer.Success := C_Fchmod
+           (Fd, C_U16 (Value mod 8#10000#)) = 0;
+         if not Answer.Success then
+            declare
+               Held : Interfaces.C.Strings.chars_ptr :=
+                 Interfaces.C.Strings.New_String
+                   ("/dev/fd/" & Ada.Strings.Fixed.Trim
+                      (C_Int'Image (Fd), Ada.Strings.Both));
+            begin
+               Answer.Success := C_Chmod
+                 (Held, C_U16 (Value mod 8#10000#)) = 0;
+               Interfaces.C.Strings.Free (Held);
+            exception
+               when others =>
+                  Safe_Free (Held);
+            end;
+         end if;
+         if not Answer.Success then
+            Answer := Link_Fallback (Answer.Identity, True);
+         end if;
+      end if;
+      Close;
+      return Answer;
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         Close;
+         return (others => <>);
+   end Update_Entry_Metadata;
+
+   function Entry_Revision_Of (Path : String) return Entry_Revision is
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Stat_Record;
+      Status : C_Int;
+   begin
+      Status := C_Lstat (C_Path, Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         return (others => <>);
+      end if;
+      return
+        (Available            => True,
+         Modified_Seconds     => Identity_Field (Info.Modified_Time.Seconds),
+         Modified_Nanoseconds => Identity_Field (Info.Modified_Time.Nanoseconds),
+         Changed_Seconds      => Identity_Field (Info.Change_Time.Seconds),
+         Changed_Nanoseconds  => Identity_Field (Info.Change_Time.Nanoseconds),
+         Size                 => Identity_Field (Info.Size),
+         Mode                 => Identity_Field (Info.Mode),
+         User_Id              => Identity_Field (Info.User_Id),
+         Group_Id             => Identity_Field (Info.Group_Id));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Entry_Revision_Of;
 
    function Same_File (Left : String; Right : String) return Boolean is
       L_Buffer : aliased Stat_Record;

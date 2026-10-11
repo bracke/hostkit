@@ -2,6 +2,7 @@ with Ada.Characters.Handling;
 with Ada.Directories;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Strings.UTF_Encoding.Wide_Strings;
 with Ada.Containers.Vectors;
 
 with Interfaces.C.Strings;
@@ -18,6 +19,8 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_long_long;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Unsigned_8;
+   use type Interfaces.Unsigned_64;
    use type System.Address;
 
    subtype C_Int is Interfaces.C.int;
@@ -29,8 +32,8 @@ package body Hostkit.Metadata is
    --  primary group and Everyone are evaluated and folded into the rwx triplets
    --  the neutral interface speaks, and setting permissions builds a fresh DACL
    --  granting exactly those rights back. A SID is identified to the caller by
-   --  its relative identifier -- the last sub-authority -- and the SID itself is
-   --  remembered so a name can be recovered from that number later.
+   --  a stable hash of all its bytes, and the SID itself is remembered so a name
+   --  can be recovered from that number later.
 
    Success : constant C_DWord := 0;
    Invalid_Handle_Value : constant System.Address :=
@@ -60,6 +63,9 @@ package body Hostkit.Metadata is
    File_Write_Data      : constant C_DWord := 16#0000_0002#;
    File_Execute_Access  : constant C_DWord := 16#0000_0020#;
    Delete_Access        : constant C_DWord := 16#0001_0000#;
+   Read_Control         : constant C_DWord := 16#0002_0000#;
+   Write_Dac            : constant C_DWord := 16#0004_0000#;
+   Write_Owner          : constant C_DWord := 16#0008_0000#;
 
    Win_World_Sid : constant C_Int := 1;
    --  WinWorldSid: the "Everyone" group, which stands in for the POSIX "other".
@@ -73,6 +79,10 @@ package body Hostkit.Metadata is
    Open_Existing         : constant C_DWord := 3;
    File_Attribute_Normal : constant C_DWord := 16#0000_0080#;
    File_Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
+   File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
+   File_Attribute_Reparse_Point  : constant C_DWord := 16#0000_0400#;
+   File_Basic_Info_Class : constant C_Int := 0;
+   File_Id_Info_Class    : constant C_Int := 18;
 
    type Trustee_Record is record
       Multiple_Trustee : System.Address := System.Null_Address;
@@ -113,6 +123,39 @@ package body Hostkit.Metadata is
    end record
      with Convention => C;
 
+   type By_Handle_File_Information is record
+      Attributes      : C_DWord := 0;
+      Creation_Time   : Filetime;
+      Access_Time     : Filetime;
+      Modified_Time   : Filetime;
+      Volume_Serial   : C_DWord := 0;
+      Size_High       : C_DWord := 0;
+      Size_Low        : C_DWord := 0;
+      Link_Count      : C_DWord := 0;
+      File_Index_High : C_DWord := 0;
+      File_Index_Low  : C_DWord := 0;
+   end record
+     with Convention => C;
+
+   type Identifier_Array is array (Natural range 0 .. 15) of Interfaces.Unsigned_8
+     with Convention => C;
+
+   type File_Id_Info is record
+      Volume_Serial : Identity_Field := 0;
+      Identifier    : Identifier_Array := [others => 0];
+   end record
+     with Convention => C;
+
+   type File_Basic_Info is record
+      Creation_Time : Interfaces.Integer_64 := 0;
+      Access_Time   : Interfaces.Integer_64 := 0;
+      Modified_Time : Interfaces.Integer_64 := 0;
+      Change_Time   : Interfaces.Integer_64 := 0;
+      Attributes    : C_DWord := 0;
+   end record
+     with Convention => C;
+   for File_Basic_Info'Size use 40 * 8;
+
    --  Getting a layout wrong here does not fail loudly; it reads the wrong field
    --  and reports plausible nonsense. Pin the sizes, so the compiler catches any
    --  drift on any host.
@@ -148,6 +191,29 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall,
           External_Name => "SetNamedSecurityInfoA";
 
+   function Get_Security_Info
+     (Handle      : System.Address;
+      Object_Type : C_Int;
+      Information : C_DWord;
+      Owner       : access System.Address;
+      Group       : access System.Address;
+      Dacl        : access System.Address;
+      Sacl        : access System.Address;
+      Descriptor  : access System.Address) return C_DWord
+     with Import, Convention => Stdcall,
+          External_Name => "GetSecurityInfo";
+
+   function Set_Security_Info
+     (Handle      : System.Address;
+      Object_Type : C_Int;
+      Information : C_DWord;
+      Owner       : System.Address;
+      Group       : System.Address;
+      Dacl        : System.Address;
+      Sacl        : System.Address) return C_DWord
+     with Import, Convention => Stdcall,
+          External_Name => "SetSecurityInfo";
+
    procedure Build_Trustee_With_Sid
      (Trustee : access Trustee_Record;
       Sid     : System.Address)
@@ -169,8 +235,8 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall,
           External_Name => "SetEntriesInAclA";
 
-   function Lookup_Account_Sid
-     (System_Name : Interfaces.C.Strings.chars_ptr;
+   function Lookup_Account_Sid_Wide
+     (System_Name : System.Address;
       Sid         : System.Address;
       Name        : System.Address;
       Name_Size   : access C_DWord;
@@ -178,29 +244,18 @@ package body Hostkit.Metadata is
       Domain_Size : access C_DWord;
       Use_Kind    : access C_Int) return C_Int
      with Import, Convention => Stdcall,
-          External_Name => "LookupAccountSidA";
+          External_Name => "LookupAccountSidW";
 
-   function Lookup_Account_Name
-     (System_Name : Interfaces.C.Strings.chars_ptr;
-      Account     : Interfaces.C.Strings.chars_ptr;
+   function Lookup_Account_Name_Wide
+     (System_Name : System.Address;
+      Account     : System.Address;
       Sid         : System.Address;
       Sid_Size    : access C_DWord;
       Domain      : System.Address;
       Domain_Size : access C_DWord;
       Use_Kind    : access C_Int) return C_Int
      with Import, Convention => Stdcall,
-          External_Name => "LookupAccountNameA";
-
-   function Get_Sid_Sub_Authority_Count
-     (Sid : System.Address) return System.Address
-     with Import, Convention => Stdcall,
-          External_Name => "GetSidSubAuthorityCount";
-
-   function Get_Sid_Sub_Authority
-     (Sid   : System.Address;
-      Index : C_DWord) return System.Address
-     with Import, Convention => Stdcall,
-          External_Name => "GetSidSubAuthority";
+          External_Name => "LookupAccountNameW";
 
    function Get_Length_Sid (Sid : System.Address) return C_DWord
      with Import, Convention => Stdcall, External_Name => "GetLengthSid";
@@ -267,6 +322,39 @@ package body Hostkit.Metadata is
       Template    : System.Address) return System.Address
      with Import, Convention => Stdcall, External_Name => "CreateFileA";
 
+   function Create_File_Wide
+     (Name        : System.Address;
+      Access_Mode : C_DWord;
+      Share       : C_DWord;
+      Security    : System.Address;
+      Disposition : C_DWord;
+      Flags       : C_DWord;
+      Template    : System.Address) return System.Address
+     with Import, Convention => Stdcall, External_Name => "CreateFileW";
+
+   function Get_File_Information
+     (File : System.Address;
+      Info : access By_Handle_File_Information) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
+
+   function Get_File_Information_Ex
+     (File  : System.Address;
+      Kind  : C_Int;
+      Info  : System.Address;
+      Bytes : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandleEx";
+
+   function Get_Volume_Information_By_Handle
+     (File             : System.Address;
+      Volume_Name      : System.Address;
+      Volume_Name_Size : C_DWord;
+      Serial           : System.Address;
+      Maximum_Name     : System.Address;
+      Flags            : System.Address;
+      File_System_Name : System.Address;
+      File_System_Size : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
+
    function Close_Handle (Item : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "CloseHandle";
 
@@ -293,33 +381,42 @@ package body Hostkit.Metadata is
      (Index_Type   => Positive,
       Element_Type => Known_Sid);
 
-   --  A SID has no small integer identity of its own, so the caller is given its
-   --  relative identifier -- the last sub-authority, which is what distinguishes
-   --  one account from another on a machine. The SID itself is kept here so the
-   --  number can be turned back into a name.
+   --  A SID has no small integer identity of its own. Hash the complete SID,
+   --  rather than using only its last relative identifier: accounts from two
+   --  domains can legitimately have the same RID. The SID itself is kept here
+   --  so the number can be turned back into a name.
    Seen_Sids : Sid_Vectors.Vector;
 
    procedure Remember (Sid : System.Address; Id : Natural);
    function Recall (Id : Natural; Into : out Sid_Buffer) return Boolean;
    function Identity_Of (Sid : System.Address) return Natural;
    function Name_Of (Sid : System.Address) return String;
+   function Wide (Value : String) return Wide_String;
 
    function Identity_Of (Sid : System.Address) return Natural is
-      Count_Ptr : constant System.Address := Get_Sid_Sub_Authority_Count (Sid);
-      Count     : Interfaces.C.unsigned_char
-        with Import, Address => Count_Ptr;
+      Length : C_DWord;
+      Hash   : Interfaces.Unsigned_64 := 16#CBF2_9CE4_8422_2325#;
    begin
-      if Sid = System.Null_Address or else Count = 0 then
+      if Sid = System.Null_Address then
          return 0;
       end if;
-
+      Length := Get_Length_Sid (Sid);
+      if Length = 0 or else Natural (Length) > Sid_Buffer'Length then
+         return 0;
+      end if;
       declare
-         Last_Ptr : constant System.Address :=
-           Get_Sid_Sub_Authority (Sid, C_DWord (Count) - 1);
-         Last     : C_DWord with Import, Address => Last_Ptr;
+         type Byte_Array is array (Natural range <>) of Interfaces.Unsigned_8
+           with Convention => C;
+         Bytes : Byte_Array (0 .. Natural (Length) - 1)
+           with Import, Address => Sid;
       begin
-         return Natural (Last mod C_DWord (Natural'Last));
+         for Byte of Bytes loop
+            Hash := (Hash xor Interfaces.Unsigned_64 (Byte))
+              * 1_099_511_628_211;
+         end loop;
       end;
+      return Natural
+        (Hash mod Interfaces.Unsigned_64 (Natural'Last - 1)) + 1;
 
    exception
       when others =>
@@ -376,41 +473,56 @@ package body Hostkit.Metadata is
    end Recall;
 
    function Name_Of (Sid : System.Address) return String is
-      Name        : aliased Interfaces.C.char_array (1 .. 256) :=
-        [others => Interfaces.C.nul];
-      Domain      : aliased Interfaces.C.char_array (1 .. 256) :=
-        [others => Interfaces.C.nul];
-      Name_Size   : aliased C_DWord := 256;
-      Domain_Size : aliased C_DWord := 256;
+      Name_Size   : aliased C_DWord := 0;
+      Domain_Size : aliased C_DWord := 0;
       Use_Kind    : aliased C_Int := 0;
-      Result      : C_Int;
+      Ignored     : C_Int;
    begin
       if Sid = System.Null_Address then
          return "";
       end if;
 
-      Result :=
-        Lookup_Account_Sid
-          (Interfaces.C.Strings.Null_Ptr,
-           Sid,
-           Name'Address, Name_Size'Access,
-           Domain'Address, Domain_Size'Access,
-           Use_Kind'Access);
-
-      if Result = 0 then
+      Ignored := Lookup_Account_Sid_Wide
+        (System.Null_Address, Sid, System.Null_Address, Name_Size'Access,
+         System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+      if Name_Size = 0 then
          return "";
       end if;
 
       declare
-         Text : String (1 .. Natural (Name_Size));
+         Name : aliased Wide_String (1 .. Natural (Name_Size)) :=
+           [others => Wide_Character'Val (0)];
+         Domain : aliased Wide_String
+           (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+             [others => Wide_Character'Val (0)];
+
+         function Text_Of (Value : Wide_String) return String is
+            Last : Integer := Value'Last;
+         begin
+            for Index in Value'Range loop
+               if Value (Index) = Wide_Character'Val (0) then
+                  Last := Index - 1;
+                  exit;
+               end if;
+            end loop;
+            return
+              (if Last < Value'First then ""
+               else Ada.Strings.UTF_Encoding.Wide_Strings.Encode
+                 (Value (Value'First .. Last)));
+         end Text_Of;
       begin
-         for Index in Text'Range loop
-            Text (Index) :=
-              Character'Val
-                (Interfaces.C.char'Pos
-                   (Name (Interfaces.C.size_t (Index))));
-         end loop;
-         return Text;
+         if Lookup_Account_Sid_Wide
+           (System.Null_Address, Sid, Name'Address, Name_Size'Access,
+            Domain'Address, Domain_Size'Access, Use_Kind'Access) = 0
+         then
+            return "";
+         end if;
+         declare
+            Account : constant String := Text_Of (Name);
+            Realm   : constant String := Text_Of (Domain);
+         begin
+            return (if Realm = "" then Account else Realm & '\' & Account);
+         end;
       end;
 
    exception
@@ -680,6 +792,16 @@ package body Hostkit.Metadata is
 
       Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
       Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+
+      procedure Free_Descriptor is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if Descriptor /= System.Null_Address then
+            Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
+         end if;
+      end Free_Descriptor;
    begin
       Available := False;
 
@@ -707,14 +829,7 @@ package body Hostkit.Metadata is
          Mode := Mode + Rights_For (Everyone (1)'Address);
       end if;
 
-      if Descriptor /= System.Null_Address then
-         declare
-            Freed : constant System.Address := Local_Free (Descriptor);
-            pragma Unreferenced (Freed);
-         begin
-            null;
-         end;
-      end if;
+      Free_Descriptor;
 
       --  Strip the execute bits unless the file is one Windows would actually run.
       if not Runs_On_Windows (Path) then
@@ -739,6 +854,7 @@ package body Hostkit.Metadata is
    exception
       when others =>
          Safe_Free (C_Path);
+         Free_Descriptor;
          Available := False;
          return 0;
    end File_Permission_Bits;
@@ -766,14 +882,19 @@ package body Hostkit.Metadata is
       --  Get_Named_Security_Info hands back a LocalAlloc'd descriptor the caller
       --  owns; every exit after it succeeds must release it, not just the happy
       --  path.
-      procedure Free_Descriptor is
+      procedure Free_Allocations is
          Freed : System.Address;
          pragma Unreferenced (Freed);
       begin
+         if New_Acl /= System.Null_Address then
+            Freed := Local_Free (New_Acl);
+            New_Acl := System.Null_Address;
+         end if;
          if Descriptor /= System.Null_Address then
             Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
          end if;
-      end Free_Descriptor;
+      end Free_Allocations;
    begin
       Status :=
         Get_Named_Security_Info
@@ -792,7 +913,7 @@ package body Hostkit.Metadata is
             Everyone (1)'Address, Everyone_Size'Access) = 0
       then
          Interfaces.C.Strings.Free (C_Path);
-         Free_Descriptor;
+         Free_Allocations;
          return False;
       end if;
 
@@ -825,7 +946,7 @@ package body Hostkit.Metadata is
 
       if Status /= Success or else New_Acl = System.Null_Address then
          Interfaces.C.Strings.Free (C_Path);
-         Free_Descriptor;
+         Free_Allocations;
          return False;
       end if;
 
@@ -837,19 +958,14 @@ package body Hostkit.Metadata is
 
       Interfaces.C.Strings.Free (C_Path);
 
-      declare
-         Freed : System.Address;
-         pragma Unreferenced (Freed);
-      begin
-         Freed := Local_Free (New_Acl);
-      end;
-      Free_Descriptor;
+      Free_Allocations;
 
       return Status = Success;
 
    exception
       when others =>
          Safe_Free (C_Path);
+         Free_Allocations;
          return False;
    end Set_Permissions;
 
@@ -938,6 +1054,16 @@ package body Hostkit.Metadata is
       Descriptor : aliased System.Address := System.Null_Address;
 
       Status : C_DWord;
+
+      procedure Free_Descriptor is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if Descriptor /= System.Null_Address then
+            Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
+         end if;
+      end Free_Descriptor;
    begin
       User_Id := 0;
       Group_Id := 0;
@@ -952,6 +1078,7 @@ package body Hostkit.Metadata is
       Interfaces.C.Strings.Free (C_Path);
 
       if Status /= Success then
+         Free_Descriptor;
          return;
       end if;
 
@@ -961,18 +1088,12 @@ package body Hostkit.Metadata is
       Remember (Group, Group_Id);
       Available := True;
 
-      if Descriptor /= System.Null_Address then
-         declare
-            Freed : constant System.Address := Local_Free (Descriptor);
-            pragma Unreferenced (Freed);
-         begin
-            null;
-         end;
-      end if;
+      Free_Descriptor;
 
    exception
       when others =>
          Safe_Free (C_Path);
+         Free_Descriptor;
          User_Id := 0;
          Group_Id := 0;
          Available := False;
@@ -989,6 +1110,416 @@ package body Hostkit.Metadata is
       Mode_Bits := File_Permission_Bits (Path, Mode_Available);
       File_Ownership (Path, User_Id, Group_Id, Ownership_Available);
    end File_Mode_And_Ownership;
+
+   function Wide (Value : String) return Wide_String is
+     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+
+   function Open_Entry (Path : String; Access_Mode : C_DWord) return System.Address is
+      Wide_Path : aliased Wide_String := Wide (Path);
+   begin
+      return Create_File_Wide
+        (Wide_Path'Address, Access_Mode,
+         File_Share_Read or File_Share_Write or File_Share_Delete,
+         System.Null_Address, Open_Existing,
+         File_Flag_Backup_Semantics or File_Flag_Open_Reparse_Point,
+         System.Null_Address);
+   exception
+      when others =>
+         return Invalid_Handle_Value;
+   end Open_Entry;
+
+   procedure Close_Entry (File : in out System.Address) is
+   begin
+      if File /= Invalid_Handle_Value and then File /= System.Null_Address then
+         declare
+            Ignored : constant C_Int := Close_Handle (File);
+         begin
+            null;
+         end;
+         File := Invalid_Handle_Value;
+      end if;
+   end Close_Entry;
+
+   function Identifier_Part (Value : Identifier_Array; First : Natural) return Identity_Field is
+      Result : Identity_Field := 0;
+   begin
+      for Offset in 0 .. 7 loop
+         Result := Result or Interfaces.Shift_Left (Identity_Field (Value (First + Offset)), Offset * 8);
+      end loop;
+      return Result;
+   end Identifier_Part;
+
+   function Valid_Identifier (Value : Identifier_Array) return Boolean is
+      Nonzero     : Boolean := False;
+      Not_All_Ones : Boolean := False;
+   begin
+      for Byte of Value loop
+         Nonzero := Nonzero or else Byte /= 0;
+         Not_All_Ones := Not_All_Ones or else Byte /= Interfaces.Unsigned_8'Last;
+      end loop;
+      return Nonzero and Not_All_Ones;
+   end Valid_Identifier;
+
+   function Is_NTFS (File : System.Address) return Boolean is
+      Name : aliased Wide_String (1 .. 16) := [others => Wide_Character'Val (0)];
+   begin
+      return Get_Volume_Information_By_Handle
+        (File, System.Null_Address, 0, System.Null_Address, System.Null_Address,
+         System.Null_Address, Name'Address, C_DWord (Name'Length)) /= 0
+        and then Name (1) in 'N' | 'n'
+        and then Name (2) in 'T' | 't'
+        and then Name (3) in 'F' | 'f'
+        and then Name (4) in 'S' | 's'
+        and then Name (5) = Wide_Character'Val (0);
+   end Is_NTFS;
+
+   function Entry_Identity_Of (Path : String) return Entry_Identity is
+      File   : System.Address := Open_Entry (Path, 0);
+      Legacy : aliased By_Handle_File_Information;
+      Id     : aliased File_Id_Info;
+      Number : Identity_Field;
+   begin
+      if File = Invalid_Handle_Value or else Get_File_Information (File, Legacy'Access) = 0 then
+         Close_Entry (File);
+         return (others => <>);
+      end if;
+      if Get_File_Information_Ex
+        (File, File_Id_Info_Class, Id'Address, C_DWord (File_Id_Info'Size / 8)) /= 0
+        and then Valid_Identifier (Id.Identifier)
+      then
+         declare
+            Result : constant Entry_Identity :=
+              (Available       => True,
+               Volume          => Id.Volume_Serial,
+               File_Number     => Identifier_Part (Id.Identifier, 0),
+               Generation_High => Identifier_Part (Id.Identifier, 8),
+               Generation_Low  => 0);
+         begin
+            Close_Entry (File);
+            return Result;
+         end;
+      end if;
+      Number := Interfaces.Shift_Left (Identity_Field (Legacy.File_Index_High), 32)
+        or Identity_Field (Legacy.File_Index_Low);
+      if not Is_NTFS (File) or else Number = 0 or else Number = Identity_Field'Last then
+         Close_Entry (File);
+         return (others => <>);
+      end if;
+      declare
+         Result : constant Entry_Identity :=
+           (Available       => True,
+            Volume          => Identity_Field (Legacy.Volume_Serial),
+            File_Number     => Number,
+            Generation_High => 0,
+            Generation_Low  => 0);
+      begin
+         Close_Entry (File);
+         return Result;
+      end;
+   exception
+      when others =>
+         Close_Entry (File);
+         return (others => <>);
+   end Entry_Identity_Of;
+
+   function Update_Entry_Metadata
+     (Path           : String;
+      Expected       : Entry_Identity;
+      Check_Expected : Boolean;
+      Kind           : Metadata_Update_Kind;
+      Value          : Identity_Field;
+      Group          : Identity_Field;
+      Max_Previous   : Identity_Field;
+      Owner_Name     : String := "";
+      Group_Name     : String := "") return Metadata_Update_Result
+   is
+      function Identity_From_Handle
+        (File : System.Address;
+         Info : access By_Handle_File_Information) return Entry_Identity
+      is
+         Id     : aliased File_Id_Info;
+         Number : Identity_Field;
+      begin
+         if Get_File_Information (File, Info) = 0 then
+            return (others => <>);
+         end if;
+         if Get_File_Information_Ex
+           (File, File_Id_Info_Class, Id'Address,
+            C_DWord (File_Id_Info'Size / 8)) /= 0
+           and then Valid_Identifier (Id.Identifier)
+         then
+            return
+              (Available       => True,
+               Volume          => Id.Volume_Serial,
+               File_Number     => Identifier_Part (Id.Identifier, 0),
+               Generation_High => Identifier_Part (Id.Identifier, 8),
+               Generation_Low  => 0);
+         end if;
+         Number := Interfaces.Shift_Left
+           (Identity_Field (Info.File_Index_High), 32)
+           or Identity_Field (Info.File_Index_Low);
+         if not Is_NTFS (File)
+           or else Number = 0
+           or else Number = Identity_Field'Last
+         then
+            return (others => <>);
+         end if;
+         return
+           (Available       => True,
+            Volume          => Identity_Field (Info.Volume_Serial),
+            File_Number     => Number,
+            Generation_High => 0,
+            Generation_Low  => 0);
+      end Identity_From_Handle;
+
+      function Resolve_Account
+        (Name     : String;
+         Expected_Id : Identity_Field;
+         Sid      : out Sid_Buffer) return Boolean
+      is
+         Wide_Name   : aliased Wide_String := Wide (Name);
+         Sid_Size    : aliased C_DWord := 0;
+         Domain_Size : aliased C_DWord := 0;
+         Use_Kind    : aliased C_Int := 0;
+         Ignored     : C_Int;
+      begin
+         Sid := [others => Interfaces.C.nul];
+         if Name = "" or else Expected_Id > Identity_Field (Natural'Last) then
+            return False;
+         end if;
+         Ignored := Lookup_Account_Name_Wide
+           (System.Null_Address, Wide_Name'Address,
+            System.Null_Address, Sid_Size'Access,
+            System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+         if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
+            return False;
+         end if;
+         declare
+            Domain : aliased Wide_String
+              (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+                [others => Wide_Character'Val (0)];
+            Actual_Sid_Size : aliased C_DWord := Sid_Size;
+            Actual_Domain_Size : aliased C_DWord := Domain_Size;
+         begin
+            if Lookup_Account_Name_Wide
+              (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
+               Actual_Sid_Size'Access, Domain'Address,
+               Actual_Domain_Size'Access, Use_Kind'Access) = 0
+            then
+               return False;
+            end if;
+         end;
+         return Identity_Field (Identity_Of (Sid (1)'Address)) = Expected_Id;
+      exception
+         when others =>
+            return False;
+      end Resolve_Account;
+
+      Access_Mode : constant C_DWord := Read_Control or
+        (if Kind = Update_Ownership then Write_Owner else Write_Dac);
+      File       : System.Address := Open_Entry (Path, Access_Mode);
+      Info       : aliased By_Handle_File_Information;
+      Answer     : Metadata_Update_Result;
+      Owner      : aliased System.Address := System.Null_Address;
+      Primary_Group : aliased System.Address := System.Null_Address;
+      Dacl       : aliased System.Address := System.Null_Address;
+      Sacl       : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+      New_Acl    : aliased System.Address := System.Null_Address;
+
+      procedure Free_Local (Item : in out System.Address) is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if Item /= System.Null_Address then
+            Freed := Local_Free (Item);
+            Item := System.Null_Address;
+         end if;
+      end Free_Local;
+
+      procedure Clean is
+      begin
+         Free_Local (New_Acl);
+         Free_Local (Descriptor);
+         Close_Entry (File);
+      end Clean;
+   begin
+      if File = Invalid_Handle_Value then
+         return Answer;
+      end if;
+      Answer.Identity := Identity_From_Handle (File, Info'Access);
+      if not Answer.Identity.Available
+        or else (Info.Attributes and File_Attribute_Reparse_Point) /= 0
+        or else (Check_Expected and then Answer.Identity /= Expected)
+      then
+         Clean;
+         return Answer;
+      end if;
+      if Get_Security_Info
+        (File, Se_File_Object,
+         Owner_Information or Group_Information or Dacl_Information,
+         Owner'Access, Primary_Group'Access, Dacl'Access, Sacl'Access,
+         Descriptor'Access) /= Success
+      then
+         Clean;
+         return Answer;
+      end if;
+
+      if Kind = Update_Ownership then
+         Answer.Previous := Identity_Field (Identity_Of (Owner));
+         Answer.Previous_Group := Identity_Field (Identity_Of (Primary_Group));
+         Remember (Owner, Natural (Answer.Previous));
+         Remember (Primary_Group, Natural (Answer.Previous_Group));
+         if Answer.Previous <= Max_Previous
+           and then Answer.Previous_Group <= Max_Previous
+           and then Value <= Identity_Field (Natural'Last)
+           and then Group <= Identity_Field (Natural'Last)
+         then
+            declare
+               Owner_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
+               Group_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
+               Borrow_Owner : constant Boolean := Answer.Previous = Value;
+               Borrow_Group : constant Boolean := Answer.Previous_Group = Group;
+               Have_Owner : constant Boolean := Borrow_Owner or else
+                 Resolve_Account (Owner_Name, Value, Owner_Sid);
+               Have_Group : constant Boolean := Borrow_Group or else
+                 Resolve_Account (Group_Name, Group, Group_Sid);
+               New_Owner : constant System.Address :=
+                 (if Borrow_Owner then Owner else Owner_Sid (1)'Address);
+               New_Group : constant System.Address :=
+                 (if Borrow_Group then Primary_Group else Group_Sid (1)'Address);
+            begin
+               if Have_Owner and then Have_Group then
+                  Answer.Success := Set_Security_Info
+                    (File, Se_File_Object,
+                     Owner_Information or Group_Information,
+                     New_Owner, New_Group, System.Null_Address,
+                     System.Null_Address) = Success;
+               end if;
+            end;
+         end if;
+      else
+         declare
+            function Rights_For (Sid : System.Address) return Natural is
+               Trustee : aliased Trustee_Record;
+               Rights  : aliased C_DWord := 0;
+            begin
+               if Sid = System.Null_Address
+                 or else Dacl = System.Null_Address
+               then
+                  return 0;
+               end if;
+               Build_Trustee_With_Sid (Trustee'Access, Sid);
+               Trustee.Form := Trustee_Is_Sid;
+               Trustee.Kind := Trustee_Is_Unknown;
+               if Get_Effective_Rights_From_Acl
+                 (Dacl, Trustee'Access, Rights'Access) /= Success
+               then
+                  return 0;
+               end if;
+               return Rights_To_Triplet (Rights);
+            end Rights_For;
+
+            Everyone : aliased Sid_Buffer := [others => Interfaces.C.nul];
+            Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+            Entries : aliased Explicit_Access_Array;
+            Mode : Natural;
+            Status : C_DWord;
+         begin
+            if Create_Well_Known_Sid
+              (Win_World_Sid, System.Null_Address, Everyone (1)'Address,
+               Everyone_Size'Access) /= 0
+            then
+               Mode := Rights_For (Owner) * 64
+                 + Rights_For (Primary_Group) * 8
+                 + Rights_For (Everyone (1)'Address);
+               if not Runs_On_Windows (Path) then
+                  Mode := Mode - ((Mode / 64) mod 2) * 64
+                    - ((Mode / 8) mod 2) * 8 - (Mode mod 2);
+               end if;
+               Answer.Previous := Identity_Field (Mode);
+
+               Build_Trustee_With_Sid
+                 (Entries (1).Trustee'Access, Owner);
+               Entries (1).Permissions := Triplet_To_Rights
+                 (Natural (Value / 64 mod 8));
+               Entries (1).Mode := Grant_Access;
+               Entries (1).Inheritance := No_Inheritance;
+               Entries (1).Trustee.Form := Trustee_Is_Sid;
+               Entries (1).Trustee.Kind := Trustee_Is_Unknown;
+
+               Build_Trustee_With_Sid
+                 (Entries (2).Trustee'Access, Primary_Group);
+               Entries (2).Permissions := Triplet_To_Rights
+                 (Natural (Value / 8 mod 8));
+               Entries (2).Mode := Grant_Access;
+               Entries (2).Inheritance := No_Inheritance;
+               Entries (2).Trustee.Form := Trustee_Is_Sid;
+               Entries (2).Trustee.Kind := Trustee_Is_Unknown;
+
+               Build_Trustee_With_Sid
+                 (Entries (3).Trustee'Access, Everyone (1)'Address);
+               Entries (3).Permissions := Triplet_To_Rights
+                 (Natural (Value mod 8));
+               Entries (3).Mode := Grant_Access;
+               Entries (3).Inheritance := No_Inheritance;
+               Entries (3).Trustee.Form := Trustee_Is_Sid;
+               Entries (3).Trustee.Kind := Trustee_Is_Unknown;
+
+               Status := Set_Entries_In_Acl
+                 (3, Entries (1)'Address, System.Null_Address,
+                  New_Acl'Access);
+               if Status = Success and then New_Acl /= System.Null_Address then
+                  Answer.Success := Set_Security_Info
+                    (File, Se_File_Object, Dacl_Information or Protected_Dacl,
+                     System.Null_Address, System.Null_Address, New_Acl,
+                     System.Null_Address) = Success;
+               end if;
+            end if;
+         end;
+      end if;
+      Clean;
+      return Answer;
+   exception
+      when others =>
+         Clean;
+         return (others => <>);
+   end Update_Entry_Metadata;
+
+   function Entry_Revision_Of (Path : String) return Entry_Revision is
+      File   : System.Address := Open_Entry (Path, File_Read_Attributes);
+      Legacy : aliased By_Handle_File_Information;
+      Basic  : aliased File_Basic_Info;
+   begin
+      if File = Invalid_Handle_Value
+        or else Get_File_Information (File, Legacy'Access) = 0
+        or else Get_File_Information_Ex
+          (File, File_Basic_Info_Class, Basic'Address, C_DWord (File_Basic_Info'Size / 8)) = 0
+      then
+         Close_Entry (File);
+         return (others => <>);
+      end if;
+      declare
+         Result : constant Entry_Revision :=
+           (Available            => True,
+            Modified_Seconds     => Identity_Field (Basic.Modified_Time),
+            Modified_Nanoseconds => 0,
+            Changed_Seconds      => Identity_Field (Basic.Change_Time),
+            Changed_Nanoseconds  => 0,
+            Size                 => Interfaces.Shift_Left (Identity_Field (Legacy.Size_High), 32)
+              or Identity_Field (Legacy.Size_Low),
+            Mode                 => Identity_Field (Legacy.Attributes),
+            User_Id              => 0,
+            Group_Id             => 0);
+      begin
+         Close_Entry (File);
+         return Result;
+      end;
+   exception
+      when others =>
+         Close_Entry (File);
+         return (others => <>);
+   end Entry_Revision_Of;
 
    --  No stamp this fine is read here yet: unknown, never a guess.
    function Change_Stamp
@@ -1072,32 +1603,37 @@ package body Hostkit.Metadata is
      (Name  : String;
       Found : out Boolean) return Natural
    is
-      C_Name : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Name);
-
+      Wide_Name   : aliased Wide_String := Wide (Name);
       Sid         : aliased Sid_Buffer := [others => Interfaces.C.nul];
-      Sid_Size    : aliased C_DWord := C_DWord (Sid_Buffer'Length);
-      Domain      : aliased Interfaces.C.char_array (1 .. 256) :=
-        [others => Interfaces.C.nul];
-      Domain_Size : aliased C_DWord := 256;
+      Sid_Size    : aliased C_DWord := 0;
+      Domain_Size : aliased C_DWord := 0;
       Use_Kind    : aliased C_Int := 0;
-      Result      : C_Int;
+      Ignored     : C_Int;
       Id          : Natural;
    begin
       Found := False;
-
-      Result :=
-        Lookup_Account_Name
-          (Interfaces.C.Strings.Null_Ptr, C_Name,
-           Sid (1)'Address, Sid_Size'Access,
-           Domain'Address, Domain_Size'Access,
-           Use_Kind'Access);
-      Interfaces.C.Strings.Free (C_Name);
-
-      if Result = 0 then
+      Ignored := Lookup_Account_Name_Wide
+        (System.Null_Address, Wide_Name'Address,
+         System.Null_Address, Sid_Size'Access,
+         System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+      if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
          return 0;
       end if;
-
+      declare
+         Domain : aliased Wide_String
+           (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+             [others => Wide_Character'Val (0)];
+         Actual_Sid_Size : aliased C_DWord := Sid_Size;
+         Actual_Domain_Size : aliased C_DWord := Domain_Size;
+      begin
+         if Lookup_Account_Name_Wide
+           (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
+            Actual_Sid_Size'Access, Domain'Address,
+            Actual_Domain_Size'Access, Use_Kind'Access) = 0
+         then
+            return 0;
+         end if;
+      end;
       Id := Identity_Of (Sid (1)'Address);
       Remember (Sid (1)'Address, Id);
       Found := Id /= 0;
@@ -1105,7 +1641,6 @@ package body Hostkit.Metadata is
 
    exception
       when others =>
-         Safe_Free (C_Name);
          Found := False;
          return 0;
    end Lookup_Identity;

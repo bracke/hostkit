@@ -1,5 +1,35 @@
 package body Hostkit.Metadata is
 
+   function Entry_Identity_Of (Path : String) return Entry_Identity is
+      pragma Unreferenced (Path);
+   begin
+      return (others => <>);
+   end Entry_Identity_Of;
+
+   function Entry_Revision_Of (Path : String) return Entry_Revision is
+      pragma Unreferenced (Path);
+   begin
+      return (others => <>);
+   end Entry_Revision_Of;
+
+   function Update_Entry_Metadata
+     (Path           : String;
+      Expected       : Entry_Identity;
+      Check_Expected : Boolean;
+      Kind           : Metadata_Update_Kind;
+      Value          : Identity_Field;
+      Group          : Identity_Field;
+      Max_Previous   : Identity_Field;
+      Owner_Name     : String := "";
+      Group_Name     : String := "") return Metadata_Update_Result
+   is
+      pragma Unreferenced
+        (Path, Expected, Check_Expected, Kind, Value, Group, Max_Previous,
+         Owner_Name, Group_Name);
+   begin
+      return (others => <>);
+   end Update_Entry_Metadata;
+
    function File_Creation_Time
      (Path      : String;
       Available : out Boolean)
