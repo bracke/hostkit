@@ -11,6 +11,7 @@ with Ada.Strings.Fixed;
 with Ada.Text_IO;
 with Interfaces.C.Strings;
 with Ada.Strings.Unbounded;
+with GNAT.OS_Lib;
 
 with Hostkit;
 with Hostkit_Shell_Cases;
@@ -21,8 +22,10 @@ with Hostkit.Descriptors;
 with Hostkit.Durability;
 with Hostkit.Fs;
 with Hostkit.Host;
+with Hostkit.Lease_Files;
 with Hostkit.Metadata;
 with Hostkit.Process;
+with Hostkit.Private_Paths;
 with Hostkit.Shell;
 with Hostkit.Trash;
 with Hostkit.Watch;
@@ -693,6 +696,116 @@ package body Hostkit_Suite is
          "a path that is not there is not reported as made private");
    end Test_Make_Private;
 
+   procedure Test_Private_Paths (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type GNAT.OS_Lib.File_Descriptor;
+      use type Hostkit.Private_Paths.Create_Outcome;
+
+      Directory : constant String :=
+        Ada.Directories.Compose (Scratch, "hk-private-paths-dir");
+      File_Path : constant String :=
+        Ada.Directories.Compose (Scratch, "hk-private-paths-file");
+      Descriptor : GNAT.OS_Lib.File_Descriptor := GNAT.OS_Lib.Invalid_FD;
+      Available : Boolean;
+      Mode : Natural;
+   begin
+      Delete_Tree_If_Present (Directory);
+      if Ada.Directories.Exists (File_Path) then
+         Ada.Directories.Delete_File (File_Path);
+      end if;
+
+      Assert
+        (Hostkit.Private_Paths.Create_Directory (Directory)
+           = Hostkit.Private_Paths.Created,
+         "an owner-only directory is created");
+      Assert
+        (Hostkit.Private_Paths.Create_Directory (Directory)
+           = Hostkit.Private_Paths.Already_Exists,
+         "a directory creation collision is reported separately");
+      Assert
+        (Hostkit.Private_Paths.Ensure_Directory (Directory),
+         "an existing owned directory can be hardened");
+
+      Descriptor := GNAT.OS_Lib.Create_New_File (File_Path, GNAT.OS_Lib.Binary);
+      Assert (Descriptor /= GNAT.OS_Lib.Invalid_FD, "the file fixture is open");
+      Assert
+        (Hostkit.Private_Paths.Restrict_Open_File (Integer (Descriptor)),
+         "an open regular file is restricted to its owner");
+      GNAT.OS_Lib.Close (Descriptor);
+      Descriptor := GNAT.OS_Lib.Invalid_FD;
+
+      if Hostkit.Metadata.Permissions_Supported
+        and then Hostkit.Metadata.Mode_Bits_Are_Native
+      then
+         Mode := Hostkit.Metadata.File_Permission_Bits (File_Path, Available);
+         Assert (Available and then Mode = 8#600#, "the file mode is owner-only");
+         Mode := Hostkit.Metadata.File_Permission_Bits (Directory, Available);
+         Assert
+           (Available and then Mode = 8#700#,
+            "the directory mode is owner-only and traversable");
+      end if;
+
+      Ada.Directories.Delete_File (File_Path);
+      Delete_Tree_If_Present (Directory);
+   exception
+      when others =>
+         if Descriptor /= GNAT.OS_Lib.Invalid_FD then
+            GNAT.OS_Lib.Close (Descriptor);
+         end if;
+         if Ada.Directories.Exists (File_Path) then
+            Ada.Directories.Delete_File (File_Path);
+         end if;
+         Delete_Tree_If_Present (Directory);
+         raise;
+   end Test_Private_Paths;
+
+   procedure Test_Delete_Tree_No_Follow
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Fs.Delete_Tree_Outcome;
+      Root : constant String := Ada.Directories.Compose (Scratch, "hk-delete-tree");
+      Child : constant String := Ada.Directories.Compose (Root, "child");
+      Outside : constant String := Ada.Directories.Compose (Scratch, "hk-delete-outside");
+      Outside_File : constant String := Ada.Directories.Compose (Outside, "kept.txt");
+      Link : constant String := Ada.Directories.Compose (Root, "outside-link");
+   begin
+      Delete_Tree_If_Present (Root);
+      Delete_Tree_If_Present (Outside);
+      Ada.Directories.Create_Path (Child);
+      Ada.Directories.Create_Path (Outside);
+      Write_File (Ada.Directories.Compose (Child, "payload.txt"), "payload");
+      Write_File (Outside_File, "keep");
+      declare
+         Linked : constant Boolean := Hostkit.Fs.Create_Link (Outside, Link);
+      begin
+         Assert
+           (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Deleted,
+            "a held tree is deleted");
+         Assert (not Ada.Directories.Exists (Root), "the requested tree is gone");
+         Assert (Ada.Directories.Exists (Outside_File), "a linked outside tree is untouched");
+         if Linked then
+            Assert (not Hostkit.Fs.Is_Link (Link), "the link itself is gone with the tree");
+         end if;
+      end;
+      Assert
+        (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Delete_Failed,
+         "a missing tree is not reported as deleted");
+      Delete_Tree_If_Present (Outside);
+   exception
+      when others =>
+         if Hostkit.Fs.Is_Link (Link) then
+            declare
+               Ignored : constant Boolean := Hostkit.Fs.Delete_Link (Link);
+            begin
+               null;
+            end;
+         end if;
+         Delete_Tree_If_Present (Root);
+         Delete_Tree_If_Present (Outside);
+         raise;
+   end Test_Delete_Tree_No_Follow;
+
    procedure Test_Locate (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
 
@@ -1212,6 +1325,114 @@ package body Hostkit_Suite is
       Ada.Directories.Delete_File (Path);
    end Test_Mode_And_Ownership_Agree_With_The_Separate_Calls;
 
+   procedure Test_Metadata_Update_Is_Bound_To_The_Held_Entry
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Metadata.Entry_Identity;
+      use type Hostkit.Metadata.Identity_Field;
+      Path : constant String :=
+        Ada.Directories.Compose (Scratch, "hk-held-metadata");
+      Expected : Hostkit.Metadata.Entry_Identity;
+      Wrong    : Hostkit.Metadata.Entry_Identity;
+      Result   : Hostkit.Metadata.Metadata_Update_Result;
+      Before   : Natural;
+      After    : Natural;
+      Available : Boolean;
+   begin
+      if not Hostkit.Metadata.Permissions_Supported then
+         return;
+      end if;
+      Write_File (Path, "held");
+      Assert
+        (Hostkit.Metadata.Set_Permissions (Path, 8#640#),
+         "the fixture mode is set");
+      Before := Hostkit.Metadata.File_Permission_Bits (Path, Available);
+      Assert (Available, "the fixture mode is readable");
+      Expected := Hostkit.Metadata.Entry_Identity_Of (Path);
+      Assert (Expected.Available, "the entry has an identity to guard");
+
+      Wrong := Expected;
+      Wrong.File_Number := Wrong.File_Number + 1;
+      Result := Hostkit.Metadata.Update_Entry_Metadata
+        (Path, Wrong, True, Hostkit.Metadata.Update_Permissions,
+         8#400#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
+      Assert (not Result.Success, "a different expected entry is refused");
+      After := Hostkit.Metadata.File_Permission_Bits (Path, Available);
+      Assert (Available and then After = Before,
+              "a refused update leaves the held entry unchanged");
+
+      Result := Hostkit.Metadata.Update_Entry_Metadata
+        (Path, Expected, True, Hostkit.Metadata.Update_Permissions,
+         8#600#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
+      Assert (Result.Success, "the expected held entry is updated");
+      Assert (Result.Identity = Expected,
+              "the result identifies the entry actually updated");
+      Assert
+        (Result.Previous = Hostkit.Metadata.Identity_Field (Before),
+         "the previous mode comes from that same held entry");
+      After := Hostkit.Metadata.File_Permission_Bits (Path, Available);
+      Assert (Available, "the updated mode remains readable");
+      if Hostkit.Host.Current /= Hostkit.Host.Windows then
+         Assert (After = 8#600#, "the requested native mode was applied");
+      end if;
+      Ada.Directories.Delete_File (Path);
+   end Test_Metadata_Update_Is_Bound_To_The_Held_Entry;
+
+   procedure Test_Lease_File_Pins_Locks_And_Transfers_Bytes
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Ada.Streams.Stream_Element_Array;
+      use type Hostkit.Lease_Files.Lease_Identity;
+      use type Hostkit.Lease_Files.Open_Outcome;
+      Path : constant String :=
+        Ada.Directories.Compose (Scratch, "hk-secure-lease");
+      First, Second : Hostkit.Lease_Files.Lease;
+      Written : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+      Read_Back : Ada.Streams.Stream_Element_Array (1 .. 16);
+      Id : Hostkit.Lease_Files.Lease_Identity;
+      Outcome : Hostkit.Lease_Files.Open_Outcome;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+      Outcome := Hostkit.Lease_Files.Create (Path, First);
+      if Outcome = Hostkit.Lease_Files.Unsupported then
+         return;
+      end if;
+      Assert (Outcome = Hostkit.Lease_Files.Opened,
+              "a fresh secure lease is created and locked");
+      Assert (Hostkit.Lease_Files.Write_At (First, Written),
+              "lease bytes are written durably");
+      Assert (Hostkit.Lease_Files.Size (First) = 16,
+              "the held lease reports its size");
+      Assert (Hostkit.Lease_Files.Read_At (First, Read_Back),
+              "lease bytes are read through the held file");
+      Assert (Read_Back = Written, "lease bytes round-trip exactly");
+      Id := Hostkit.Lease_Files.Identity (First);
+      Assert (Id.Available, "the held lease has a stable identity");
+      Assert (Hostkit.Lease_Files.Path_Matches (First, Path),
+              "the current path still names the held lease");
+
+      Outcome := Hostkit.Lease_Files.Open
+        (Path, Hostkit.Lease_Files.Exclusive, True, Second);
+      Assert (Outcome = Hostkit.Lease_Files.Busy,
+              "an exclusive claimant cannot pass a live shared lease");
+      Assert (not Hostkit.Lease_Files.Is_Held (Second),
+              "a busy claim retains no handle");
+      Hostkit.Lease_Files.Release (First);
+      Outcome := Hostkit.Lease_Files.Open
+        (Path, Hostkit.Lease_Files.Exclusive, True, Second);
+      Assert (Outcome = Hostkit.Lease_Files.Opened,
+              "the lease becomes claimable when its owner releases it");
+      Assert (Hostkit.Lease_Files.Identity (Second) = Id,
+              "reopening retains the same file identity");
+      Hostkit.Lease_Files.Release (Second);
+      Ada.Directories.Delete_File (Path);
+   end Test_Lease_File_Pins_Locks_And_Transfers_Bytes;
+
    procedure Test_Same_File_Sees_Through_A_Second_Name
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -1271,6 +1492,55 @@ package body Hostkit_Suite is
       Ada.Directories.Delete_File (Original);
       Ada.Directories.Delete_File (Other);
    end Test_Same_File_Sees_Through_A_Second_Name;
+
+   procedure Test_Entry_Identity_And_Revision_Do_Not_Follow_Links
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Metadata.Identity_Field;
+      Original : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity");
+      Link     : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-link");
+      Missing  : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-missing");
+
+      function Same
+        (Left, Right : Hostkit.Metadata.Entry_Identity) return Boolean is
+        (Left.Available and then Right.Available
+         and then Left.Volume = Right.Volume
+         and then Left.File_Number = Right.File_Number
+         and then Left.Generation_High = Right.Generation_High
+         and then Left.Generation_Low = Right.Generation_Low);
+   begin
+      if Hostkit.Fs.Is_Link (Link) then
+         Assert (Hostkit.Fs.Delete_Link (Link), "remove an old identity-test link");
+      end if;
+      if Ada.Directories.Exists (Original) then
+         Ada.Directories.Delete_File (Original);
+      end if;
+      Write_File (Original, "identity");
+
+      declare
+         Identity : constant Hostkit.Metadata.Entry_Identity :=
+           Hostkit.Metadata.Entry_Identity_Of (Original);
+         Revision : constant Hostkit.Metadata.Entry_Revision :=
+           Hostkit.Metadata.Entry_Revision_Of (Original);
+      begin
+         Assert (Identity.Available, "a newly-created entry has a stable host identity");
+         Assert (Revision.Available and then Revision.Size = 9,
+                 "a newly-created entry has a complete no-follow revision");
+         Assert (not Hostkit.Metadata.Entry_Identity_Of (Missing).Available,
+                 "a missing entry has no invented identity");
+         Assert (not Hostkit.Metadata.Entry_Revision_Of (Missing).Available,
+                 "a missing entry has no invented revision");
+
+         if Hostkit.Fs.Create_Link (Original, Link) then
+            Assert
+              (not Same (Identity, Hostkit.Metadata.Entry_Identity_Of (Link)),
+               "a link's identity is its own, not its target's");
+            Assert (Hostkit.Fs.Delete_Link (Link), "remove the identity-test link");
+         end if;
+      end;
+      Ada.Directories.Delete_File (Original);
+   end Test_Entry_Identity_And_Revision_Do_Not_Follow_Links;
 
    procedure Test_Device_Id_Reports_A_Comparable_Volume
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -1688,6 +1958,12 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Make_Private'Access, "fs : a path is restricted to its owner");
       Register_Routine
+        (T, Test_Private_Paths'Access,
+         "private paths : creation and open-file hardening are owner-only");
+      Register_Routine
+        (T, Test_Delete_Tree_No_Follow'Access,
+         "fs : secure tree deletion never follows a link outside the tree");
+      Register_Routine
         (T, Test_Locate'Access, "process : a program is found by name");
       Register_Routine
         (T, Test_The_Host_Is_Not_Guessed'Access, "host : the host identifies itself");
@@ -1732,8 +2008,17 @@ package body Hostkit_Suite is
         (T, Test_Mode_And_Ownership_Agree_With_The_Separate_Calls'Access,
          "metadata : the one-call mode+ownership read agrees with the two it replaces");
       Register_Routine
+        (T, Test_Metadata_Update_Is_Bound_To_The_Held_Entry'Access,
+         "metadata : updates stay bound to the held entry and report its old value");
+      Register_Routine
+        (T, Test_Lease_File_Pins_Locks_And_Transfers_Bytes'Access,
+         "lease files : secure held identities combine locking and durable bytes");
+      Register_Routine
         (T, Test_Same_File_Sees_Through_A_Second_Name'Access,
          "metadata : two names for one file are recognised as the same file");
+      Register_Routine
+        (T, Test_Entry_Identity_And_Revision_Do_Not_Follow_Links'Access,
+         "metadata : entry identities and revisions inspect links without following them");
       Register_Routine
         (T, Test_Device_Id_Reports_A_Comparable_Volume'Access,
          "metadata : device ids identify the volume when the host reports them");
