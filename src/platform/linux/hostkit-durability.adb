@@ -48,4 +48,27 @@ package body Hostkit.Durability is
    function Sync_Directory (Path : String) return Outcome
    is (Sync (Path, O_Rdonly + O_Directory + O_Cloexec));
 
+   function posix_fallocate (FD : C_Int; Offset, Length : Interfaces.C.long) return C_Int
+     with Import, Convention => C, External_Name => "posix_fallocate";
+
+   function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome is
+      O_Wronly : constant C_Int := 8#1#;
+      Name     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      FD       : constant C_Int := open (Name, O_Wronly + O_Cloexec);
+      Result   : Outcome := Failed;
+   begin
+      Interfaces.C.Strings.Free (Name);
+      if FD < 0 then
+         return Failed;
+      end if;
+      --  It answers with the error itself, zero for none.
+      if Length <= 0 or else posix_fallocate (FD, 0, Interfaces.C.long (Length)) = 0 then
+         Result := Synced;
+      end if;
+      if close (FD) /= 0 then
+         Result := Failed;
+      end if;
+      return Result;
+   end Reserve_Space;
+
 end Hostkit.Durability;

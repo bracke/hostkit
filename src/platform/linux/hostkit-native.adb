@@ -424,12 +424,23 @@ package body Hostkit.Native is
 
             --  Asking did not work; now it is not a request. The group is
             --  made to stop whatever its leader did: a shell may have gone
-            --  and left what it started.
-            if Waitpid (Child, Status'Address, WNOHANG) /= Child then
-               Ignored := Kill ((if Whole_Group then -Child else Child), Sigkill);
-            elsif Whole_Group then
-               Ignored := Kill (-Child, Sigkill);
-            end if;
+            --  and left what it started. Whether the leader ended is asked
+            --  without reaping it, so its id is not given up while the
+            --  group is still sent to -- and the loop's reap below keeps
+            --  how it ended.
+            declare
+               Info : aliased Wait_Info := [others => 0];
+            begin
+               if Wait_Id (P_PID, Child, Info'Address, W_EXITED + W_NOHANG + W_NOWAIT) = 0
+                 and then Info (Pid_Slot) = Child
+               then
+                  if Whole_Group then
+                     Ignored := Kill (-Child, Sigkill);
+                  end if;
+               else
+                  Ignored := Kill ((if Whole_Group then -Child else Child), Sigkill);
+               end if;
+            end;
          end if;
 
          if Poll /= null then

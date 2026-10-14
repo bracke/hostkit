@@ -14,4 +14,11 @@ package body Hostkit.Durability is
       return Not_Supported;
    end Sync_Directory;
 
+   --  An unknown host cannot say the room is had.
+   function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome is
+      pragma Unreferenced (Path, Length);
+   begin
+      return Not_Supported;
+   end Reserve_Space;
+
 end Hostkit.Durability;

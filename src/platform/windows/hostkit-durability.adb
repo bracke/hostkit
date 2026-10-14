@@ -46,4 +46,12 @@ package body Hostkit.Durability is
       return Not_Supported;
    end Sync_Directory;
 
+   --  The C runtime offers no reservation that leaves the length alone;
+   --  the room is not said to be had.
+   function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome is
+      pragma Unreferenced (Path, Length);
+   begin
+      return Not_Supported;
+   end Reserve_Space;
+
 end Hostkit.Durability;

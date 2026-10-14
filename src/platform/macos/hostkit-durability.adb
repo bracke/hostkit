@@ -55,4 +55,12 @@ package body Hostkit.Durability is
    function Sync_Directory (Path : String) return Outcome
    is (Sync (Path, O_Rdonly + O_Directory + O_Cloexec));
 
+   --  macOS has no posix_fallocate, and F_PREALLOCATE does not grow the
+   --  file; the room is not said to be had.
+   function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome is
+      pragma Unreferenced (Path, Length);
+   begin
+      return Not_Supported;
+   end Reserve_Space;
+
 end Hostkit.Durability;

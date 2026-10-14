@@ -274,9 +274,14 @@ package Hostkit.Process is
    --                       for the group with no environment but PATH, the
    --                       program with what the shell gives it: for a
    --                       caller that passes the program what it may have
-   --                       itself (env -i), so that nothing else it holds is
-   --                       readable in the group's parent. Linux; elsewhere
-   --                       there is no such shell, and it is ignored.
+   --                       itself (env -i), so that the shell, the
+   --                       program's parent, carries nothing else of the
+   --                       caller's. The caller's own environment is not
+   --                       hidden by it: a program under the same user can
+   --                       read /proc/<caller>/environ unless the caller is
+   --                       not dumpable or the program runs in a process
+   --                       namespace of its own. Linux; elsewhere there is
+   --                       no such shell, and it is ignored.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
    --          rather than the program deciding to stop.
    function Run_Captured

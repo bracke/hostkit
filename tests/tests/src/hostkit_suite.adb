@@ -2093,6 +2093,30 @@ package body Hostkit_Suite is
       AUnit.Assertions.Assert
         (Hostkit.Durability.Sync_File (Directory & "/not-there.txt") = Hostkit.Durability.Failed,
          "a file that is not there was said to be synced");
+
+      --  Room reserved is room the file has, its length grown to it; a
+      --  file that is not there has none to reserve.
+      declare
+         use type Ada.Directories.File_Size;
+         Reserved : constant Hostkit.Durability.Outcome :=
+           Hostkit.Durability.Reserve_Space (Path, 1_048_576);
+      begin
+         if Hostkit.Host.Current = Hostkit.Host.Linux then
+            AUnit.Assertions.Assert
+              (Reserved = Hostkit.Durability.Synced,
+               "room was not reserved: " & Hostkit.Durability.Outcome'Image (Reserved));
+            AUnit.Assertions.Assert
+              (Ada.Directories.Size (Path) = 1_048_576, "the file was not grown to the room reserved");
+            AUnit.Assertions.Assert
+              (Hostkit.Durability.Reserve_Space (Directory & "/not-there.txt", 4096)
+                 = Hostkit.Durability.Failed,
+               "room was reserved for a file that is not there");
+         else
+            AUnit.Assertions.Assert
+              (Reserved /= Hostkit.Durability.Synced,
+               "room was said to be reserved where the host cannot");
+         end if;
+      end;
    end Test_Writes_Are_Made_Durable;
 
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is

@@ -30,4 +30,18 @@ package Hostkit.Durability is
    --    operation -- Windows journals directory entries itself.
    function Sync_Directory (Path : String) return Outcome;
 
+   --  Give a file its blocks up to Length now, rather than as it is
+   --  written: a file mapped and written through memory on a disk that
+   --  fills part way faults the writer (SIGBUS) where no check can see it;
+   --  a refusal here comes before anything is written. The file is grown
+   --  to Length where it is shorter, never cut.
+   --
+   --  @param Path The file; it must exist.
+   --  @param Length The bytes it is to hold room for.
+   --  @return Synced when the room is the file's, Failed when it cannot be
+   --    had -- no space, no such file -- or Not_Supported where the host
+   --    cannot reserve it (macOS, an unknown host), and the file is as it
+   --    was.
+   function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome;
+
 end Hostkit.Durability;

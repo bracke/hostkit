@@ -17,12 +17,23 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Durability.Reserve_Space`: a file given its blocks up front (posix_fallocate
+  on Linux), so a file written through a shared mapping is refused before it is
+  written rather than faulting its writer when the disk fills; `Not_Supported`
+  on macOS, Windows and unknown hosts.
+
 - `Process.Run_Captured (Clean_Wrapper => True)`: with `Whole_Group`, on Linux,
   the shell that stands for the group starts with no environment but `PATH`, so
   a caller that passes its program only what it may have (`env -i`) leaves
   nothing else readable in `/proc/<parent>/environ`. Ignored on other hosts.
 
 ### Fixed
+
+- Linux `Run_Captured`: a stop that found the leader already ended reaped it
+  before sending the group its kill, giving its id up while still in use and
+  losing how it ended; the leader is now asked without being reaped.
+- `Run_Captured (Clean_Wrapper)` says what it does not do: the caller's own
+  `/proc/<pid>/environ` stays readable to a program under the same user.
 
 - Linux `Run_Captured` with `Whole_Group`: the program starts in a session of its
   own (`setsid`), with no controlling terminal to stop on; when the group's
