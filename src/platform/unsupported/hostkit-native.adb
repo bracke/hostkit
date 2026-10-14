@@ -36,10 +36,11 @@ package body Hostkit.Native is
       Cancelled         : Hostkit.Process.Cancel_Check;
       Poll              : Hostkit.Process.Poll_Hook;
       Started_Notice    : Hostkit.Process.Started_Hook;
-      Whole_Group       : Boolean := False)
+      Whole_Group       : Boolean := False;
+      Clean_Wrapper     : Boolean := False)
       return Hostkit.Process.Process_Outcome
    is
-      pragma Unreferenced (Whole_Group);
+      pragma Unreferenced (Whole_Group, Clean_Wrapper);
       pragma Unreferenced
         (Program, Arguments, Working_Directory, Stdin_Path, Stdout_Path, Stderr_Path,
          Timeout_Ms, Cancelled, Poll, Started_Notice);

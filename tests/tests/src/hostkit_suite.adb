@@ -552,6 +552,82 @@ package body Hostkit_Suite is
       Assert (Gone, "what the shell started outlived it");
    end Test_Group_Stops_Whole;
 
+   --  A group whose leader ends well takes what it left running with it:
+   --  a program sent to the background does not run on after it.
+   procedure Test_Group_Ends_With_Leader (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      use type Hostkit.Process.Presence;
+
+      Pid_Path  : constant String := Ada.Directories.Compose (Scratch, "group-left.pid");
+      Arguments : Hostkit.String_Vectors.Vector;
+      Outcome   : Hostkit.Process.Process_Outcome;
+      File      : Ada.Text_IO.File_Type;
+      Child     : Integer := 0;
+      Gone      : Boolean := False;
+   begin
+      if Hostkit.Host.Current /= Hostkit.Host.Linux then
+         return;
+      end if;
+      Arguments.Append (To_Unbounded_String ("-c"));
+      Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; exit 0"));
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program     => "/bin/sh",
+           Arguments   => Arguments,
+           Stdin_Path  => "/dev/null",
+           Timeout_Ms  => 10_000,
+           Whole_Group => True);
+      Assert (Outcome.Started and then not Outcome.Timed_Out and then Outcome.Exit_Status = 0,
+              "the shell did not end on its own");
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_Path);
+      Child := Integer'Value (Ada.Text_IO.Get_Line (File));
+      Ada.Text_IO.Close (File);
+      for Try in 1 .. 100 loop
+         Gone := Hostkit.Process.Presence_Of (Child) = Hostkit.Process.Absent;
+         exit when Gone;
+         delay 0.01;
+      end loop;
+      Assert (Gone, "what the shell left running outlived it");
+   end Test_Group_Ends_With_Leader;
+
+   --  A clean wrapper holds no environment of the caller's: what the
+   --  program can read of its parent says nothing it was not given.
+   procedure Test_Clean_Wrapper (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+
+      Out_Path  : constant String := Ada.Directories.Compose (Scratch, "wrapper-env.txt");
+      Arguments : Hostkit.String_Vectors.Vector;
+      Outcome   : Hostkit.Process.Process_Outcome;
+      File      : Ada.Text_IO.File_Type;
+      Seen      : Unbounded_String;
+   begin
+      if Hostkit.Host.Current /= Hostkit.Host.Linux then
+         return;
+      end if;
+      Ada.Environment_Variables.Set ("HOSTKIT_WRAPPER_SECRET", "not-for-children");
+      Arguments.Append (To_Unbounded_String ("-c"));
+      Arguments.Append (To_Unbounded_String ("tr '\000' '\n' < /proc/$PPID/environ"));
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program       => "/bin/sh",
+           Arguments     => Arguments,
+           Stdin_Path    => "/dev/null",
+           Stdout_Path   => Out_Path,
+           Timeout_Ms    => 10_000,
+           Whole_Group   => True,
+           Clean_Wrapper => True);
+      Ada.Environment_Variables.Clear ("HOSTKIT_WRAPPER_SECRET");
+      Assert (Outcome.Started and then Outcome.Exit_Status = 0, "the program did not run");
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Out_Path);
+      while not Ada.Text_IO.End_Of_File (File) loop
+         Append (Seen, Ada.Text_IO.Get_Line (File) & ASCII.LF);
+      end loop;
+      Ada.Text_IO.Close (File);
+      Assert (Ada.Strings.Fixed.Index (To_String (Seen), "HOSTKIT_WRAPPER_SECRET") = 0
+              and then Ada.Strings.Fixed.Index (To_String (Seen), "PATH=") > 0,
+              "the wrapper held the caller's environment: " & To_String (Seen));
+   end Test_Clean_Wrapper;
+
    procedure Test_Accessible_By_Others (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
 
@@ -2098,6 +2174,10 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Group_Stops_Whole'Access,
          "process : stopped as a group, a program takes what it started with it");
+      Register_Routine
+        (T, Test_Group_Ends_With_Leader'Access, "process : a group's leader ending ends what it left running");
+      Register_Routine
+        (T, Test_Clean_Wrapper'Access, "process : a clean wrapper holds none of the caller's environment");
       Register_Routine
         (T, Test_The_Host_Answers_For_Its_Own_Trash'Access,
          "trash : a host with no trash of its own declines and leaves the file alone");

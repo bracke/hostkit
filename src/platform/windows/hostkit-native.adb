@@ -274,9 +274,12 @@ package body Hostkit.Native is
       Cancelled         : Hostkit.Process.Cancel_Check;
       Poll              : Hostkit.Process.Poll_Hook;
       Started_Notice    : Hostkit.Process.Started_Hook;
-      Whole_Group       : Boolean := False)
+      Whole_Group       : Boolean := False;
+      Clean_Wrapper     : Boolean := False)
       return Hostkit.Process.Process_Outcome
    is
+      --  No shell stands for the group here: nothing to clean.
+      pragma Unreferenced (Clean_Wrapper);
       --  CreateProcessW takes a command line, not a vector, so the arguments have
       --  to be quoted into one with the C runtime rules every Windows program
       --  parses back out. That quoting is pure text and easy to get subtly wrong,

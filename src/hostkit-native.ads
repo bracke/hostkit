@@ -42,7 +42,8 @@ private package Hostkit.Native is
       Cancelled         : Hostkit.Process.Cancel_Check;
       Poll              : Hostkit.Process.Poll_Hook;
       Started_Notice    : Hostkit.Process.Started_Hook;
-      Whole_Group       : Boolean := False)
+      Whole_Group       : Boolean := False;
+      Clean_Wrapper     : Boolean := False)
       return Hostkit.Process.Process_Outcome;
 
    --  Ask a process, by id, to stop. See Hostkit.Process.Request_Stop.

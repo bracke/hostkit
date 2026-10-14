@@ -270,6 +270,13 @@ package Hostkit.Process is
    --                     read it. On Linux the program is also killed when
    --                     the caller dies, whatever kills it; elsewhere it
    --                     runs on until it ends.
+   --  @param Clean_Wrapper With Whole_Group, start the shell that stands
+   --                       for the group with no environment but PATH, the
+   --                       program with what the shell gives it: for a
+   --                       caller that passes the program what it may have
+   --                       itself (env -i), so that nothing else it holds is
+   --                       readable in the group's parent. Linux; elsewhere
+   --                       there is no such shell, and it is ignored.
    --  @return What became of it. Timed_Out says the deadline (or a cancellation) ended it,
    --          rather than the program deciding to stop.
    function Run_Captured
@@ -283,7 +290,8 @@ package Hostkit.Process is
       Cancelled         : Cancel_Check := null;
       Poll              : Poll_Hook := null;
       Started           : Started_Hook := null;
-      Whole_Group       : Boolean := False)
+      Whole_Group       : Boolean := False;
+      Clean_Wrapper     : Boolean := False)
       return Process_Outcome;
 
    --  Start whatever the host thinks this path is: a document in its default

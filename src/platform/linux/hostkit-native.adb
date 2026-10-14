@@ -1,3 +1,4 @@
+with Ada.Environment_Variables;
 with Ada.Calendar;
 with Ada.Strings.Unbounded;
 
@@ -79,7 +80,8 @@ package body Hostkit.Native is
       Cancelled         : Hostkit.Process.Cancel_Check;
       Poll              : Hostkit.Process.Poll_Hook;
       Started_Notice    : Hostkit.Process.Started_Hook;
-      Whole_Group       : Boolean := False)
+      Whole_Group       : Boolean := False;
+      Clean_Wrapper     : Boolean := False)
       return Hostkit.Process.Process_Outcome
    is
       use type Interfaces.C.Strings.chars_ptr;
@@ -110,8 +112,29 @@ package body Hostkit.Native is
         with Import => True, Convention => C, External_Name => "execvp";
       function Kill (Pid : C_Int; Signal : C_Int) return C_Int
         with Import => True, Convention => C, External_Name => "kill";
-      function Set_Group (Pid, Group : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "setpgid";
+      function New_Session return C_Int
+        with Import => True, Convention => C, External_Name => "setsid";
+      function Execve
+        (File : Interfaces.C.Strings.chars_ptr;
+         Argv : System.Address;
+         Envp : System.Address)
+         return C_Int
+        with Import => True, Convention => C, External_Name => "execve";
+
+      --  waitid (P_PID, child, info, WEXITED | WNOHANG | WNOWAIT): whether
+      --  the leader has ended, without reaping it -- its id stays the
+      --  group's until it is reaped, so what it left in the group can be
+      --  ended first, and nothing else that took the id is.
+      type Wait_Info is array (0 .. 31) of aliased C_Int with Convention => C;
+      function Wait_Id (Id_Type : C_Int; Id : C_Int; Info : System.Address; Options : C_Int) return C_Int
+        with Import => True, Convention => C, External_Name => "waitid";
+      P_PID     : constant C_Int := 1;
+      W_EXITED  : constant C_Int := 4;
+      W_NOHANG  : constant C_Int := 1;
+      W_NOWAIT  : constant C_Int := 16#0100_0000#;
+      --  si_pid, after si_signo, si_errno, si_code and the padding before
+      --  the union, on the 64-bit hosts this is built for.
+      Pid_Slot  : constant := 4;
 
       --  prctl (PR_SET_PDEATHSIG, SIGTERM): the child is told when the thread
       --  that forked it ends, however it ends -- kill -9 included.
@@ -160,6 +183,15 @@ package body Hostkit.Native is
       Wrap      : C_Argv (0 .. Count + 5);
       Shell_C   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
 
+      --  A clean wrapper's whole environment: where programs are, and
+      --  nothing else -- what the caller holds is not left readable in the
+      --  process every one of its group can see as its parent.
+      Path_Said : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String
+          ("PATH=" & (if Ada.Environment_Variables.Exists ("PATH")
+                      then Ada.Environment_Variables.Value ("PATH") else "/usr/bin:/bin"));
+      Bare_Env  : C_Argv (0 .. 1) := [Path_Said, Interfaces.C.Strings.Null_Ptr];
+
       Child      : C_Int;
       Status     : aliased C_Int := 0;
       Collected  : C_Int;
@@ -188,6 +220,7 @@ package body Hostkit.Native is
          if Shell_C /= Interfaces.C.Strings.Null_Ptr then
             Interfaces.C.Strings.Free (Shell_C);
          end if;
+         Interfaces.C.Strings.Free (Path_Said);
       end Free_Argv;
 
       --  Deadline or cancellation: both mean "stop waiting and end it".
@@ -245,10 +278,13 @@ package body Hostkit.Native is
       begin
          Interfaces.C.Strings.Free (Path_C);
 
-         if Opened >= 0 then
-            Ignored := Dup2 (Opened, Target_Fd);
-            Ignored := C_Close (Opened);
+         --  Not to be captured, it is not run: written to the caller's
+         --  terminal instead, what it says would be lost and said nowhere.
+         if Opened < 0 then
+            Underscore_Exit (127);
          end if;
+         Ignored := Dup2 (Opened, Target_Fd);
+         Ignored := C_Close (Opened);
       end Redirect;
    begin
       Argv (0) := Interfaces.C.Strings.New_String (Program);
@@ -282,7 +318,9 @@ package body Hostkit.Native is
          Ignored := Set_Mask (SIG_SETMASK, No_Signals'Access, System.Null_Address);
 
          if Whole_Group then
-            Ignored := Set_Group (0, 0);
+            --  A session of its own, and so a group of its own with no
+            --  terminal: nothing in it reads or stops on the caller's.
+            Ignored := New_Session;
 
             --  A group run on the caller's behalf does not outlive it: were
             --  the caller killed outright, what it started would run on with
@@ -323,7 +361,11 @@ package body Hostkit.Native is
             end;
          end if;
 
-         if Whole_Group then
+         if Whole_Group and then Clean_Wrapper then
+            if Execve (Shell_C, Wrap (0)'Address, Bare_Env (0)'Address) /= 0 then
+               Underscore_Exit (127);
+            end if;
+         elsif Whole_Group then
             if Execvp (Shell_C, Wrap (0)'Address) /= 0 then
                Underscore_Exit (127);
             end if;
@@ -337,17 +379,26 @@ package body Hostkit.Native is
       --  The parent.
       Result.Started := True;
 
-      --  Set here too: whichever of the two runs first, the group is made
-      --  before anything is sent to it.
-      if Whole_Group then
-         Ignored := Set_Group (Child, Child);
-      end if;
 
       if Started_Notice /= null then
          Started_Notice.all (Integer (Child));
       end if;
 
       loop
+         --  Its leader ended: what it left behind in its group -- a server
+         --  sent to the background, a daemon a test began -- is ended with
+         --  it, before the leader is reaped and its id given up.
+         if Whole_Group then
+            declare
+               Info : aliased Wait_Info := [others => 0];
+            begin
+               if Wait_Id (P_PID, Child, Info'Address, W_EXITED + W_NOHANG + W_NOWAIT) = 0
+                 and then Info (Pid_Slot) = Child
+               then
+                  Ignored := Kill (-Child, Sigkill);
+               end if;
+            end;
+         end if;
          Collected := Waitpid (Child, Status'Address, WNOHANG);
 
          if Collected = Child then
@@ -365,6 +416,11 @@ package body Hostkit.Native is
          if not Killed and then Should_Stop then
             Killed := True;
             Ignored := Kill ((if Whole_Group then -Child else Child), Sigterm);
+            --  And its leader by its own id: stopped before it had made its
+            --  session, it is in no group yet.
+            if Whole_Group then
+               Ignored := Kill (Child, Sigterm);
+            end if;
             delay 0.05;
 
             --  Asking did not work; now it is not a request. The group is

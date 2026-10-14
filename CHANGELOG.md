@@ -15,8 +15,20 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ## [Unreleased]
 
+### Added
+
+- `Process.Run_Captured (Clean_Wrapper => True)`: with `Whole_Group`, on Linux,
+  the shell that stands for the group starts with no environment but `PATH`, so
+  a caller that passes its program only what it may have (`env -i`) leaves
+  nothing else readable in `/proc/<parent>/environ`. Ignored on other hosts.
+
 ### Fixed
 
+- Linux `Run_Captured` with `Whole_Group`: the program starts in a session of its
+  own (`setsid`), with no controlling terminal to stop on; when the group's
+  leader ends, what it left running in the group is killed before the leader is
+  reaped; and a capture file that cannot be opened ends the child (127) rather
+  than letting it write to the caller's terminal.
 - `Fs.Own_Executable` on Linux: a program replaced on disk while it runs is
   named without the kernel's ` (deleted)` suffix, so starting itself again
   starts the new copy.
