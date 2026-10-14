@@ -132,6 +132,14 @@ package body Hostkit.Native is
       Sigterm  : constant C_Int := 15;
       Sigkill  : constant C_Int := 9;
 
+      --  signal (SIGPIPE, SIG_DFL): a caller that ignores SIGPIPE, to be
+      --  told of a closed reader by EPIPE, would hand that on across exec,
+      --  and `yes | head` in what it runs would spin on EPIPE instead of
+      --  ending as a pipeline ends.
+      function Default_Pipe (Signal : C_Int; Handler : System.Address) return System.Address
+        with Import => True, Convention => C, External_Name => "signal";
+      Sigpipe_Number : constant C_Int := 13;
+
       Count     : constant Natural := Natural (Arguments.Length);
       Argv      : C_Argv (0 .. Count + 1);
       Program_C : Interfaces.C.Strings.chars_ptr :=
@@ -143,6 +151,8 @@ package body Hostkit.Native is
       Started_At : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       Killed     : Boolean := False;
       Ignored    : C_Int;
+      Pipe_Was   : System.Address;
+      pragma Unreferenced (Pipe_Was);
       Result     : Hostkit.Process.Process_Outcome;
 
       procedure Free_Argv is
@@ -236,6 +246,7 @@ package body Hostkit.Native is
       if Child = 0 then
          --  The child. Nothing here may return: on any failure it must _exit, or two
          --  copies of the caller would carry on running.
+         Pipe_Was := Default_Pipe (Sigpipe_Number, System.Null_Address);
          if Whole_Group then
             Ignored := Set_Group (0, 0);
          end if;

@@ -157,6 +157,14 @@ package body Hostkit.Native is
       No_Signals  : aliased constant Signal_Set := [others => 0];
       Sig_Term_Number  : constant := 15;
       Forked_By        : constant C_Int := Own_Id;
+      --  signal (SIGPIPE, SIG_DFL): a caller that ignores SIGPIPE, to be
+      --  told of a closed reader by EPIPE, would hand that on across exec,
+      --  and `yes | head` in what it runs would spin on EPIPE instead of
+      --  ending as a pipeline ends.
+      function Default_Pipe (Signal : C_Int; Handler : System.Address) return System.Address
+        with Import => True, Convention => C, External_Name => "signal";
+      Sigpipe_Number : constant C_Int := 13;
+
       procedure Underscore_Exit (Status : C_Int)
         with Import => True, Convention => C, External_Name => "_exit";
 
@@ -198,6 +206,8 @@ package body Hostkit.Native is
       Started_At : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       Killed     : Boolean := False;
       Ignored    : C_Int;
+      Pipe_Was   : System.Address;
+      pragma Unreferenced (Pipe_Was);
       Result     : Hostkit.Process.Process_Outcome;
 
       procedure Free_Argv is
@@ -316,6 +326,7 @@ package body Hostkit.Native is
          --  The child. Nothing here may return: on any failure it must _exit, or two
          --  copies of the caller would carry on running.
          Ignored := Set_Mask (SIG_SETMASK, No_Signals'Access, System.Null_Address);
+         Pipe_Was := Default_Pipe (Sigpipe_Number, System.Null_Address);
 
          if Whole_Group then
             --  A session of its own, and so a group of its own with no
