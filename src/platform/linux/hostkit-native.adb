@@ -379,7 +379,6 @@ package body Hostkit.Native is
       --  The parent.
       Result.Started := True;
 
-
       if Started_Notice /= null then
          Started_Notice.all (Integer (Child));
       end if;
