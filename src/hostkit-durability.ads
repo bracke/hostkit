@@ -40,8 +40,8 @@ package Hostkit.Durability is
    --  @param Length The bytes it is to hold room for.
    --  @return Synced when the room is the file's, Failed when it cannot be
    --    had -- no space, no such file -- or Not_Supported where the host
-   --    cannot reserve it (macOS, an unknown host), and the file is as it
-   --    was.
+   --    or the file system cannot reserve it (macOS, an unknown host, a
+   --    file system without the operation), and the file is as it was.
    function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome;
 
 end Hostkit.Durability;

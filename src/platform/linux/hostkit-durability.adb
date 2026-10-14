@@ -52,18 +52,36 @@ package body Hostkit.Durability is
      with Import, Convention => C, External_Name => "posix_fallocate";
 
    function Reserve_Space (Path : String; Length : Long_Long_Integer) return Outcome is
-      O_Wronly : constant C_Int := 8#1#;
+      --  Read and write: where the file system has no fallocate of its own
+      --  (NFSv3, CIFS, some FUSE), glibc reserves by reading each block
+      --  and writing it back, and a descriptor open for writing alone made
+      --  that fail.
+      O_Rdwr     : constant C_Int := 8#2#;
+      EINTR      : constant C_Int := 4;
+      EINVAL     : constant C_Int := 22;
+      ENOSYS     : constant C_Int := 38;
+      EOPNOTSUPP : constant C_Int := 95;
       Name     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      FD       : constant C_Int := open (Name, O_Wronly + O_Cloexec);
+      FD       : constant C_Int := open (Name, O_Rdwr + O_Cloexec);
       Result   : Outcome := Failed;
+      Said     : C_Int := 0;
    begin
       Interfaces.C.Strings.Free (Name);
       if FD < 0 then
          return Failed;
       end if;
-      --  It answers with the error itself, zero for none.
-      if Length <= 0 or else posix_fallocate (FD, 0, Interfaces.C.long (Length)) = 0 then
+      --  It answers with the error itself, zero for none. A file system
+      --  that cannot reserve at all says so, and that is not a refusal.
+      if Length > 0 then
+         loop
+            Said := posix_fallocate (FD, 0, Interfaces.C.long (Length));
+            exit when Said /= EINTR;
+         end loop;
+      end if;
+      if Said = 0 then
          Result := Synced;
+      elsif Said in EOPNOTSUPP | ENOSYS | EINVAL then
+         Result := Not_Supported;
       end if;
       if close (FD) /= 0 then
          Result := Failed;

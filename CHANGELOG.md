@@ -29,6 +29,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- Linux `Durability.Reserve_Space` opens the file for reading and writing, as
+  glibc's emulation on file systems without fallocate needs, retries an
+  interrupted call, and answers `Not_Supported` where the file system cannot
+  reserve rather than `Failed`.
+
 - Linux `Run_Captured`: a stop that found the leader already ended reaped it
   before sending the group its kill, giving its id up while still in use and
   losing how it ended; the leader is now asked without being reaped.
