@@ -63,4 +63,28 @@ package body Hostkit.Durability is
       return Not_Supported;
    end Reserve_Space;
 
+   ------------------
+   -- Sync_Mapping --
+   ------------------
+
+   function Sync_Mapping
+     (Start : System.Address; Length : Long_Long_Integer) return Outcome
+   is
+      use type System.Address;
+
+      --  macOS numbers it sixteen (sys/mman.h), Linux four.
+      MS_SYNC : constant Interfaces.C.int := 16;
+
+      function msync
+        (Addr : System.Address; Len : Interfaces.C.size_t; Flags : Interfaces.C.int)
+         return Interfaces.C.int
+        with Import, Convention => C, External_Name => "msync";
+   begin
+      if Start = System.Null_Address or else Length <= 0 then
+         return Synced;
+      end if;
+      return (if msync (Start, Interfaces.C.size_t (Length), MS_SYNC) = 0
+              then Synced else Failed);
+   end Sync_Mapping;
+
 end Hostkit.Durability;

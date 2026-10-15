@@ -54,4 +54,26 @@ package body Hostkit.Durability is
       return Not_Supported;
    end Reserve_Space;
 
+   ------------------
+   -- Sync_Mapping --
+   ------------------
+
+   function Sync_Mapping
+     (Start : System.Address; Length : Long_Long_Integer) return Outcome
+   is
+      use type System.Address;
+
+      --  The view's pages into the file; Sync_File's FlushFileBuffers then
+      --  puts the file on the device.
+      function FlushViewOfFile
+        (Base : System.Address; Bytes : Interfaces.C.size_t) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "FlushViewOfFile";
+   begin
+      if Start = System.Null_Address or else Length <= 0 then
+         return Synced;
+      end if;
+      return (if FlushViewOfFile (Start, Interfaces.C.size_t (Length)) /= 0
+              then Synced else Failed);
+   end Sync_Mapping;
+
 end Hostkit.Durability;

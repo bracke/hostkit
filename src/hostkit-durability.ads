@@ -1,3 +1,5 @@
+with System;
+
 --  Making what was written stay written: a file's contents, or a
 --  directory's entries -- a rename into it, a file made or removed -- put
 --  on the storage device, not only handed to the operating system, so that
@@ -29,6 +31,19 @@ package Hostkit.Durability is
    --  @return Synced, Failed, or Not_Supported where the host has no such
    --    operation -- Windows journals directory entries itself.
    function Sync_Directory (Path : String) return Outcome;
+
+   --  Put what was written through a shared mapping of a file into the file,
+   --  and the file on the device: on POSIX a write through the mapping is the
+   --  page cache's until msync, and only Linux makes a later fsync of the
+   --  file cover it. Called before Sync_File where a file was built in a
+   --  mapping, so that a name given to it after the sync names its data.
+   --
+   --  @param Start The mapping's first byte, page aligned as the host
+   --    returned it.
+   --  @param Length Bytes of it.
+   --  @return Synced, Failed, or Not_Supported.
+   function Sync_Mapping
+     (Start : System.Address; Length : Long_Long_Integer) return Outcome;
 
    --  Give a file its blocks up to Length now, rather than as it is
    --  written: a file mapped and written through memory on a disk that

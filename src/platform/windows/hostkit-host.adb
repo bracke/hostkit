@@ -365,4 +365,16 @@ package body Hostkit.Host is
          return "";
    end Login_Name;
 
+   -----------------------
+   -- Usable_Processors --
+   -----------------------
+
+   --  Not asked here: the host's own answer is not one this body reads, so
+   --  nothing is known and the caller counts the processors online.
+   function Usable_Processors (Set : out Processor_Set) return Boolean is
+   begin
+      Set := [others => False];
+      return False;
+   end Usable_Processors;
+
 end Hostkit.Host;

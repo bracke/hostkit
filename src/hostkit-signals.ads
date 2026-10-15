@@ -222,4 +222,34 @@ package Hostkit.Signals is
    --  @param Item Signal to clear.
    procedure Clear (Item : Signal);
 
+   --  Whether a recorded signal arrived, forgetting it in the same step.
+   --
+   --  Arrived and then Clear lose a signal that lands between the two: the
+   --  second of two told-to-end signals, which means "now", read as the
+   --  first. This answers and clears at once, so an arrival is either seen
+   --  by this call or left for the next.
+   --
+   --  @param Item Signal to take.
+   --  @return True when at least one had arrived since the last take or clear.
+   function Take (Item : Signal) return Boolean;
+
+   --  Set what this process does about a signal, and say what it did before.
+   --
+   --  Set_Disposition and then Current_Disposition cannot give the previous
+   --  answer: the setting has replaced it. A program that takes a signal for
+   --  a while and then gives it back needs the one it took over -- a job
+   --  started under nohup ignores SIGHUP, and putting the default back after
+   --  would let the closing terminal end it.
+   --
+   --  @param Item Signal to change.
+   --  @param To What to do about it from now.
+   --  @param Previous What was done about it until now, meaningful only when
+   --    this returns True: ignored, recorded by this package, or the default
+   --    -- which stands for any handler this package did not install.
+   --  @return True when the disposition was set.
+   function Replace_Disposition
+     (Item     : Signal;
+      To       : Disposition;
+      Previous : out Disposition) return Boolean;
+
 end Hostkit.Signals;

@@ -1,6 +1,7 @@
 with Interfaces.C;
 
 with System;
+with System.Atomic_Operations.Exchange;
 
 package body Hostkit.Signals is
 
@@ -176,9 +177,13 @@ package body Hostkit.Signals is
    --  the point where it changes; Atomic because a partially written flag
    --  would be a value neither side wrote.
    ------------------------------------------------------------------
-   type Arrival_Flags is array (Signal) of Boolean;
-   pragma Atomic_Components (Arrival_Flags);
-   pragma Volatile (Arrival_Flags);
+   --  A byte each, atomic, so that Take can read and clear one in a single
+   --  exchange: a read and then a write would lose a signal landing between.
+   type Arrival is new Boolean with Atomic, Size => 8;
+
+   package Arrival_Exchange is new System.Atomic_Operations.Exchange (Arrival);
+
+   type Arrival_Flags is array (Signal) of aliased Arrival;
 
    Arrivals : Arrival_Flags := [others => False];
 
@@ -220,7 +225,7 @@ package body Hostkit.Signals is
 
    function Arrived (Item : Signal) return Boolean is
    begin
-      return Arrivals (Item);
+      return Boolean (Arrivals (Item));
    end Arrived;
 
    -----------
@@ -231,6 +236,15 @@ package body Hostkit.Signals is
    begin
       Arrivals (Item) := False;
    end Clear;
+
+   ----------
+   -- Take --
+   ----------
+
+   function Take (Item : Signal) return Boolean is
+   begin
+      return Boolean (Arrival_Exchange.Atomic_Exchange (Arrivals (Item), False));
+   end Take;
 
    ---------------------
    -- Set_Disposition --
@@ -259,6 +273,46 @@ package body Hostkit.Signals is
       Previous := C_Signal (To_Number (Item), Handler);
       return Previous /= SIG_ERR;
    end Set_Disposition;
+
+   -------------------------
+   -- Replace_Disposition --
+   -------------------------
+
+   function Replace_Disposition
+     (Item     : Signal;
+      To       : Disposition;
+      Previous : out Disposition) return Boolean
+   is
+      Handler : constant System.Address :=
+        (case To is
+            when Disposition_Default => SIG_DFL,
+            when Disposition_Ignore  => SIG_IGN,
+            when Disposition_Record  => Record_Arrival'Address);
+      Was : System.Address;
+   begin
+      Previous := Disposition_Default;
+
+      if Item = Signal_Kill or else Item = Signal_Stop then
+         return False;
+      end if;
+
+      if To = Disposition_Record then
+         Clear (Item);
+      end if;
+
+      --  signal(2) answers with what it replaced, so this reads the old
+      --  disposition in the same step that sets the new: no window.
+      Was := C_Signal (To_Number (Item), Handler);
+      if Was = SIG_ERR then
+         return False;
+      end if;
+
+      Previous :=
+        (if Was = SIG_IGN then Disposition_Ignore
+         elsif Was = Record_Arrival'Address then Disposition_Record
+         else Disposition_Default);
+      return True;
+   end Replace_Disposition;
 
    -------------------------
    -- Current_Disposition --

@@ -1,4 +1,5 @@
 with Interfaces.C;
+with System.Atomic_Operations.Exchange;
 
 package body Hostkit.Signals is
 
@@ -119,8 +120,12 @@ package body Hostkit.Signals is
    --  Atomic because the routine that sets it runs on a thread of Windows'
    --  making while this one runs on, and a plain Boolean written by one thread
    --  and read by another is not something either compiler owes an answer for.
-   Interrupt_Arrived : Boolean := False;
-   pragma Atomic (Interrupt_Arrived);
+   --  A byte, atomic, so that Take reads and clears it in one exchange.
+   type Arrival is new Boolean with Atomic, Size => 8;
+
+   package Arrival_Exchange is new System.Atomic_Operations.Exchange (Arrival);
+
+   Interrupt_Arrived : aliased Arrival := False;
 
    --  Whether this process has added the routine, and whether it has asked for
    --  Ctrl-C to be ignored. Windows keeps a list rather than a slot: adding the
@@ -248,7 +253,7 @@ package body Hostkit.Signals is
    begin
       --  False for the rest because nothing can record them, not because none
       --  arrived. A caller that wants to know which is which asks Can_Record.
-      return Item = Signal_Interrupt and then Interrupt_Arrived;
+      return Item = Signal_Interrupt and then Boolean (Interrupt_Arrived);
    end Arrived;
 
    -----------
@@ -261,6 +266,40 @@ package body Hostkit.Signals is
          Interrupt_Arrived := False;
       end if;
    end Clear;
+
+   ----------
+   -- Take --
+   ----------
+
+   function Take (Item : Signal) return Boolean is
+   begin
+      return Item = Signal_Interrupt
+        and then Boolean (Arrival_Exchange.Atomic_Exchange (Interrupt_Arrived, False));
+   end Take;
+
+   -------------------------
+   -- Replace_Disposition --
+   -------------------------
+
+   function Replace_Disposition
+     (Item     : Signal;
+      To       : Disposition;
+      Previous : out Disposition) return Boolean
+   is
+      --  What this body installed, which is all Windows lets anyone know;
+      --  see Current_Disposition.
+      Was : constant Disposition :=
+        (if Ignoring then Disposition_Ignore
+         elsif Installed then Disposition_Record
+         else Disposition_Default);
+   begin
+      Previous := Disposition_Default;
+      if not Set_Disposition (Item, To) then
+         return False;
+      end if;
+      Previous := Was;
+      return True;
+   end Replace_Disposition;
 
    -------------------------
    -- Current_Disposition --

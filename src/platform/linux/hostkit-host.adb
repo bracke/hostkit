@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Interfaces;
 with Interfaces.C;
 with System;
 
@@ -190,5 +191,41 @@ package body Hostkit.Host is
       when others =>
          return "";
    end Login_Name;
+
+   -----------------------
+   -- Usable_Processors --
+   -----------------------
+
+   function Usable_Processors (Set : out Processor_Set) return Boolean is
+      use type Interfaces.Unsigned_64;
+
+      --  The kernel's mask, a bit a processor, a word of sixty-four at a
+      --  time: glibc's cpu_set_t at its default size.
+      type Mask is array (0 .. Most_Processors / 64 - 1) of Interfaces.Unsigned_64
+        with Convention => C;
+
+      function sched_getaffinity
+        (Pid : Interfaces.C.int; Size : Interfaces.C.size_t; Into : System.Address)
+         return Interfaces.C.int
+        with Import, Convention => C, External_Name => "sched_getaffinity";
+
+      Bits : Mask := [others => 0];
+      Any  : Boolean := False;
+   begin
+      Set := [others => False];
+      if sched_getaffinity (0, Interfaces.C.size_t (Bits'Size / 8), Bits'Address) /= 0 then
+         return False;
+      end if;
+      for Index in Set'Range loop
+         Set (Index) :=
+           (Interfaces.Shift_Right (Bits (Index / 64), Index mod 64) and 1) = 1;
+         Any := Any or else Set (Index);
+      end loop;
+      --  A mask with nothing in it is not one a running process can have.
+      if not Any then
+         Set := [others => False];
+      end if;
+      return Any;
+   end Usable_Processors;
 
 end Hostkit.Host;

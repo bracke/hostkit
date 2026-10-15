@@ -101,4 +101,21 @@ package body Hostkit.Signals is
       null;
    end Clear;
 
+   function Take (Item : Signal) return Boolean is
+      pragma Unreferenced (Item);
+   begin
+      return False;
+   end Take;
+
+   function Replace_Disposition
+     (Item     : Signal;
+      To       : Disposition;
+      Previous : out Disposition) return Boolean
+   is
+      pragma Unreferenced (Item, To);
+   begin
+      Previous := Disposition_Default;
+      return False;
+   end Replace_Disposition;
+
 end Hostkit.Signals;

@@ -120,4 +120,23 @@ package Hostkit.Host is
    --  @return True when that stream is a terminal.
    function Is_Terminal (Stream : Stream_Kind) return Boolean;
 
+   --  The most processors Usable_Processors can name: the size of the set
+   --  the C libraries pass, 1024.
+   Most_Processors : constant := 1024;
+
+   --  Processors, numbered as the host numbers them, marked where this
+   --  process may run.
+   type Processor_Set is array (0 .. Most_Processors - 1) of Boolean;
+
+   --  Which processors this process may run on: what an affinity mask, a
+   --  cpuset or `taskset` leaves it -- which may be far fewer than are
+   --  online, and a worker count that ignores it shares a few processors
+   --  between many spinning workers.
+   --
+   --  @param Set The processors marked, all False when this returns False.
+   --  @return True only where the host said plainly; False where it has no
+   --    such question or would not answer, which means nothing is known,
+   --    not that no processor may be used.
+   function Usable_Processors (Set : out Processor_Set) return Boolean;
+
 end Hostkit.Host;
