@@ -1,5 +1,5 @@
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 
 with Hostkit.Windows_Command_Line;
 
@@ -191,7 +191,7 @@ package body Hostkit.Spawn is
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String
-   is (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+   is (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    function To_Handle (Item : Hostkit.Descriptors.Descriptor) return System.Address
    is (System.Storage_Elements.To_Address
@@ -369,7 +369,7 @@ package body Hostkit.Spawn is
       declare
          Wide_Environment : aliased Wide_String :=
            (if Use_Environment
-            then Ada.Strings.UTF_Encoding.Wide_Strings.Decode
+            then Ada.Strings.UTF_Encoding.Conversions.Convert
                    (To_String (Environment_Block))
             else "" & Wide_Character'Val (0));
 

@@ -4,7 +4,7 @@ with Ada.Containers.Indefinite_Vectors;
 with Ada.Directories;
 with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 
 with Interfaces.C.Strings;
 
@@ -45,7 +45,7 @@ package body Hostkit.Fs is
      with Import => True, Convention => Stdcall, External_Name => "CreateSymbolicLinkW";
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    --  A symbolic link and a junction are both reparse points, and this is how Windows
    --  says so. There is no lstat, which is why GNAT's Is_Symbolic_Link cannot answer
@@ -399,7 +399,7 @@ package body Hostkit.Fs is
                  Wide_Character'Val (U16 (Start + Index * 2));
             end loop;
             Target := Ada.Strings.Unbounded.To_Unbounded_String
-              (Ada.Strings.UTF_Encoding.Wide_Strings.Encode (Wide_T));
+              (Ada.Strings.UTF_Encoding.Conversions.Convert (Wide_T));
          end;
       end;
       return True;
@@ -778,7 +778,7 @@ package body Hostkit.Fs is
 
          declare
             Resolved : constant String :=
-              Ada.Strings.UTF_Encoding.Wide_Strings.Encode
+              Ada.Strings.UTF_Encoding.Conversions.Convert
                 (Wide_Buf (1 .. Natural (Length)));
          begin
             --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.

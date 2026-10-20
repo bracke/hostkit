@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Interfaces;
 with Interfaces.C;
 with System;
@@ -72,7 +72,7 @@ package body Hostkit.Private_Paths is
    File_Id_Info_Class : constant C_Int := 18;
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value)
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
         & Wide_Character'Val (0));
 
    function Create_Directory_W

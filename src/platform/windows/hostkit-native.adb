@@ -1,6 +1,6 @@
 with Hostkit.Windows_Command_Line;
 with Ada.Calendar;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 
 with Interfaces.C;
 
@@ -107,7 +107,7 @@ package body Hostkit.Native is
      with Import => True, Convention => Stdcall, External_Name => "ShellExecuteW";
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    --  Windows has no zombie: a process that has exited is gone once its handles are
    --  closed, and everything here closes both before it returns.

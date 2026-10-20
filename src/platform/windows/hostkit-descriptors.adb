@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 
 with Interfaces.C;
 
@@ -163,7 +163,7 @@ package body Hostkit.Descriptors is
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String
-   is (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+   is (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    function To_Handle (Item : Descriptor) return System.Address
    is (System.Storage_Elements.To_Address

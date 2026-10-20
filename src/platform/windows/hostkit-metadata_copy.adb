@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -34,7 +34,7 @@ package body Hostkit.Metadata_Copy is
    File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value)
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
         & Wide_Character'Val (0));
 
    function Create_File_W

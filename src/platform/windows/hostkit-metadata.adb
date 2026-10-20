@@ -2,7 +2,7 @@ with Ada.Characters.Handling;
 with Ada.Directories;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Containers.Vectors;
 
 with Interfaces.C.Strings;
@@ -507,7 +507,7 @@ package body Hostkit.Metadata is
             end loop;
             return
               (if Last < Value'First then ""
-               else Ada.Strings.UTF_Encoding.Wide_Strings.Encode
+               else Ada.Strings.UTF_Encoding.Conversions.Convert
                  (Value (Value'First .. Last)));
          end Text_Of;
       begin
@@ -1112,7 +1112,7 @@ package body Hostkit.Metadata is
    end File_Mode_And_Ownership;
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value) & Wide_Character'Val (0));
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    function Open_Entry (Path : String; Access_Mode : C_DWord) return System.Address is
       Wide_Path : aliased Wide_String := Wide (Path);

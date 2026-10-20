@@ -1,5 +1,5 @@
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Interfaces.C;
 with System;
 
@@ -50,7 +50,7 @@ package body Hostkit.Trash is
       --  16-bit per element, so decode the UTF-8 path to Wide_String and
       --  double-NUL terminate it (pFrom is a double-null-terminated list).
       Wide_Path : aliased Wide_String :=
-        Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Path)
+        Ada.Strings.UTF_Encoding.Conversions.Convert (Path)
           & Wide_Character'Val (0) & Wide_Character'Val (0);
       Operation : aliased SH_File_Operation_W :=
         (Window        => System.Null_Address,

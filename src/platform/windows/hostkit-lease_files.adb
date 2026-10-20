@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -105,7 +105,7 @@ package body Hostkit.Lease_Files is
      with Import, Convention => Stdcall, External_Name => "GetFileSizeEx";
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Wide_Strings.Decode (Value)
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
       & Wide_Character'Val (0));
    function To_Handle (Item : Lease) return System.Address is
      (System.Storage_Elements.To_Address

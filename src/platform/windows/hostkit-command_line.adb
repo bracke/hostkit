@@ -1,6 +1,6 @@
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Vectors;
-with Ada.Strings.UTF_Encoding.Wide_Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 
 with Interfaces.C;
 
@@ -75,7 +75,7 @@ package body Hostkit.Command_Line is
          Last := Last + 1;
       end loop;
 
-      return Ada.Strings.UTF_Encoding.Wide_Strings.Encode (Text (1 .. Last));
+      return Ada.Strings.UTF_Encoding.Conversions.Convert (Text (1 .. Last));
    end Decoded;
 
    procedure Ask is
