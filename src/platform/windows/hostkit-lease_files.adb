@@ -6,6 +6,7 @@ with System.Storage_Elements;
 package body Hostkit.Lease_Files is
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
+   use type Interfaces.C.long_long;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_64;
@@ -14,6 +15,9 @@ package body Hostkit.Lease_Files is
    subtype C_Int is Interfaces.C.int;
    subtype C_DWord is Interfaces.C.unsigned_long;
    subtype C_I64 is Interfaces.C.long_long;
+
+   --  A Windows DWORD is 32 bits; one ReadFile/WriteFile call moves at most this.
+   Max_Transfer : constant := 2 ** 32 - 1;
 
    Invalid_Handle : constant System.Address :=
      System.Storage_Elements.To_Address
@@ -278,7 +282,7 @@ package body Hostkit.Lease_Files is
    begin
       if not Item.Held
         or else Offset < 0
-        or else Data'Length > Natural (C_DWord'Last)
+        or else Data'Length > Max_Transfer
         or else Set_File_Pointer
           (To_Handle (Item), C_I64 (Offset), System.Null_Address, File_Begin) = 0
       then
@@ -312,7 +316,7 @@ package body Hostkit.Lease_Files is
    begin
       if not Item.Held
         or else Offset < 0
-        or else Data'Length > Natural (C_DWord'Last)
+        or else Data'Length > Max_Transfer
         or else Set_File_Pointer
           (To_Handle (Item), C_I64 (Offset), System.Null_Address, File_Begin) = 0
       then
