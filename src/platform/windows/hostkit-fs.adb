@@ -252,6 +252,12 @@ package body Hostkit.Fs is
      (Source : String;
       Target : String)
       return Boolean
+   is (Move_No_Replace_Outcome (Source, Target) = Moved);
+
+   function Move_No_Replace_Outcome
+     (Source : String;
+      Target : String)
+      return Move_Outcome
    is
       function Move_File_Ex
         (Existing : System.Address;
@@ -260,17 +266,31 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
 
+      function Get_Last_Error return C_DWord
+        with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+      Error_Not_Same_Device  : constant C_DWord := 17;
+      Error_Invalid_Function  : constant C_DWord := 1;
+      Error_Not_Supported    : constant C_DWord := 50;
+
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
+      Error       : C_DWord;
    begin
-      return Move_File_Ex
-               (Wide_Source'Address,
-                Wide_Target'Address,
-                0) /= 0;
+      if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, 0) /= 0 then
+         return Moved;
+      end if;
+      Error := Get_Last_Error;
+      if Error = Error_Not_Same_Device then
+         return Move_Cross_Device;
+      elsif Error = Error_Invalid_Function or else Error = Error_Not_Supported then
+         return Move_Unsupported;
+      end if;
+      return Move_Refused;
    exception
       when others =>
-         return False;
-   end Move_No_Replace;
+         return Move_Refused;
+   end Move_No_Replace_Outcome;
 
    --  Windows has no readlink: a link is a reparse point. Open it without following it
    --  (FILE_FLAG_OPEN_REPARSE_POINT) and pull the target out of the reparse data. The

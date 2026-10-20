@@ -195,6 +195,22 @@ package Hostkit.Fs is
    --  @return True only when Source moved and Target was previously absent.
    function Move_No_Replace (Source : String; Target : String) return Boolean;
 
+   --  Why a no-replace move did or did not happen. Only Move_Cross_Device and
+   --  Move_Unsupported say a copy and delete could stand in for the rename;
+   --  Move_Refused (target exists, permission, missing source, busy, ...) says
+   --  a copy would fail the same way or do something the rename refused.
+   type Move_Outcome is
+     (Moved,
+      Move_Cross_Device,
+      Move_Unsupported,
+      Move_Refused);
+
+   --  Move_No_Replace, saying why it failed.
+   --  @param Source Entry to move, including symbolic links.
+   --  @param Target New pathname, which must not exist.
+   --  @return Moved exactly when Move_No_Replace would return True.
+   function Move_No_Replace_Outcome (Source : String; Target : String) return Move_Outcome;
+
    --  Read the literal target of the symbolic link (or junction) at Path.
    --
    --  POSIX has readlink. Windows has no such call: a link is a reparse point, so this

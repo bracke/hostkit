@@ -124,6 +124,16 @@ package body Hostkit.Fs is
       return False;
    end Move_No_Replace;
 
+   function Move_No_Replace_Outcome
+     (Source : String;
+      Target : String)
+      return Move_Outcome
+   is
+      pragma Unreferenced (Source, Target);
+   begin
+      return Move_Unsupported;
+   end Move_No_Replace_Outcome;
+
    function Read_Link_Target
      (Path   : String;
       Target : out Ada.Strings.Unbounded.Unbounded_String)

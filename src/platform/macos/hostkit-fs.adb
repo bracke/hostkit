@@ -480,28 +480,53 @@ package body Hostkit.Fs is
      (Source : String;
       Target : String)
       return Boolean
+   is (Move_No_Replace_Outcome (Source, Target) = Moved);
+
+   function Move_No_Replace_Outcome
+     (Source : String;
+      Target : String)
+      return Move_Outcome
    is
-      function C_Rename
+      function C_Renamex
         (Old_Path : Interfaces.C.Strings.chars_ptr;
          New_Path : Interfaces.C.Strings.chars_ptr;
          Flags    : Interfaces.C.unsigned)
          return Interfaces.C.int
         with Import => True, Convention => C, External_Name => "renamex_np";
 
+      Rename_Excl : constant := 4;
+      Exdev       : constant := 18;
+      Einval      : constant := 22;
+      Enotsup     : constant := 45;
+      Enosys      : constant := 78;
+
+      function C_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
+        (C_Renamex (From, To, Rename_Excl));
+
       C_Source : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Source);
       C_Target : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Target);
       Status   : Interfaces.C.int;
+      Error    : Integer;
    begin
-      Status := C_Rename (C_Source, C_Target, 4);
+      Status := C_Rename (C_Source, C_Target);
+      Error := GNAT.OS_Lib.Errno;
       Interfaces.C.Strings.Free (C_Source);
       Interfaces.C.Strings.Free (C_Target);
-      return Status = 0;
+      if Status = 0 then
+         return Moved;
+      elsif Error = Exdev then
+         return Move_Cross_Device;
+      elsif Error = Einval or else Error = Enotsup or else Error = Enosys then
+         --  The filesystem lacks the no-replace rename itself.
+         return Move_Unsupported;
+      end if;
+      return Move_Refused;
    exception
       when others =>
-         return False;
-   end Move_No_Replace;
+         return Move_Refused;
+   end Move_No_Replace_Outcome;
 
    --  POSIX readlink: read the link's own target, not the resolved path.
    function Read_Link_Target
