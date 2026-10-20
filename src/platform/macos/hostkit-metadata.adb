@@ -4,6 +4,7 @@ with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Symbols;
 
 package body Hostkit.Metadata is
    use Ada.Strings.Unbounded;
@@ -27,7 +28,8 @@ package body Hostkit.Metadata is
    --  macOS has no statx, so this uses stat(2). Since Darwin's 64-bit inode
    --  transition the x86_64 symbols carry an $INODE64 suffix: the unsuffixed
    --  names still exist but describe the older, narrower struct, and binding
-   --  those against this record would silently misread every field.
+   --  those against this record would silently misread every field. arm64 has
+   --  only the 64-bit-inode names; Hostkit.Darwin_Symbols picks per arch.
 
    type Timespec is record
       Seconds     : C_S64 := 0;
@@ -135,17 +137,17 @@ package body Hostkit.Metadata is
    function C_Stat
      (Path   : Interfaces.C.Strings.chars_ptr;
       Buffer : access Stat_Record) return C_Int
-     with Import, Convention => C, External_Name => "stat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Stat;
 
    function C_Lstat
      (Path   : Interfaces.C.Strings.chars_ptr;
       Buffer : access Stat_Record) return C_Int
-     with Import, Convention => C, External_Name => "lstat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Lstat;
 
    function C_Statfs
      (Path   : Interfaces.C.Strings.chars_ptr;
       Buffer : access Statfs_Record) return C_Int
-     with Import, Convention => C, External_Name => "statfs$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Statfs;
 
    function C_Chmod
      (Path : Interfaces.C.Strings.chars_ptr;
@@ -162,12 +164,12 @@ package body Hostkit.Metadata is
 
    function C_Fstat
      (Fd : C_Int; Buffer : access Stat_Record) return C_Int
-     with Import, Convention => C, External_Name => "fstat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstat;
 
    function C_Fstatat
      (Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
       Buffer : access Stat_Record; Flags : C_Int) return C_Int
-     with Import, Convention => C, External_Name => "fstatat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstatat;
 
    function C_Fchmod (Fd : C_Int; Mode : C_U16) return C_Int
      with Import, Convention => C, External_Name => "fchmod";

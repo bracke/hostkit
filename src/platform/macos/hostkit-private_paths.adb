@@ -1,6 +1,7 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Symbols;
 
 package body Hostkit.Private_Paths is
    use type Interfaces.C.int;
@@ -72,7 +73,7 @@ package body Hostkit.Private_Paths is
      with Import, Convention => C, External_Name => "close";
    function C_Fstat
      (Fd : C_Int; Info : access Stat_Record) return C_Int
-     with Import, Convention => C, External_Name => "fstat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstat;
    function C_Geteuid return C_U32
      with Import, Convention => C, External_Name => "geteuid";
    function C_Fchmod

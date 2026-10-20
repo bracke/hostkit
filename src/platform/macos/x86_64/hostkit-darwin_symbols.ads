@@ -1,0 +1,12 @@
+--  Intel macOS: since the 64-bit inode transition the unsuffixed names
+--  describe the older, narrower structs; the $INODE64 entry points fill the
+--  64-bit-inode layout the Ada records bind.
+private package Hostkit.Darwin_Symbols is
+   Stat    : constant String := "stat$INODE64";
+   Lstat   : constant String := "lstat$INODE64";
+   Fstat   : constant String := "fstat$INODE64";
+   Fstatat : constant String := "fstatat$INODE64";
+   Statfs  : constant String := "statfs$INODE64";
+   Readdir : constant String := "readdir$INODE64";
+
+end Hostkit.Darwin_Symbols;

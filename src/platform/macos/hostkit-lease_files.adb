@@ -1,6 +1,7 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Symbols;
 
 package body Hostkit.Lease_Files is
    use type Ada.Streams.Stream_Element_Offset;
@@ -64,7 +65,7 @@ package body Hostkit.Lease_Files is
    function C_Fchmod (Fd : C_Int; Mode : C_U32) return C_Int
      with Import, Convention => C, External_Name => "fchmod";
    function C_Fstat (Fd : C_Int; Info : access Stat_Record) return C_Int
-     with Import, Convention => C, External_Name => "fstat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstat;
    function C_Pread
      (Fd : C_Int; Buffer : System.Address; Count : C_U64;
       Offset : C_S64) return C_S64

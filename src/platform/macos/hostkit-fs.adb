@@ -8,6 +8,7 @@ with Ada.Directories;
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
+with Hostkit.Darwin_Symbols;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -132,7 +133,7 @@ package body Hostkit.Fs is
         (Path : Interfaces.C.Strings.chars_ptr;
          Buf  : access Stat_Record)
          return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "stat$INODE64";
+        with Import => True, Convention => C, External_Name => Hostkit.Darwin_Symbols.Stat;
 
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Info   : aliased Stat_Record;
@@ -197,7 +198,7 @@ package body Hostkit.Fs is
 
       function C_Stat (Path : Interfaces.C.Strings.chars_ptr; Buf : System.Address)
         return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "stat$INODE64";
+        with Import => True, Convention => C, External_Name => Hostkit.Darwin_Symbols.Stat;
 
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Result : Interfaces.C.int;
@@ -615,15 +616,15 @@ package body Hostkit.Fs is
       function C_Fdopendir (Fd : C_Int) return System.Address
         with Import, Convention => C, External_Name => "fdopendir";
       function C_Readdir (Directory : System.Address) return System.Address
-        with Import, Convention => C, External_Name => "readdir$INODE64";
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Readdir;
       function C_Closedir (Directory : System.Address) return C_Int
         with Import, Convention => C, External_Name => "closedir";
       function C_Fstat (Fd : C_Int; Info : access Stat_Record) return C_Int
-        with Import, Convention => C, External_Name => "fstat$INODE64";
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstat;
       function C_Fstatat
         (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr;
          Info : access Stat_Record; Flags : C_Int) return C_Int
-        with Import, Convention => C, External_Name => "fstatat$INODE64";
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstatat;
       function C_Unlinkat
         (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
         with Import, Convention => C, External_Name => "unlinkat";

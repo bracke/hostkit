@@ -1,6 +1,7 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Symbols;
 
 package body Hostkit.Metadata_Copy is
    use Ada.Strings.Unbounded;
@@ -54,7 +55,7 @@ package body Hostkit.Metadata_Copy is
    function C_Lstat
      (Path : Interfaces.C.Strings.chars_ptr; Info : access Stat_Record)
       return C_Int
-     with Import, Convention => C, External_Name => "lstat$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Lstat;
    function C_Listxattr
      (Path : Interfaces.C.Strings.chars_ptr; Names : System.Address;
       Size : Interfaces.C.size_t; Options : C_Int) return C_Long

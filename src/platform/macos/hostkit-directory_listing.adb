@@ -1,6 +1,7 @@
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Symbols;
 
 --  readdir, its d_type the kind: DT_DIR, DT_REG, DT_LNK, DT_UNKNOWN.
 package body Hostkit.Directory_Listing is
@@ -17,7 +18,7 @@ package body Hostkit.Directory_Listing is
    function C_Opendir (Name : Interfaces.C.Strings.chars_ptr) return System.Address
      with Import, Convention => C, External_Name => "opendir";
    function C_Readdir (Directory : System.Address) return System.Address
-     with Import, Convention => C, External_Name => "readdir$INODE64";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Readdir;
    function C_Closedir (Directory : System.Address) return Interfaces.C.int
      with Import, Convention => C, External_Name => "closedir";
 
