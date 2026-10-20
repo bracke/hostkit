@@ -1,6 +1,8 @@
 with Ada.Environment_Variables;
 with Ada.Strings.Unbounded;
 
+with Hostkit.Host;
+
 package body Hostkit.Shell is
    use Ada.Strings.Unbounded;
 
@@ -16,17 +18,21 @@ package body Hostkit.Shell is
          return "";
    end Value;
 
+   --  Which shell family applies is decided by the host the build targets, not
+   --  by the environment: COMSPEC is set on Linux machines that run Wine, and
+   --  choosing cmd (with its /C and "" quoting) there broke every shell action.
    function Is_Command_Shell return Boolean is
+      use type Hostkit.Host.Kind;
    begin
-      return Value ("COMSPEC") /= "";
+      return Hostkit.Host.Current = Hostkit.Host.Windows;
    end Is_Command_Shell;
 
    function Executable return String is
       Comspec : constant String := Value ("COMSPEC");
       Shell   : constant String := Value ("SHELL");
    begin
-      if Comspec /= "" then
-         return Comspec;
+      if Is_Command_Shell then
+         return (if Comspec /= "" then Comspec else "cmd.exe");
       elsif Shell /= "" then
          return Shell;
       else
