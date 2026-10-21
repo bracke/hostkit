@@ -37,6 +37,16 @@ package body Hostkit.Local_Channel is
    function C_Close (FD : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "close";
 
+   --  macOS has no MSG_NOSIGNAL. A peer that has gone away must fail the send,
+   --  not raise SIGPIPE, whose default action ends the whole process; the
+   --  socket option says so once for every later send.
+   SOL_SOCKET   : constant C_Int := 16#FFFF#;
+   SO_NOSIGPIPE : constant C_Int := 16#1022#;
+
+   function C_Setsockopt
+     (FD, Level, Name : C_Int; Value : System.Address; Len : C_Int) return C_Int
+     with Import => True, Convention => C, External_Name => "setsockopt";
+
    function Connect (Path : String; Item : out Channel) return Boolean is
       FD   : C_Int;
       Addr : aliased Sockaddr_Un;
@@ -54,6 +64,19 @@ package body Hostkit.Local_Channel is
       if FD < 0 then
          return False;
       end if;
+
+      declare
+         One : aliased C_Int := 1;
+      begin
+         if C_Setsockopt (FD, SOL_SOCKET, SO_NOSIGPIPE, One'Address, C_Int'Size / 8) /= 0 then
+            declare
+               Ignored : constant C_Int := C_Close (FD);
+            begin
+               pragma Unreferenced (Ignored);
+               return False;
+            end;
+         end if;
+      end;
 
       Addr.Family := Interfaces.C.short (AF_UNIX);
       for I in Path'Range loop

@@ -26,6 +26,10 @@ package body Hostkit.Local_Channel is
    function C_Connect (FD : C_Int; Addr : System.Address; Len : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "connect";
 
+   --  A peer that has gone away must fail the send, not raise SIGPIPE, whose
+   --  default action ends the whole process.
+   MSG_NOSIGNAL : constant C_Int := 16#4000#;
+
    function C_Send (FD : C_Int; Buf : System.Address; Len : Interfaces.C.size_t; Flags : C_Int)
      return Interfaces.C.long
      with Import => True, Convention => C, External_Name => "send";
@@ -176,7 +180,7 @@ package body Hostkit.Local_Channel is
 
       while From <= Data'Last loop
          Sent := C_Send (FD, Data (From)'Address,
-                         Interfaces.C.size_t (Data'Last - From + 1), 0);
+                         Interfaces.C.size_t (Data'Last - From + 1), MSG_NOSIGNAL);
          if Sent <= 0 then
             return False;
          end if;
