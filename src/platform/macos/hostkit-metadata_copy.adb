@@ -110,7 +110,9 @@ package body Hostkit.Metadata_Copy is
       Info : aliased Stat_Record;
    begin
       Times := [others => 0];
-      if not Stat (Path, Info'Access) then return False; end if;
+      if not Stat (Path, Info'Access) then
+         return False;
+      end if;
       Times := [Interfaces.Integer_64 (Info.Access_Time.Seconds),
                 Interfaces.Integer_64 (Info.Access_Time.Nanoseconds),
                 Interfaces.Integer_64 (Info.Modified_Time.Seconds),
@@ -140,7 +142,9 @@ package body Hostkit.Metadata_Copy is
       Names_Size, Actual, Value_Size : C_Long;
       Total : Natural := 0;
    begin
-      if not Stat (Path, Info'Access) then return No_Snapshot; end if;
+      if not Stat (Path, Info'Access) then
+         return No_Snapshot;
+      end if;
       Result.Available := True;
       Result.Times := [Interfaces.Integer_64 (Info.Access_Time.Seconds),
                        Interfaces.Integer_64 (Info.Access_Time.Nanoseconds),
@@ -154,9 +158,14 @@ package body Hostkit.Metadata_Copy is
       C_Path := Interfaces.C.Strings.New_String (Path);
       Names_Size := C_Listxattr (C_Path, System.Null_Address, 0, Xattr_Nofollow);
       if Names_Size < 0 then
-         if Errno = E_Not_Supported then Free (C_Path); return Result; end if;
+         if Errno = E_Not_Supported then
+            Free (C_Path);
+            return Result;
+         end if;
          Free (C_Path); return No_Snapshot;
-      elsif Names_Size = 0 then Free (C_Path); return Result;
+      elsif Names_Size = 0 then
+         Free (C_Path);
+         return Result;
       elsif Names_Size > C_Long (Maximum_Attribute_Bytes) then
          Free (C_Path); return No_Snapshot;
       end if;
@@ -179,7 +188,10 @@ package body Hostkit.Metadata_Copy is
                   while Last < Natural (Actual) and then Names (Last) /= 0 loop
                      Last := Last + 1;
                   end loop;
-                  if Last = Natural (Actual) then Free (C_Path); return No_Snapshot; end if;
+                  if Last = Natural (Actual) then
+                     Free (C_Path);
+                     return No_Snapshot;
+                  end if;
                   declare
                      Name : String (1 .. Last - Offset);
                   begin

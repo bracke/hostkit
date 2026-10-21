@@ -285,7 +285,7 @@ package body Hostkit.Private_Paths is
             File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point,
             System.Null_Address);
          Info : aliased By_Handle_File_Information;
-         Ok : Boolean := Handle /= Invalid_Handle
+         Ok : constant Boolean := Handle /= Invalid_Handle
            and then Get_File_Information (Handle, Info'Access) /= 0
            and then (Info.Attributes and File_Attribute_Directory) /= 0
            and then (Info.Attributes and File_Attribute_Reparse_Point) = 0

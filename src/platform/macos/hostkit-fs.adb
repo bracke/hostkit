@@ -617,8 +617,10 @@ package body Hostkit.Fs is
          Kind : Interfaces.C.unsigned_char;
          Name : Interfaces.C.char_array (0 .. 1_023);
       end record with Convention => C;
+      --  'Size omits the tail padding C's sizeof includes; 'Object_Size is the
+      --  storage each array element takes, which is what sizeof means.
       pragma Compile_Time_Error
-        (Dirent'Size /= 1_048 * 8, "Darwin dirent must be 1048 bytes");
+        (Dirent'Object_Size /= 1_048 * 8, "Darwin dirent must be 1048 bytes");
 
       type Identity is record
          Device : C_S32 := 0;

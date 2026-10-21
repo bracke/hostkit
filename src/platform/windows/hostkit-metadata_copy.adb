@@ -94,7 +94,7 @@ package body Hostkit.Metadata_Copy is
    is
       Handle : constant System.Address := Open_Entry (Path, File_Read_Attributes);
       Accessed, Modified : aliased Filetime;
-      Ok : Boolean := Handle /= Invalid_Handle
+      Ok : constant Boolean := Handle /= Invalid_Handle
         and then Get_File_Time
           (Handle, System.Null_Address, Accessed'Access, Modified'Access) /= 0;
       Ignored : C_Int;
@@ -119,7 +119,7 @@ package body Hostkit.Metadata_Copy is
       Handle : constant System.Address := Open_Entry (Path, File_Write_Attributes);
       Accessed : aliased Filetime := File_Time (Times (1));
       Modified : aliased Filetime := File_Time (Times (3));
-      Ok : Boolean := Handle /= Invalid_Handle
+      Ok : constant Boolean := Handle /= Invalid_Handle
         and then Set_File_Time
           (Handle, System.Null_Address, Accessed'Access, Modified'Access) /= 0;
       Ignored : C_Int;

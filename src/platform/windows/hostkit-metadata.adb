@@ -1423,6 +1423,8 @@ package body Hostkit.Metadata is
             Everyone : aliased Sid_Buffer := [others => Interfaces.C.nul];
             Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
             Entries : aliased Explicit_Access_Array;
+            type Bit_List is array (1 .. 3) of Positive;
+            Execute_Bits : constant Bit_List := [64, 8, 1];
             Mode : Natural;
             Status : C_DWord;
          begin
@@ -1434,8 +1436,12 @@ package body Hostkit.Metadata is
                  + Rights_For (Primary_Group) * 8
                  + Rights_For (Everyone (1)'Address);
                if not Runs_On_Windows (Path) then
-                  Mode := Mode - ((Mode / 64) mod 2) * 64
-                    - ((Mode / 8) mod 2) * 8 - (Mode mod 2);
+                  --  Clear the owner, group and other execute bits.
+                  for Execute_Bit of Execute_Bits loop
+                     if (Mode / Execute_Bit) rem 2 = 1 then
+                        Mode := Mode - Execute_Bit;
+                     end if;
+                  end loop;
                end if;
                Answer.Previous := Identity_Field (Mode);
 

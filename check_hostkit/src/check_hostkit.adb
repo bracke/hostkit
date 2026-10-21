@@ -292,7 +292,21 @@ begin
    --  File metadata: what the filesystem says about a file.
    Require_Binding ("src/platform/linux/hostkit-metadata.adb", "statx");
    Require_Binding ("src/platform/linux/hostkit-metadata.adb", "statvfs");
-   Require_Binding ("src/platform/macos/hostkit-metadata.adb", "statfs$INODE64");
+   --  The stat family's link names differ by architecture (Intel needs the
+   --  $INODE64 entry points, Apple silicon has only the plain ones), so the
+   --  import names a per-architecture Darwin_Symbols constant.
+   Require_Text
+     ("src/platform/macos/hostkit-metadata.adb",
+      "External_Name => Hostkit.Darwin_Symbols.Statfs",
+      "src/platform/macos/hostkit-metadata.adb must bind Darwin_Symbols.Statfs");
+   Require_Text
+     ("src/platform/macos/x86_64/hostkit-darwin_symbols.ads",
+      "Statfs  : constant String := ""statfs$INODE64"";",
+      "Intel macOS must bind statfs$INODE64");
+   Require_Text
+     ("src/platform/macos/arm64/hostkit-darwin_symbols.ads",
+      "Statfs  : constant String := ""statfs"";",
+      "Apple silicon macOS must bind statfs");
    Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetDiskFreeSpaceExA");
    Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExA");
 
