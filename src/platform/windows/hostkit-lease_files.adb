@@ -56,6 +56,12 @@ package body Hostkit.Lease_Files is
       Volume : Interfaces.Unsigned_64 := 0;
       Identifier : Identifier_Array := [others => 0];
    end record with Convention => C;
+   --  The advisory lock is a byte-range lock on one byte no lease ever
+   --  reaches. Windows enforces byte-range locks against I/O, so a shared
+   --  lock inside the data would make the holder's own writes fail there.
+   Lock_Offset_Low : constant C_DWord := 16#FFFF_FFFE#;
+   Lock_Offset_High : constant C_DWord := 16#7FFF_FFFF#;
+
    type Overlapped is record
       Internal, Internal_High : System.Address := System.Null_Address;
       Offset, Offset_High : C_DWord := 0;
@@ -186,7 +192,8 @@ package body Hostkit.Lease_Files is
       Region : aliased Overlapped;
       Flags : C_DWord := Lock_Immediate;
    begin
-      Region.Offset := 16;
+      Region.Offset := Lock_Offset_Low;
+      Region.Offset_High := Lock_Offset_High;
       if Kind = Exclusive then
          Flags := Flags or Lock_Exclusive;
       end if;
@@ -264,7 +271,8 @@ package body Hostkit.Lease_Files is
       Ignored : C_Int;
    begin
       if Item.Held then
-         Region.Offset := 16;
+         Region.Offset := Lock_Offset_Low;
+         Region.Offset_High := Lock_Offset_High;
          Ignored := Unlock_File_Ex (To_Handle (Item), 0, 1, 0, Region'Access);
          Ignored := Close_Handle (To_Handle (Item));
       end if;

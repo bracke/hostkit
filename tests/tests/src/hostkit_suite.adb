@@ -1610,9 +1610,11 @@ package body Hostkit_Suite is
       Path : constant String :=
         Ada.Directories.Compose (Scratch, "hk-secure-lease");
       First, Second : Hostkit.Lease_Files.Lease;
-      Written : constant Ada.Streams.Stream_Element_Array (1 .. 16) :=
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-      Read_Back : Ada.Streams.Stream_Element_Array (1 .. 16);
+      --  Longer than any lock bookkeeping a host might keep in the file, so
+      --  the holder's own writes and reads are proven not to collide with it.
+      Written : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
+        [for Index in 1 .. 64 => Ada.Streams.Stream_Element (Index)];
+      Read_Back : Ada.Streams.Stream_Element_Array (1 .. 64);
       Id : Hostkit.Lease_Files.Lease_Identity;
       Outcome : Hostkit.Lease_Files.Open_Outcome;
    begin
@@ -1627,7 +1629,7 @@ package body Hostkit_Suite is
               "a fresh secure lease is created and locked");
       Assert (Hostkit.Lease_Files.Write_At (First, Written),
               "lease bytes are written durably");
-      Assert (Hostkit.Lease_Files.Size (First) = 16,
+      Assert (Hostkit.Lease_Files.Size (First) = 64,
               "the held lease reports its size");
       Assert (Hostkit.Lease_Files.Read_At (First, Read_Back),
               "lease bytes are read through the held file");
