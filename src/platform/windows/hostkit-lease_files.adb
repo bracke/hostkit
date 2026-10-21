@@ -228,6 +228,7 @@ package body Hostkit.Lease_Files is
       end if;
       if Get_File_Information (Handle, Info'Access) = 0
         or else (Info.Attributes and Reparse_Point) /= 0
+        or else Info.Link_Count /= 1
       then
          Ignored := Close_Handle (Handle);
          return Refused;
@@ -376,6 +377,7 @@ package body Hostkit.Lease_Files is
       end if;
       if Get_File_Information (Handle, Info'Access) = 0
         or else (Info.Attributes and Reparse_Point) /= 0
+        or else Info.Link_Count /= 1
       then
          Ignored := Close_Handle (Handle);
          return False;

@@ -3,8 +3,8 @@ with Interfaces;
 
 --  Secure, process-held lease files for crash-recovery protocols.
 --
---  An opened lease is a regular, singly-linked file owned by this user on
---  POSIX, or a non-reparse-point file on Windows. The pathname is never
+--  An opened lease is a regular, singly-linked file, owned by this user on
+--  POSIX and not a reparse point on Windows. The pathname is never
 --  followed through a symbolic link. The advisory lock lives on the open
 --  file description/handle and therefore disappears when the process exits.
 package Hostkit.Lease_Files is
