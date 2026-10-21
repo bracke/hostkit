@@ -25,6 +25,7 @@ with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Lease_Files;
 with Hostkit.Metadata;
+with Hostkit.Resources;
 with Hostkit.Process;
 with Hostkit.Private_Paths;
 with Hostkit.Shell;
@@ -1107,6 +1108,23 @@ package body Hostkit_Suite is
         (Hostkit.Metadata.Same_File (Own, Ada.Command_Line.Command_Name)
            or else Ada.Command_Line.Command_Name = "",
          "and it is the program that is running");
+
+      --  Data beside the program is found from there, not from the current
+      --  directory: the program's own file at level zero, nothing for a name
+      --  that is nowhere above it.
+      declare
+         Own_Name : constant String := Ada.Directories.Simple_Name (Own);
+      begin
+         Assert
+           (Hostkit.Metadata.Same_File (Hostkit.Resources.Beside_Executable (Own_Name, Levels => 0), Own),
+            "a file beside the program is found beside it");
+         Assert
+           (Hostkit.Resources.Beside_Executable ("no-such-hostkit-resource.dat") = "",
+            "a file that is not there is not found");
+         Assert
+           (Hostkit.Resources.Beside_Executable ("") = "",
+            "an empty name finds nothing");
+      end;
    end Test_Where_This_Program_Is;
 
    procedure Test_Where_This_User_Lives (T : in out AUnit.Test_Cases.Test_Case'Class) is
