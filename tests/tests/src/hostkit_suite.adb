@@ -947,6 +947,9 @@ package body Hostkit_Suite is
          Arranged := Ada.Text_IO.Get_Line (File) = "arranged";
          Ada.Text_IO.Close (File);
          Ada.Directories.Delete_File (Record_At);
+         Assert
+           (Arranged or else Hostkit.Host.Current = Hostkit.Host.Unsupported,
+            "every supported host can end a child with its parent");
          if Arranged then
             --  Its parent has gone: within a few seconds, so has it.
             for Try in 1 .. 100 loop
