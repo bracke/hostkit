@@ -1746,8 +1746,10 @@ package body Hostkit_Suite is
            Hostkit.Metadata.Entry_Revision_Of (Original);
       begin
          Assert (Identity.Available, "a newly-created entry has a stable host identity");
-         Assert (Revision.Available and then Revision.Size = 9,
-                 "a newly-created entry has a complete no-follow revision");
+         Assert (Revision.Available, "a newly-created entry has a no-follow revision");
+         --  Put_Line ends the line with CR LF on Windows, so ask the file.
+         Assert (Revision.Size = Hostkit.Metadata.Identity_Field (Ada.Directories.Size (Original)),
+                 "a newly-created entry's revision has its size");
          Assert (not Hostkit.Metadata.Entry_Identity_Of (Missing).Available,
                  "a missing entry has no invented identity");
          Assert (not Hostkit.Metadata.Entry_Revision_Of (Missing).Available,

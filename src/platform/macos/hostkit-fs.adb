@@ -641,7 +641,7 @@ package body Hostkit.Fs is
       function C_Dup (Fd : C_Int) return C_Int
         with Import, Convention => C, External_Name => "dup";
       function C_Fdopendir (Fd : C_Int) return System.Address
-        with Import, Convention => C, External_Name => "fdopendir";
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fdopendir;
       function C_Readdir (Directory : System.Address) return System.Address
         with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Readdir;
       function C_Closedir (Directory : System.Address) return C_Int

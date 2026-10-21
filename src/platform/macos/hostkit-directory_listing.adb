@@ -16,7 +16,7 @@ package body Hostkit.Directory_Listing is
    end record with Convention => C;
 
    function C_Opendir (Name : Interfaces.C.Strings.chars_ptr) return System.Address
-     with Import, Convention => C, External_Name => "opendir";
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Opendir;
    function C_Readdir (Directory : System.Address) return System.Address
      with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Readdir;
    function C_Closedir (Directory : System.Address) return Interfaces.C.int

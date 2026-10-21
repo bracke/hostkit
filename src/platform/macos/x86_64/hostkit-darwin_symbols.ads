@@ -8,5 +8,9 @@ private package Hostkit.Darwin_Symbols is
    Fstatat : constant String := "fstatat$INODE64";
    Statfs  : constant String := "statfs$INODE64";
    Readdir : constant String := "readdir$INODE64";
+   --  <dirent.h> aliases the directory-stream openers along with readdir; a
+   --  stream must come from the matching opener.
+   Opendir   : constant String := "opendir$INODE64";
+   Fdopendir : constant String := "fdopendir$INODE64";
 
 end Hostkit.Darwin_Symbols;
