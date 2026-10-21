@@ -91,7 +91,9 @@ package body Hostkit.Parent_Watch is
       if Snapshot = System.Null_Address or else Snapshot = Invalid_Handle_Value then
          return 0;
       end if;
-      Item.Size := Process_Entry'Size / 8;
+      --  dwSize must be the structure's full size, tail padding included
+      --  (568 on x64); its unpadded size makes Process32FirstW refuse it.
+      Item.Size := Process_Entry'Object_Size / 8;
       More := Process_First (Snapshot, Item'Access);
       while More /= 0 loop
          if Item.Process_Id = Own then
