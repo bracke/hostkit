@@ -46,10 +46,10 @@ project Hostkit is
             --  Windows library.
             for Linker_Options use ("-lshell32", "-lntdll");
          when "macos" =>
-            --  CoreServices for the trash (FSMoveObjectToTrashSync), CoreFoundation
-            --  for the host locale (CFLocaleCopyCurrent). Inherited for the same
-            --  reason as shell32 above.
-            for Linker_Options use ("-framework", "CoreServices", "-framework", "CoreFoundation");
+            --  Foundation and the Objective-C runtime for the trash (NSFileManager,
+            --  through objc_msgSend), CoreFoundation for the host locale
+            --  (CFLocaleCopyCurrent). Inherited for the same reason as shell32 above.
+            for Linker_Options use ("-framework", "Foundation", "-framework", "CoreFoundation", "-lobjc");
          when others =>
             null;
       end case;

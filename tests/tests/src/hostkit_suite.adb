@@ -1331,6 +1331,22 @@ package body Hostkit_Suite is
               (Facility.Uses_Recycle_Bin = (Hostkit.Host.Current = Hostkit.Host.Windows),
                "only Windows calls its trash the Recycle Bin");
 
+            --  The call itself, on macOS: the runner has a Finder trash, and
+            --  NSFileManager reached through objc_msgSend goes wrong at run
+            --  time, not at the compile, if a prototype is off.
+            if Hostkit.Host.Current = Hostkit.Host.MacOS then
+               declare
+                  Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-taken");
+               begin
+                  Write_File (Path, "to the trash");
+                  Assert (Hostkit.Trash.Move_To_Trash (Path), "macOS takes a file into its trash");
+                  Assert (not Ada.Directories.Exists (Path), "and it is gone from where it was");
+                  Assert
+                    (not Hostkit.Trash.Move_To_Trash (Path),
+                     "a path that is no longer there is refused, not reported as trashed");
+               end;
+            end if;
+
          when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
             Assert (not Facility.Available, "this host has no trash of its own to call");
             Assert (Facility.Api_Name = Null_Unbounded_String, "and names no call");

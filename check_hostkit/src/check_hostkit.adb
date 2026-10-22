@@ -321,7 +321,11 @@ begin
    --  The host's own trash. Linux deliberately binds nothing: the freedesktop
    --  trash is a filesystem layout for the caller to write, not a call to make.
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHFileOperationW");
-   Require_Binding ("src/platform/macos/hostkit-trash.adb", "FSMoveObjectToTrashSync");
+   Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
+   Require_Text
+     ("src/platform/macos/hostkit-trash.adb",
+      """trashItemAtURL:resultingItemURL:error:""",
+      "src/platform/macos/hostkit-trash.adb must send trashItemAtURL:resultingItemURL:error:");
 
    --  The host's locale. POSIX has none, and answers "" on purpose.
    Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserDefaultLocaleName");

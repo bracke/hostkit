@@ -5,40 +5,69 @@ with System;
 
 package body Hostkit.Trash is
    use Ada.Strings.Unbounded;
-   use type Interfaces.C.int;
+   use type Interfaces.C.unsigned_char;
    use type Interfaces.C.Strings.chars_ptr;
+   use type System.Address;
 
-   --  This is Carbon's File Manager: an FSRef is the old opaque file reference,
-   --  and FSMoveObjectToTrashSync is the call that moves one to the Finder's
-   --  trash. Both have been deprecated since 10.8 in favour of
-   --  -[NSFileManager trashItemAtURL:resultingItemURL:error:], which is the
-   --  documented way and which this should become.
+   --  -[NSFileManager trashItemAtURL:resultingItemURL:error:], the documented
+   --  way to put something in the Finder's trash. It replaced Carbon's
+   --  FSMoveObjectToTrashSync, deprecated since 10.8, which this used before.
    --
-   --  It is not that yet because reaching NSFileManager from Ada means driving
-   --  the Objective-C runtime by hand -- objc_getClass, sel_registerName and
-   --  objc_msgSend with the right signature per call -- and none of it can be
-   --  written blind: a wrong selector or a mismatched msgSend variant does not
-   --  fail to compile, it corrupts the stack at run time on a machine nobody
-   --  here has. So the working deprecated call was carried over rather than
-   --  replaced with an unverified rewrite. It links against CoreServices; if a
-   --  future macOS drops the symbol, the macOS CI runner fails to link, which is
-   --  the signal to do the Objective-C work properly.
-   type FS_Ref is array (1 .. 80) of Interfaces.C.unsigned_char
-     with Convention => C;
+   --  Reached through the Objective-C runtime rather than an Objective-C
+   --  source, so a crate using hostkit needs no Objective-C compiler. Each
+   --  message has an import of objc_msgSend with exactly its own arguments
+   --  and result: on Apple silicon objc_msgSend must be called through the
+   --  prototype of the method it lands in, never as a variadic function, and
+   --  a wrong one does not fail to compile -- it reads the wrong registers.
+   --  The macOS CI job trashes a real file, which is what keeps these honest.
 
-   function FSPathMakeRef
-     (Path         : Interfaces.C.Strings.chars_ptr;
-      Reference    : access FS_Ref;
-      Is_Directory : System.Address)
-      return Interfaces.C.int
-     with Import, Convention => C, External_Name => "FSPathMakeRef";
+   function Objc_Get_Class (Name : Interfaces.C.char_array) return System.Address
+     with Import, Convention => C, External_Name => "objc_getClass";
 
-   function FSMoveObjectToTrashSync
-     (Source_Reference : access FS_Ref;
-      Target_Reference : System.Address;
-      Options          : Interfaces.C.unsigned)
-      return Interfaces.C.int
-     with Import, Convention => C, External_Name => "FSMoveObjectToTrashSync";
+   function Sel_Register_Name (Name : Interfaces.C.char_array) return System.Address
+     with Import, Convention => C, External_Name => "sel_registerName";
+
+   --  [NSFileManager defaultManager]
+   function Send
+     (Receiver : System.Address; Selector : System.Address) return System.Address
+     with Import, Convention => C, External_Name => "objc_msgSend";
+
+   --  [NSString stringWithUTF8String:]
+   function Send_C_String
+     (Receiver : System.Address;
+      Selector : System.Address;
+      Text     : Interfaces.C.Strings.chars_ptr)
+      return System.Address
+     with Import, Convention => C, External_Name => "objc_msgSend";
+
+   --  [NSURL fileURLWithPath:]
+   function Send_Object
+     (Receiver : System.Address;
+      Selector : System.Address;
+      Object   : System.Address)
+      return System.Address
+     with Import, Convention => C, External_Name => "objc_msgSend";
+
+   --  [manager trashItemAtURL:resultingItemURL:error:], answering a BOOL --
+   --  one byte on both architectures.
+   function Send_Trash
+     (Receiver  : System.Address;
+      Selector  : System.Address;
+      Item      : System.Address;
+      Resulting : System.Address;
+      Error     : System.Address)
+      return Interfaces.C.unsigned_char
+     with Import, Convention => C, External_Name => "objc_msgSend";
+
+   --  The NSString and NSURL made here are autoreleased; without a pool of
+   --  our own, on a thread that has none, they would never be freed.
+   function Autorelease_Pool_Push return System.Address
+     with Import, Convention => C, External_Name => "objc_autoreleasePoolPush";
+
+   procedure Autorelease_Pool_Pop (Pool : System.Address)
+     with Import, Convention => C, External_Name => "objc_autoreleasePoolPop";
+
+   Api : constant String := "NSFileManager.trashItemAtURL";
 
    procedure Safe_Free (Pointer : in out Interfaces.C.Strings.chars_ptr) is
    begin
@@ -56,27 +85,56 @@ package body Hostkit.Trash is
    begin
       return
         (Available             => True,
-         Api_Name              => To_Unbounded_String ("FSMoveObjectToTrashSync"),
+         Api_Name              => To_Unbounded_String (Api),
          Uses_Recycle_Bin      => False,
          Preserves_Metadata    => True,
          Requires_User_Consent => False);
    end Current;
 
    function Move_To_Trash (Path : String) return Boolean is
-      C_Path    : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      Reference : aliased FS_Ref;
-      Status    : Interfaces.C.int;
+      use Interfaces.C;
+      C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Pool    : constant System.Address := Autorelease_Pool_Push;
+      Trashed : Boolean := False;
    begin
-      Status := FSPathMakeRef (C_Path, Reference'Access, System.Null_Address);
+      declare
+         Manager_Class : constant System.Address := Objc_Get_Class (To_C ("NSFileManager"));
+         String_Class  : constant System.Address := Objc_Get_Class (To_C ("NSString"));
+         URL_Class     : constant System.Address := Objc_Get_Class (To_C ("NSURL"));
+      begin
+         if Manager_Class /= System.Null_Address
+           and then String_Class /= System.Null_Address
+           and then URL_Class /= System.Null_Address
+         then
+            declare
+               Text : constant System.Address :=
+                 Send_C_String (String_Class, Sel_Register_Name (To_C ("stringWithUTF8String:")), C_Path);
+               URL : constant System.Address :=
+                 (if Text = System.Null_Address then System.Null_Address
+                  else Send_Object (URL_Class, Sel_Register_Name (To_C ("fileURLWithPath:")), Text));
+               Manager : constant System.Address :=
+                 Send (Manager_Class, Sel_Register_Name (To_C ("defaultManager")));
+            begin
+               --  A path that is not UTF-8 makes no string, and so no URL.
+               if URL /= System.Null_Address and then Manager /= System.Null_Address then
+                  Trashed :=
+                    Send_Trash
+                      (Manager,
+                       Sel_Register_Name (To_C ("trashItemAtURL:resultingItemURL:error:")),
+                       Item      => URL,
+                       Resulting => System.Null_Address,
+                       Error     => System.Null_Address) /= 0;
+               end if;
+            end;
+         end if;
+      end;
 
-      if Status = 0 then
-         Status := FSMoveObjectToTrashSync (Reference'Access, System.Null_Address, 0);
-      end if;
-
+      Autorelease_Pool_Pop (Pool);
       Interfaces.C.Strings.Free (C_Path);
-      return Status = 0;
+      return Trashed;
    exception
       when others =>
+         Autorelease_Pool_Pop (Pool);
          Safe_Free (C_Path);
          return False;
    end Move_To_Trash;
