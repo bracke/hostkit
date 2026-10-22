@@ -31,11 +31,11 @@ package body Hostkit.Pty is
      (Path  : Interfaces.C.Strings.chars_ptr;
       Flags : C_Int;
       Mode  : Interfaces.C.unsigned) return C_Int
-     with Import => True, Convention => C, External_Name => "open";
+     with Import => True, Convention => C_Variadic_2, External_Name => "open";
    function C_Close (Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "close";
    function C_Fcntl (Fd : C_Int; Command : C_Int; Argument : C_Int) return C_Int
-     with Import => True, Convention => C, External_Name => "fcntl";
+     with Import => True, Convention => C_Variadic_2, External_Name => "fcntl";
 
    F_Setfd    : constant C_Int := 2;
    FD_Cloexec : constant C_Int := 1;

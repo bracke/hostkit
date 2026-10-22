@@ -55,7 +55,7 @@ package body Hostkit.Lease_Files is
    function C_Open
      (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int;
       Mode : C_U32) return C_Int
-     with Import, Convention => C, External_Name => "open";
+     with Import, Convention => C_Variadic_2, External_Name => "open";
    function C_Close (Fd : C_Int) return C_Int
      with Import, Convention => C, External_Name => "close";
    function C_Flock (Fd, Operation : C_Int) return C_Int

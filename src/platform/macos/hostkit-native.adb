@@ -99,7 +99,7 @@ package body Hostkit.Native is
          Flags : C_Int;
          Mode  : Interfaces.C.unsigned)
          return C_Int
-        with Import => True, Convention => C, External_Name => "open";
+        with Import => True, Convention => C_Variadic_2, External_Name => "open";
       function Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
         with Import => True, Convention => C, External_Name => "dup2";
       function C_Close (Fd : C_Int) return C_Int

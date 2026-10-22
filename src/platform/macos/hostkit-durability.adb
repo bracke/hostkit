@@ -14,7 +14,7 @@ package body Hostkit.Durability is
    F_Fullfsync : constant C_Int := 51;
 
    function open (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
-     with Import, Convention => C_Variadic_1, External_Name => "open";
+     with Import, Convention => C, External_Name => "open";
 
    function close (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "close";
@@ -23,7 +23,7 @@ package body Hostkit.Durability is
      with Import, Convention => C, External_Name => "fsync";
 
    function fcntl (FD : C_Int; Command : C_Int; Argument : C_Int) return C_Int
-     with Import, Convention => C, External_Name => "fcntl";
+     with Import, Convention => C_Variadic_2, External_Name => "fcntl";
 
    --  The file's data on the device: F_FULLFSYNC, and fsync where the file
    --  system does not take it.

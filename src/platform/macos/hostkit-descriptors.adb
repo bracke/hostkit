@@ -63,13 +63,18 @@ package body Hostkit.Descriptors is
      with Import => True, Convention => C, External_Name => "close";
    function C_Dup (Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "dup";
+   --  fcntl and open take their last argument as C's "...". Apple silicon
+   --  passes variadic arguments on the stack, not in registers, so a plain C
+   --  import hands them garbage: the mode a file was created with, the flags
+   --  set on a descriptor. C_Variadic_2 says the first two are the fixed ones.
+   --  (Intel passes both kinds alike, which is why this did not show there.)
    function C_Fcntl (Fd : C_Int; Command : C_Int; Argument : C_Int) return C_Int
-     with Import => True, Convention => C, External_Name => "fcntl";
+     with Import => True, Convention => C_Variadic_2, External_Name => "fcntl";
    function C_Open
      (Path  : Interfaces.C.Strings.chars_ptr;
       Flags : C_Int;
       Mode  : Interfaces.C.unsigned) return C_Int
-     with Import => True, Convention => C, External_Name => "open";
+     with Import => True, Convention => C_Variadic_2, External_Name => "open";
    function C_Read (Fd : C_Int; Buffer : System.Address; Count : C_Long) return C_Long
      with Import => True, Convention => C, External_Name => "read";
    function C_Write (Fd : C_Int; Buffer : System.Address; Count : C_Long) return C_Long

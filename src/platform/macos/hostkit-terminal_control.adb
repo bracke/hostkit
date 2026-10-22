@@ -68,7 +68,7 @@ package body Hostkit.Terminal_Control is
    function Ioctl
      (Fd : C_Int; Request : Interfaces.C.unsigned_long; Argument : System.Address)
       return C_Int
-     with Import => True, Convention => C, External_Name => "ioctl";
+     with Import => True, Convention => C_Variadic_2, External_Name => "ioctl";
 
    function To_Fd (Item : Hostkit.Descriptors.Descriptor) return C_Int
    is (C_Int (Hostkit.Descriptors.Native_Value (Item)));

@@ -98,7 +98,7 @@ package body Hostkit.Spawn is
    function Ioctl
      (Fd : C_Int; Request : Interfaces.C.unsigned_long; Argument : System.Address)
       return C_Int
-     with Import => True, Convention => C, External_Name => "ioctl";
+     with Import => True, Convention => C_Variadic_2, External_Name => "ioctl";
 
    --  The environment the next exec passes on, and -- because execvp reads
    --  PATH from it -- the PATH the lookup uses. That is the shell semantics a

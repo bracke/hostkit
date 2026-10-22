@@ -37,7 +37,7 @@ package body Hostkit.Locks is
      (Path  : Interfaces.C.Strings.chars_ptr;
       Flags : C_Int;
       Mode  : Interfaces.C.unsigned) return C_Int
-     with Import => True, Convention => C, External_Name => "open";
+     with Import => True, Convention => C_Variadic_2, External_Name => "open";
    function C_Close (Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "close";
    function C_Flock (Fd : C_Int; Operation : C_Int) return C_Int
