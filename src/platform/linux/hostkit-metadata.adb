@@ -1,3 +1,4 @@
+with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Interfaces.C;
@@ -209,7 +210,9 @@ package body Hostkit.Metadata is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Info   : aliased Statx_Record;
       Status : C_Int;
-      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+      --  The Unix epoch, in UTC: Ada.Calendar.Time_Of would read it as local
+      --  midnight and shift every time by the zone's 1970 offset.
+      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Formatting.Time_Of (1970, 1, 1, 0.0, Time_Zone => 0);
    begin
       Available := False;
       Status := Statx (At_FDCWD, C_Path, At_Symlink_Nofollow, Statx_Btime, Info'Access);
@@ -236,7 +239,9 @@ package body Hostkit.Metadata is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Info   : aliased Statx_Record;
       Status : C_Int;
-      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Time_Of (1970, 1, 1);
+      --  The Unix epoch, in UTC: Ada.Calendar.Time_Of would read it as local
+      --  midnight and shift every time by the zone's 1970 offset.
+      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Formatting.Time_Of (1970, 1, 1, 0.0, Time_Zone => 0);
    begin
       Available := False;
       Status := Statx (At_FDCWD, C_Path, 0, Statx_Atime, Info'Access);
