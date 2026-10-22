@@ -1549,7 +1549,37 @@ package body Hostkit.Metadata is
       --  to the same absolute string ignoring case name the same file.
       function Normalized (Path : String) return String is
         (Ada.Characters.Handling.To_Lower (Ada.Directories.Full_Name (Path)));
+
+      --  The volume and file index of what Path names, through any link, as
+      --  stat's device and inode are elsewhere: they tell two hard links to
+      --  one file apart from two files.
+      function Identify (Path : String; Info : access By_Handle_File_Information) return Boolean is
+         Wide_Path : aliased Wide_String := Wide (Path);
+         File      : System.Address :=
+           Create_File_Wide
+             (Wide_Path'Address, 0,
+              File_Share_Read or File_Share_Write or File_Share_Delete,
+              System.Null_Address, Open_Existing, File_Flag_Backup_Semantics,
+              System.Null_Address);
+         Found     : Boolean;
+      begin
+         if File = Invalid_Handle_Value then
+            return False;
+         end if;
+         Found := Get_File_Information (File, Info) /= 0;
+         Close_Entry (File);
+         return Found;
+      end Identify;
+
+      Left_Info  : aliased By_Handle_File_Information;
+      Right_Info : aliased By_Handle_File_Information;
    begin
+      if Identify (Left, Left_Info'Access) and then Identify (Right, Right_Info'Access) then
+         return Left_Info.Volume_Serial = Right_Info.Volume_Serial
+           and then Left_Info.File_Index_High = Right_Info.File_Index_High
+           and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
+      end if;
+
       return Ada.Directories.Exists (Left)
         and then Ada.Directories.Exists (Right)
         and then Normalized (Left) = Normalized (Right);
