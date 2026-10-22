@@ -12,6 +12,7 @@ with System.Storage_Elements;
 
 package body Hostkit.Metadata is
    use Ada.Strings.Unbounded;
+   use type Ada.Directories.File_Kind;
    use type Ada.Calendar.Time;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
@@ -836,8 +837,13 @@ package body Hostkit.Metadata is
 
       Free_Descriptor;
 
-      --  Strip the execute bits unless the file is one Windows would actually run.
-      if not Runs_On_Windows (Path) then
+      --  Strip the execute bits unless the file is one Windows would actually
+      --  run. A directory keeps them: its execute bit means it can be entered,
+      --  as the DACL grants.
+      if not Runs_On_Windows (Path)
+        and then not (Ada.Directories.Exists (Path)
+                      and then Ada.Directories.Kind (Path) = Ada.Directories.Directory)
+      then
          declare
             Owner_Bits : constant Natural := (Mode / 64) mod 8;
             Group_Bits : constant Natural := (Mode / 8) mod 8;
