@@ -235,13 +235,29 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
 
+      function Get_Last_Error return C_DWord
+        with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+      Error_Access_Denied     : constant C_DWord := 5;
+      Error_Sharing_Violation : constant C_DWord := 32;
+      Error_Lock_Violation    : constant C_DWord := 33;
+
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
+      Error       : C_DWord;
    begin
-      return Move_File_Ex
-               (Wide_Source'Address,
-                Wide_Target'Address,
-                Move_File_Replace_Existing) /= 0;
+      --  A file just written is often held a moment by someone else (a
+      --  virus scanner, the indexer) that did not share deletion; the move
+      --  is refused until they let go. Try again, briefly, for that only.
+      for Attempt in 1 .. 10 loop
+         if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, Move_File_Replace_Existing) /= 0 then
+            return True;
+         end if;
+         Error := Get_Last_Error;
+         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
+         delay Duration (Attempt) * 0.02;
+      end loop;
+      return False;
    exception
       when others =>
          return False;
@@ -272,15 +288,24 @@ package body Hostkit.Fs is
       Error_Not_Same_Device  : constant C_DWord := 17;
       Error_Invalid_Function  : constant C_DWord := 1;
       Error_Not_Supported    : constant C_DWord := 50;
+      Error_Access_Denied     : constant C_DWord := 5;
+      Error_Sharing_Violation : constant C_DWord := 32;
+      Error_Lock_Violation    : constant C_DWord := 33;
 
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
       Error       : C_DWord;
    begin
-      if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, 0) /= 0 then
-         return Moved;
-      end if;
-      Error := Get_Last_Error;
+      --  As Replace_File: someone holding the file a moment refuses the
+      --  move; try again, briefly, for that only.
+      for Attempt in 1 .. 10 loop
+         if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, 0) /= 0 then
+            return Moved;
+         end if;
+         Error := Get_Last_Error;
+         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
+         delay Duration (Attempt) * 0.02;
+      end loop;
       if Error = Error_Not_Same_Device then
          return Move_Cross_Device;
       elsif Error = Error_Invalid_Function or else Error = Error_Not_Supported then

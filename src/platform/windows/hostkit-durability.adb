@@ -23,9 +23,16 @@ package body Hostkit.Durability is
 
    function Sync_File (Path : String) return Outcome is
       Name   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      FD     : constant C_Int := open (Name, O_Rdwr + O_Binary);
+      FD     : C_Int := open (Name, O_Rdwr + O_Binary);
       Result : Outcome := Failed;
    begin
+      --  A file just written may be held a moment by someone else (a virus
+      --  scanner) that did not share writing; try again briefly.
+      for Attempt in 1 .. 10 loop
+         exit when FD >= 0;
+         delay Duration (Attempt) * 0.02;
+         FD := open (Name, O_Rdwr + O_Binary);
+      end loop;
       Interfaces.C.Strings.Free (Name);
       if FD < 0 then
          return Failed;
