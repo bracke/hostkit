@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Metadata.Change_Stamp` on macOS (stat: modification and change times to
+  the nanosecond, size, inode) and Windows (FILE_BASIC_INFO's LastWriteTime and
+  ChangeTime as Unix seconds and nanoseconds, size, file index), in Linux's
+  words; both said `Available => False` before, so their callers could only
+  trust size and modification time, which an unpacker or a script sets back.
+
 - `Fs.Read_Beneath`: read an ordinary file at a path below a root without
   following a symbolic link or reparse point anywhere on the way, the check
   being the open itself. POSIX walks from a descriptor of the root with openat

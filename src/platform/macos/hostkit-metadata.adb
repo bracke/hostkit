@@ -469,16 +469,28 @@ package body Hostkit.Metadata is
       File_Ownership (Path, User_Id, Group_Id, Ownership_Available);
    end File_Mode_And_Ownership;
 
-   --  No stamp this fine is read here yet: unknown, never a guess.
+   --  The words Linux gives: modification and change times to the
+   --  nanosecond, size, file number. stat follows a link, as statx does
+   --  there; st_ctime moves on every write and nothing sets it back.
    function Change_Stamp
      (Path      : String;
       Available : out Boolean)
       return String
    is
-      pragma Unreferenced (Path);
+      Info : aliased Stat_Record;
    begin
       Available := False;
-      return "";
+      if not Stat_Of (Path, Info'Access) then
+         return "";
+      end if;
+      Available := True;
+      return C_S64'Image (Info.Modified_Time.Seconds) & "." & C_S64'Image (Info.Modified_Time.Nanoseconds)
+        & C_S64'Image (Info.Change_Time.Seconds) & "." & C_S64'Image (Info.Change_Time.Nanoseconds)
+        & C_S64'Image (Info.Size) & C_U64'Image (Info.Inode);
+   exception
+      when others =>
+         Available := False;
+         return "";
    end Change_Stamp;
 
    function Entry_Identity_Of (Path : String) return Entry_Identity is
