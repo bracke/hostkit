@@ -17,6 +17,15 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Fs.Read_Beneath`: read an ordinary file at a path below a root without
+  following a symbolic link or reparse point anywhere on the way, the check
+  being the open itself. POSIX walks from a descriptor of the root with openat
+  and O_NOFOLLOW; Windows opens each part as itself, refuses a reparse point and
+  holds each directory without FILE_SHARE_DELETE until the read is done. A
+  check-then-read (Real_Path, then open) leaked the outside file 7-42 times in
+  20,000 swaps of a directory for a link; this leaked none. `Read_Unsupported`
+  on an unknown host.
+
 - `Durability.Reserve_Space`: a file given its blocks up front (posix_fallocate
   on Linux), so a file written through a shared mapping is refused before it is
   written rather than faulting its writer when the disk fills; `Not_Supported`

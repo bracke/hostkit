@@ -157,6 +157,19 @@ package body Hostkit.Fs is
       return Tree_Delete_Unsupported;
    end Delete_Tree_No_Follow;
 
+   procedure Read_Beneath
+     (Root    : String;
+      Path    : String;
+      Most    : Natural;
+      Text    : out Ada.Strings.Unbounded.Unbounded_String;
+      Outcome : out Read_Beneath_Outcome)
+   is
+      pragma Unreferenced (Root, Path, Most);
+   begin
+      Text := Ada.Strings.Unbounded.Null_Unbounded_String;
+      Outcome := Read_Unsupported;
+   end Read_Beneath;
+
    function Real_Path (Path : String) return String is
       pragma Unreferenced (Path);
    begin

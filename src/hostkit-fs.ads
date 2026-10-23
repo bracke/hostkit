@@ -260,6 +260,47 @@ package Hostkit.Fs is
    --          (on Windows with the \\?\ and \\?\UNC\ prefix stripped).
    function Real_Path (Path : String) return String;
 
+   type Read_Beneath_Outcome is
+     (Read_Done,
+      --  Path is absolute, climbs with "..", or a link or reparse point lies
+      --  on the way: not read.
+      Read_Outside,
+      --  Some part of Path is not there, or a part before the last is no
+      --  directory.
+      Read_Missing,
+      --  Path names a directory, a device, a pipe: no ordinary file.
+      Read_Not_File,
+      --  The file holds more than Most bytes.
+      Read_Too_Large,
+      Read_Failed,
+      Read_Unsupported);
+
+   --  Read the ordinary file at Path, relative to Root, without following a
+   --  symbolic link or reparse point anywhere below Root -- the file itself
+   --  or any directory on the way.
+   --
+   --  Checking first and reading after cannot do this: a directory on the
+   --  way swapped for a link between the two is followed by the read. Here
+   --  the check is the open. POSIX walks from a descriptor of Root, one part
+   --  at a time, with openat and O_NOFOLLOW, so each part is looked up in the
+   --  directory already held. Windows opens each part as itself
+   --  (FILE_FLAG_OPEN_REPARSE_POINT), refuses a reparse point, and holds
+   --  every directory on the way open without FILE_SHARE_DELETE until the
+   --  read is done, so none can be renamed or replaced meanwhile.
+   --
+   --  Root itself is resolved once, links and all: it is the caller's.
+   --  Parts are split at '/' (and '\' on Windows); empty and "." parts are
+   --  skipped, ".." is refused, as is ':' on Windows (a stream or a drive).
+   --
+   --  @param Most The largest file read, in bytes.
+   --  @param Text The file's bytes, one Character each; empty unless Read_Done.
+   procedure Read_Beneath
+     (Root    : String;
+      Path    : String;
+      Most    : Natural;
+      Text    : out Ada.Strings.Unbounded.Unbounded_String;
+      Outcome : out Read_Beneath_Outcome);
+
    --  The host's directory for temporary/scratch files, without a trailing
    --  separator. On POSIX this is $TMPDIR, else /tmp. On Windows it is
    --  GetTempPathA, which consults TMP/TEMP/USERPROFILE and falls back to the

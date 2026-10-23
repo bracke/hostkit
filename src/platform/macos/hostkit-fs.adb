@@ -950,6 +950,209 @@ package body Hostkit.Fs is
          return "";
    end Real_Path;
 
+   procedure Read_Beneath
+     (Root    : String;
+      Path    : String;
+      Most    : Natural;
+      Text    : out Ada.Strings.Unbounded.Unbounded_String;
+      Outcome : out Read_Beneath_Outcome)
+   is
+      use type Interfaces.C.long;
+      package Part_Vectors is new Ada.Containers.Indefinite_Vectors
+        (Index_Type => Positive, Element_Type => String);
+
+      O_Rdonly    : constant C_Int := 0;
+      O_Nonblock  : constant C_Int := 16#4#;
+      O_Directory : constant C_Int := 16#0010_0000#;
+      O_Nofollow  : constant C_Int := 16#100#;
+      O_Cloexec   : constant C_Int := 16#0100_0000#;
+      E_Intr      : constant C_Int := 4;
+      E_Noent     : constant C_Int := 2;
+      E_Notdir    : constant C_Int := 20;
+      E_Loop      : constant C_Int := 62;
+      Type_Mask   : constant C_U16 := 8#170000#;
+      Regular     : constant C_U16 := 8#100000#;
+      Symlink     : constant C_U16 := 8#120000#;
+      Chunk       : constant := 65_536;
+
+      function C_Open (Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "open";
+      function C_Openat
+        (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "openat";
+      function C_Close (Fd : C_Int) return C_Int
+        with Import, Convention => C, External_Name => "close";
+      function C_Read (Fd : C_Int; Buffer : System.Address; Count : Interfaces.C.size_t)
+        return Interfaces.C.long
+        with Import, Convention => C, External_Name => "read";
+      function Errno_Location return System.Address
+        with Import, Convention => C, External_Name => "__error";
+
+      function Errno return C_Int is
+         Value : C_Int with Import, Address => Errno_Location;
+      begin
+         return Value;
+      end Errno;
+
+      procedure Close (Fd : in out C_Int) is
+         Ignored : C_Int;
+      begin
+         if Fd >= 0 then
+            Ignored := C_Close (Fd);
+            Fd := -1;
+         end if;
+      end Close;
+
+      At_Symlink_Nofollow : constant C_Int := 16#20#;
+
+      function C_Fstat (Fd : C_Int; Info : access Stat_Record) return C_Int
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstat;
+      function C_Fstatat
+        (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr;
+         Info : access Stat_Record; Flags : C_Int) return C_Int
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Fstatat;
+
+      --  Whether a name in a held directory is a link, not followed.
+      function Is_Link_At (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr) return Boolean is
+         Info : aliased Stat_Record;
+      begin
+         return C_Fstatat (Fd, Name, Info'Access, At_Symlink_Nofollow) = 0
+           and then (Info.Mode and Type_Mask) = Symlink;
+      end Is_Link_At;
+
+      --  A held descriptor's type and size.
+      function Held_Info (Fd : C_Int; Mode : out C_U16; Size : out Long_Long_Integer) return Boolean is
+         Info : aliased Stat_Record;
+         Done : constant Boolean := C_Fstat (Fd, Info'Access) = 0;
+      begin
+         Mode := Info.Mode;
+         Size := Long_Long_Integer (Info.Size);
+         return Done;
+      end Held_Info;
+
+      Parts : Part_Vectors.Vector;
+      Held  : C_Int := -1;
+      Start : Positive := Path'First;
+   begin
+      Text := Ada.Strings.Unbounded.Null_Unbounded_String;
+      Outcome := Read_Failed;
+      if Path'Length = 0 or else Path (Path'First) = '/' then
+         Outcome := Read_Outside;
+         return;
+      end if;
+      for Index in Path'First .. Path'Last + 1 loop
+         if Index > Path'Last or else Path (Index) = '/' then
+            declare
+               Part : constant String := Path (Start .. Index - 1);
+            begin
+               if Part = ".." or else (for some C of Part => C = ASCII.NUL) then
+                  Outcome := Read_Outside;
+                  return;
+               elsif Part /= "" and then Part /= "." then
+                  Parts.Append (Part);
+               end if;
+            end;
+            Start := Index + 1;
+         end if;
+      end loop;
+      if Parts.Is_Empty then
+         Outcome := Read_Not_File;
+         return;
+      end if;
+
+      declare
+         C_Root : Interfaces.C.Strings.chars_ptr :=
+           Interfaces.C.Strings.New_String (if Root = "" then "." else Root);
+      begin
+         Held := C_Open (C_Root, O_Rdonly + O_Directory + O_Cloexec);
+         Interfaces.C.Strings.Free (C_Root);
+      end;
+      if Held < 0 then
+         Outcome := Read_Missing;
+         return;
+      end if;
+
+      --  Each part looked up in the directory already held, never through
+      --  a link: a part that is one fails to open rather than being taken.
+      for Index in Parts.First_Index .. Parts.Last_Index loop
+         declare
+            Last   : constant Boolean := Index = Parts.Last_Index;
+            C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Parts (Index));
+            Next   : constant C_Int :=
+              C_Openat (Held, C_Name, O_Rdonly + O_Nofollow + O_Cloexec
+                                      + (if Last then O_Nonblock else O_Directory));
+            Error  : constant C_Int := Errno;
+         begin
+            if Next < 0 then
+               Outcome :=
+                 (if Error = E_Noent then Read_Missing
+                  elsif Error = E_Loop or else Is_Link_At (Held, C_Name) then Read_Outside
+                  elsif Error = E_Notdir then Read_Missing
+                  else Read_Failed);
+               Interfaces.C.Strings.Free (C_Name);
+               Close (Held);
+               return;
+            end if;
+            Interfaces.C.Strings.Free (C_Name);
+            Close (Held);
+            Held := Next;
+         end;
+      end loop;
+
+      declare
+         Mode : C_U16;
+         Size : Long_Long_Integer;
+      begin
+         if not Held_Info (Held, Mode, Size) then
+            Close (Held);
+            return;
+         elsif (Mode and Type_Mask) = Symlink then
+            Close (Held);
+            Outcome := Read_Outside;
+            return;
+         elsif (Mode and Type_Mask) /= Regular then
+            Close (Held);
+            Outcome := Read_Not_File;
+            return;
+         elsif Size > Long_Long_Integer (Most) then
+            Close (Held);
+            Outcome := Read_Too_Large;
+            return;
+         end if;
+      end;
+
+      declare
+         Buffer : aliased String (1 .. Chunk);
+         Total  : Natural := 0;
+         Got    : Interfaces.C.long;
+      begin
+         loop
+            Got := C_Read (Held, Buffer'Address, Interfaces.C.size_t (Chunk));
+            if Got < 0 then
+               exit when Errno /= E_Intr;
+            elsif Got = 0 then
+               Outcome := Read_Done;
+               exit;
+            elsif Natural (Got) > Most - Total then
+               Outcome := Read_Too_Large;
+               exit;
+            else
+               Total := Total + Natural (Got);
+               Ada.Strings.Unbounded.Append (Text, Buffer (1 .. Natural (Got)));
+            end if;
+         end loop;
+      end;
+      Close (Held);
+      if Outcome /= Read_Done then
+         Text := Ada.Strings.Unbounded.Null_Unbounded_String;
+      end if;
+   exception
+      when others =>
+         Close (Held);
+         Text := Ada.Strings.Unbounded.Null_Unbounded_String;
+         Outcome := Read_Failed;
+   end Read_Beneath;
+
    --  Shared by the three questions below: the directory part of a path.
    function Directory_Part (Path : String) return String is
    begin
