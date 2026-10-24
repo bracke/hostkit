@@ -7,7 +7,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Strings.Wide_Unbounded;
 
-with Interfaces.C.Strings;
+with Interfaces.C;
 
 with System;
 with System.Storage_Elements;
@@ -27,16 +27,35 @@ package body Hostkit.Fs is
    Symbolic_Link_Allow_Unprivileged : constant C_DWord := 16#0000_0002#;
    Symbolic_Link_Directory          : constant C_DWord := 16#0000_0001#;
 
+   --  Paths are UTF-8 here and UTF-16 to Windows: the "A" entry points would
+   --  read them in the ANSI code page, so any non-ASCII path (a profile named
+   --  Jürgen) would not be found.
    function Get_File_Attributes
-     (Name : Interfaces.C.Strings.chars_ptr)
+     (Name : System.Address)
       return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesA";
+     with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesW";
 
    function Get_Temp_Path
      (Buffer_Length : C_DWord;
       Buffer        : System.Address)
       return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetTempPathA";
+     with Import => True, Convention => Stdcall, External_Name => "GetTempPathW";
+
+   --  WIN32_FIND_DATAW, of which only the reparse tag (dwReserved0, at byte 36
+   --  for a reparse point) is read.
+   type Find_Data is array (1 .. 592) of Interfaces.Unsigned_8 with Alignment => 8;
+
+   function Find_First_File
+     (Name : System.Address;
+      Data : access Find_Data)
+      return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "FindFirstFileW";
+
+   function Find_Close (Handle : System.Address) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "FindClose";
+
+   Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
+   Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
 
    function Create_Symbolic_Link
      (Link   : System.Address;
@@ -51,14 +70,39 @@ package body Hostkit.Fs is
    --  A symbolic link and a junction are both reparse points, and this is how Windows
    --  says so. There is no lstat, which is why GNAT's Is_Symbolic_Link cannot answer
    --  here and says False instead.
+   --  Only the symbolic-link and junction tags are links: OneDrive
+   --  placeholders, deduplicated files and app-execution aliases are reparse
+   --  points too, but ordinary files and folders to the user.
    function Is_Link (Path : String) return Boolean is
-      C_Path     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      Attributes : constant C_DWord := Get_File_Attributes (C_Path);
+      use type Interfaces.Unsigned_32;
+      use type System.Address;
+      Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+      Data       : aliased Find_Data := [others => 0];
+      Handle     : System.Address;
+      Tag        : Interfaces.Unsigned_32;
+      Invalid_Handle : constant System.Address := System.Storage_Elements.To_Address
+        (System.Storage_Elements.Integer_Address'Last);
    begin
-      Interfaces.C.Strings.Free (C_Path);
-
-      return Attributes /= Invalid_File_Attributes
-        and then (Attributes and File_Attribute_Reparse_Point) /= 0;
+      if Attributes = Invalid_File_Attributes
+        or else (Attributes and File_Attribute_Reparse_Point) = 0
+      then
+         return False;
+      end if;
+      Handle := Find_First_File (Wide_Path'Address, Data'Access);
+      if Handle = Invalid_Handle then
+         --  The tag is unreadable: a reparse point is still safest treated
+         --  as a link, which is never followed.
+         return True;
+      end if;
+      if Find_Close (Handle) = 0 then
+         null;
+      end if;
+      Tag := Interfaces.Unsigned_32 (Data (37))
+        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (38)), 8)
+        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (39)), 16)
+        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (40)), 24);
+      return Tag = Io_Reparse_Tag_Symlink or else Tag = Io_Reparse_Tag_Mount_Point;
    exception
       when others =>
          return False;
@@ -110,11 +154,9 @@ package body Hostkit.Fs is
         (if Dot = 0 then ""
          else Ada.Characters.Handling.To_Lower (Path (Dot .. Path'Last)));
 
-      C_Path     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      Attributes : constant C_DWord := Get_File_Attributes (C_Path);
+      Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
-      Interfaces.C.Strings.Free (C_Path);
-
       if Attributes = Invalid_File_Attributes
         or else (Attributes and File_Attribute_Directory) /= 0
       then
@@ -475,13 +517,9 @@ package body Hostkit.Fs is
       function Delete_File (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
 
-      C_Path     : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Attributes : constant C_DWord := Get_File_Attributes (C_Path);
       Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
-      Interfaces.C.Strings.Free (C_Path);
-
       if Attributes = Invalid_File_Attributes
         or else (Attributes and File_Attribute_Reparse_Point) = 0
       then
@@ -1249,20 +1287,18 @@ package body Hostkit.Fs is
    end Config_Directory;
 
    function Temp_Directory return String is
-      use type Interfaces.C.size_t;
-      Buf : Interfaces.C.char_array (0 .. 519) := [others => Interfaces.C.nul];
+      Buf : aliased Wide_String (1 .. 1024) := [others => Wide_Character'Val (0)];
       N   : constant C_DWord := Get_Temp_Path (C_DWord (Buf'Length), Buf'Address);
    begin
-      --  GetTempPathA returns 0 on failure, or the length required if the
-      --  buffer was too small; 520 bytes comfortably holds any MAX_PATH temp dir.
+      --  GetTempPathW returns 0 on failure, or the length required if the
+      --  buffer was too small; 1024 UTF-16 units hold any temp dir.
       if N = 0 or else N > C_DWord (Buf'Length) then
          return ".";
       end if;
       declare
-         Raw : constant String :=
-           Interfaces.C.To_Ada (Buf (0 .. Interfaces.C.size_t (N) - 1), Trim_Nul => False);
+         Raw : constant String := Ada.Strings.UTF_Encoding.Conversions.Convert (Buf (1 .. Natural (N)));
       begin
-         --  GetTempPathA always appends a trailing backslash; drop it so the
+         --  GetTempPathW always appends a trailing backslash; drop it so the
          --  result composes with "/" or "\" the way callers expect.
          if Raw'Length > 1 and then (Raw (Raw'Last) = '\' or else Raw (Raw'Last) = '/') then
             return Raw (Raw'First .. Raw'Last - 1);

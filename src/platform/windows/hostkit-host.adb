@@ -1,4 +1,5 @@
 with Ada.Strings.Unbounded;
+with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Environment_Variables;
 
 with Interfaces.C;
@@ -180,13 +181,13 @@ package body Hostkit.Host is
          Size   : Interfaces.C.unsigned_long)
          return Interfaces.C.unsigned_long
       with Import, Convention => Stdcall,
-           External_Name => "GetModuleFileNameA";
+           External_Name => "GetModuleFileNameW";
 
-      Buffer : aliased Interfaces.C.char_array (1 .. 4096) :=
-        [others => Interfaces.C.nul];
+      Buffer : aliased Wide_String (1 .. 4096) := [others => Wide_Character'Val (0)];
       Filled : Interfaces.C.unsigned_long;
    begin
-      --  A null module handle asks for this process's own image.
+      --  A null module handle asks for this process's own image. The wide
+      --  call: the ANSI one would garble a path that is not ASCII.
       Filled :=
         Get_Module_File_Name (System.Null_Address, Buffer'Address, 4096);
 
@@ -194,7 +195,7 @@ package body Hostkit.Host is
          return "";
       end if;
 
-      return Interfaces.C.To_Ada (Buffer);
+      return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Filled)));
    exception
       when others =>
          return "";
@@ -256,13 +257,14 @@ package body Hostkit.Host is
         (Buffer : System.Address;
          Size   : access Interfaces.C.unsigned_long)
          return Interfaces.C.int
-      with Import, Convention => Stdcall, External_Name => "GetComputerNameA";
+      with Import, Convention => Stdcall, External_Name => "GetComputerNameW";
 
       Size   : aliased Interfaces.C.unsigned_long := 256;
-      Buffer : aliased Interfaces.C.char_array (1 .. 256) := [others => Interfaces.C.nul];
+      Buffer : aliased Wide_String (1 .. 256) := [others => Wide_Character'Val (0)];
    begin
-      if Get_Computer_Name (Buffer'Address, Size'Access) /= 0 then
-         return Interfaces.C.To_Ada (Buffer);
+      --  On success Size is the name's length, without the terminator.
+      if Get_Computer_Name (Buffer'Address, Size'Access) /= 0 and then Size <= 256 then
+         return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Size)));
       elsif Ada.Environment_Variables.Exists ("COMPUTERNAME") then
          return Ada.Environment_Variables.Value ("COMPUTERNAME");
       else
@@ -274,18 +276,21 @@ package body Hostkit.Host is
    end Node_Name;
 
    function Set_Node_Name (Name : String) return Boolean is
-      Raw : Interfaces.C.char_array := Interfaces.C.To_C (Name);
-
       function Set_Computer_Name
         (Name : System.Address)
          return Interfaces.C.int
-      with Import, Convention => Stdcall, External_Name => "SetComputerNameA";
+      with Import, Convention => Stdcall, External_Name => "SetComputerNameW";
    begin
       if Name = "" then
          return False;
       end if;
 
-      return Set_Computer_Name (Raw'Address) /= 0;
+      declare
+         Raw : aliased constant Wide_String :=
+           Ada.Strings.UTF_Encoding.Conversions.Convert (Name) & Wide_Character'Val (0);
+      begin
+         return Set_Computer_Name (Raw'Address) /= 0;
+      end;
    exception
       when others =>
          return False;
@@ -350,13 +355,15 @@ package body Hostkit.Host is
         (Buffer : System.Address;
          Size   : access Interfaces.C.unsigned_long)
          return Interfaces.C.int
-        with Import, Convention => Stdcall, External_Name => "GetUserNameA";
+        with Import, Convention => Stdcall, External_Name => "GetUserNameW";
 
       Size   : aliased Interfaces.C.unsigned_long := 256;
-      Buffer : aliased Interfaces.C.char_array (1 .. 256) := [others => Interfaces.C.nul];
+      Buffer : aliased Wide_String (1 .. 256) := [others => Wide_Character'Val (0)];
    begin
-      if Get_User_Name (Buffer'Address, Size'Access) /= 0 then
-         return Interfaces.C.To_Ada (Buffer);
+      --  On success Size counts the terminator too. A user named Jürgen must
+      --  not come back in the ANSI code page.
+      if Get_User_Name (Buffer'Address, Size'Access) /= 0 and then Size in 1 .. 256 then
+         return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Size) - 1));
       else
          return "";
       end if;

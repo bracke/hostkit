@@ -6,7 +6,7 @@ with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Containers.Vectors;
 
-with Interfaces.C.Strings;
+with Interfaces.C;
 with System;
 with System.Storage_Elements;
 
@@ -20,7 +20,6 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_long_long;
-   use type Interfaces.C.Strings.chars_ptr;
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_64;
    use type System.Address;
@@ -171,7 +170,7 @@ package body Hostkit.Metadata is
       "Win32 WIN32_FILE_ATTRIBUTE_DATA must be 36 bytes");
 
    function Get_Named_Security_Info
-     (Object_Name : Interfaces.C.Strings.chars_ptr;
+     (Object_Name : System.Address;
       Object_Type : C_Int;
       Information : C_DWord;
       Owner       : access System.Address;
@@ -180,10 +179,10 @@ package body Hostkit.Metadata is
       Sacl        : access System.Address;
       Descriptor  : access System.Address) return C_DWord
      with Import, Convention => Stdcall,
-          External_Name => "GetNamedSecurityInfoA";
+          External_Name => "GetNamedSecurityInfoW";
 
    function Set_Named_Security_Info
-     (Object_Name : Interfaces.C.Strings.chars_ptr;
+     (Object_Name : System.Address;
       Object_Type : C_Int;
       Information : C_DWord;
       Owner       : System.Address;
@@ -191,7 +190,7 @@ package body Hostkit.Metadata is
       Dacl        : System.Address;
       Sacl        : System.Address) return C_DWord
      with Import, Convention => Stdcall,
-          External_Name => "SetNamedSecurityInfoA";
+          External_Name => "SetNamedSecurityInfoW";
 
    function Get_Security_Info
      (Handle      : System.Address;
@@ -280,22 +279,22 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall, External_Name => "LocalFree";
 
    function Get_File_Attributes_Ex
-     (Name  : Interfaces.C.Strings.chars_ptr;
+     (Name  : System.Address;
       Level : C_Int;
       Data  : access Attribute_Data) return C_Int
      with Import, Convention => Stdcall,
-          External_Name => "GetFileAttributesExA";
+          External_Name => "GetFileAttributesExW";
 
    function Get_Disk_Free_Space_Ex
-     (Directory       : Interfaces.C.Strings.chars_ptr;
+     (Directory       : System.Address;
       Free_To_Caller  : access C_U64;
       Total           : access C_U64;
       Total_Free      : access C_U64) return C_Int
      with Import, Convention => Stdcall,
-          External_Name => "GetDiskFreeSpaceExA";
+          External_Name => "GetDiskFreeSpaceExW";
 
    function Get_Volume_Information
-     (Root         : Interfaces.C.Strings.chars_ptr;
+     (Root         : System.Address;
       Name         : System.Address;
       Name_Size    : C_DWord;
       Serial       : access C_DWord;
@@ -304,7 +303,7 @@ package body Hostkit.Metadata is
       System_Name  : System.Address;
       System_Size  : C_DWord) return C_Int
      with Import, Convention => Stdcall,
-          External_Name => "GetVolumeInformationA";
+          External_Name => "GetVolumeInformationW";
 
    function Get_Final_Path_Name
      (File   : System.Address;
@@ -312,17 +311,7 @@ package body Hostkit.Metadata is
       Length : C_DWord;
       Flags  : C_DWord) return C_DWord
      with Import, Convention => Stdcall,
-          External_Name => "GetFinalPathNameByHandleA";
-
-   function Create_File
-     (Name        : Interfaces.C.Strings.chars_ptr;
-      Access_Mode : C_DWord;
-      Share       : C_DWord;
-      Security    : System.Address;
-      Disposition : C_DWord;
-      Flags       : C_DWord;
-      Template    : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "CreateFileA";
+          External_Name => "GetFinalPathNameByHandleW";
 
    function Create_File_Wide
      (Name        : System.Address;
@@ -534,15 +523,6 @@ package body Hostkit.Metadata is
 
    --------------------------------------------------------------------------
 
-   procedure Safe_Free (Item : in out Interfaces.C.Strings.chars_ptr);
-
-   procedure Safe_Free (Item : in out Interfaces.C.Strings.chars_ptr) is
-   begin
-      if Item /= Interfaces.C.Strings.Null_Ptr then
-         Interfaces.C.Strings.Free (Item);
-      end if;
-   end Safe_Free;
-
    function Runs_On_Windows (Path : String) return Boolean;
 
    function Runs_On_Windows (Path : String) return Boolean is
@@ -607,8 +587,7 @@ package body Hostkit.Metadata is
      (Path      : String;
       Available : out Boolean) return Ada.Calendar.Time
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
       Data   : aliased Attribute_Data;
       Result : C_Int;
       --  The Unix epoch, in UTC: Ada.Calendar.Time_Of would read it as local
@@ -617,8 +596,7 @@ package body Hostkit.Metadata is
    begin
       Available := False;
 
-      Result := Get_File_Attributes_Ex (C_Path, 0, Data'Access);
-      Interfaces.C.Strings.Free (C_Path);
+      Result := Get_File_Attributes_Ex (C_Path'Address, 0, Data'Access);
 
       if Result = 0 then
          return Ada.Calendar.Time_Of (1901, 1, 1);
@@ -651,8 +629,7 @@ package body Hostkit.Metadata is
      (Path      : String;
       Available : out Boolean) return Ada.Calendar.Time
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
       Data   : aliased Attribute_Data;
       Result : C_Int;
       --  The Unix epoch, in UTC: Ada.Calendar.Time_Of would read it as local
@@ -661,8 +638,7 @@ package body Hostkit.Metadata is
    begin
       Available := False;
 
-      Result := Get_File_Attributes_Ex (C_Path, 0, Data'Access);
-      Interfaces.C.Strings.Free (C_Path);
+      Result := Get_File_Attributes_Ex (C_Path'Address, 0, Data'Access);
 
       if Result = 0 then
          return Ada.Calendar.Time_Of (1901, 1, 1);
@@ -690,8 +666,7 @@ package body Hostkit.Metadata is
    end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
 
       Free_To_Caller : aliased C_U64 := 0;
       Total          : aliased C_U64 := 0;
@@ -706,7 +681,7 @@ package body Hostkit.Metadata is
    begin
       Result :=
         Get_Disk_Free_Space_Ex
-          (C_Path, Free_To_Caller'Access, Total'Access, Total_Free'Access);
+          (C_Path'Address, Free_To_Caller'Access, Total'Access, Total_Free'Access);
 
       if Result /= 0 then
          Answer.Available := True;
@@ -720,25 +695,17 @@ package body Hostkit.Metadata is
       --  a path like C:\Users\... it simply fails, and the read-only flag and the
       --  name limit were reported as unknown for every volume.
       declare
-         Root : Interfaces.C.Strings.chars_ptr :=
-           Interfaces.C.Strings.Null_Ptr;
+         Root : aliased Wide_String :=
+           Wide (if Path'Length >= 2 and then Path (Path'First + 1) = ':'
+                 then Path (Path'First .. Path'First + 1) & "\"
+                 else Path);
       begin
-         if Path'Length >= 2 and then Path (Path'First + 1) = ':' then
-            Root :=
-              Interfaces.C.Strings.New_String
-                (Path (Path'First .. Path'First + 1) & "\");
-         else
-            Root := Interfaces.C.Strings.New_String (Path);
-         end if;
-
          Result :=
            Get_Volume_Information
-             (Root,
+             (Root'Address,
               System.Null_Address, 0,
               Serial'Access, Component'Access, Flags'Access,
               System.Null_Address, 0);
-
-         Interfaces.C.Strings.Free (Root);
       end;
 
       if Result /= 0 then
@@ -748,12 +715,10 @@ package body Hostkit.Metadata is
          Answer.Read_Only_Known := True;
       end if;
 
-      Interfaces.C.Strings.Free (C_Path);
       return Answer;
 
    exception
       when others =>
-         Safe_Free (C_Path);
          return (others => <>);
    end Volume_Capacity_Of;
 
@@ -761,8 +726,7 @@ package body Hostkit.Metadata is
      (Path      : String;
       Available : out Boolean) return Natural
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
 
       Owner      : aliased System.Address := System.Null_Address;
       Group      : aliased System.Address := System.Null_Address;
@@ -813,11 +777,10 @@ package body Hostkit.Metadata is
 
       Status :=
         Get_Named_Security_Info
-          (C_Path, Se_File_Object,
+          (C_Path'Address, Se_File_Object,
            Owner_Information or Group_Information or Dacl_Information,
            Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
            Descriptor'Access);
-      Interfaces.C.Strings.Free (C_Path);
 
       if Status /= Success then
          return 0;
@@ -864,7 +827,6 @@ package body Hostkit.Metadata is
 
    exception
       when others =>
-         Safe_Free (C_Path);
          Free_Descriptor;
          Available := False;
          return 0;
@@ -874,8 +836,7 @@ package body Hostkit.Metadata is
      (Path : String;
       Mode : Natural) return Boolean
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
 
       Owner      : aliased System.Address := System.Null_Address;
       Group      : aliased System.Address := System.Null_Address;
@@ -909,13 +870,12 @@ package body Hostkit.Metadata is
    begin
       Status :=
         Get_Named_Security_Info
-          (C_Path, Se_File_Object,
+          (C_Path'Address, Se_File_Object,
            Owner_Information or Group_Information or Dacl_Information,
            Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
            Descriptor'Access);
 
       if Status /= Success then
-         Interfaces.C.Strings.Free (C_Path);
          return False;
       end if;
 
@@ -923,7 +883,6 @@ package body Hostkit.Metadata is
            (Win_World_Sid, System.Null_Address,
             Everyone (1)'Address, Everyone_Size'Access) = 0
       then
-         Interfaces.C.Strings.Free (C_Path);
          Free_Allocations;
          return False;
       end if;
@@ -956,18 +915,15 @@ package body Hostkit.Metadata is
           (3, Entries (1)'Address, System.Null_Address, New_Acl'Access);
 
       if Status /= Success or else New_Acl = System.Null_Address then
-         Interfaces.C.Strings.Free (C_Path);
          Free_Allocations;
          return False;
       end if;
 
       Status :=
         Set_Named_Security_Info
-          (C_Path, Se_File_Object, Dacl_Information or Protected_Dacl,
+          (C_Path'Address, Se_File_Object, Dacl_Information or Protected_Dacl,
            System.Null_Address, System.Null_Address,
            New_Acl, System.Null_Address);
-
-      Interfaces.C.Strings.Free (C_Path);
 
       Free_Allocations;
 
@@ -975,7 +931,6 @@ package body Hostkit.Metadata is
 
    exception
       when others =>
-         Safe_Free (C_Path);
          Free_Allocations;
          return False;
    end Set_Permissions;
@@ -994,23 +949,21 @@ package body Hostkit.Metadata is
             High => C_DWord (Ticks / 2 ** 32));
       end To_Filetime;
 
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
       File   : System.Address := System.Null_Address;
       Access_Filetime   : aliased Filetime := To_Filetime (Access_Time);
       Modified_Filetime : aliased Filetime := To_Filetime (Modified_Time);
       Result : C_Int;
    begin
       File :=
-        Create_File
-          (C_Path,
+        Create_File_Wide
+          (C_Path'Address,
            File_Read_Attributes or File_Write_Attributes,
            File_Share_Read or File_Share_Write or File_Share_Delete,
            System.Null_Address,
            Open_Existing,
            File_Attribute_Normal or File_Flag_Backup_Semantics,
            System.Null_Address);
-      Interfaces.C.Strings.Free (C_Path);
 
       if File = System.Null_Address or else File = Invalid_Handle_Value then
          return False;
@@ -1038,9 +991,6 @@ package body Hostkit.Metadata is
                null;
             end;
          end if;
-         if C_Path /= Interfaces.C.Strings.Null_Ptr then
-            Interfaces.C.Strings.Free (C_Path);
-         end if;
          return False;
    end Set_File_Times;
 
@@ -1055,8 +1005,7 @@ package body Hostkit.Metadata is
       Group_Id  : out Natural;
       Available : out Boolean)
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
 
       Owner      : aliased System.Address := System.Null_Address;
       Group      : aliased System.Address := System.Null_Address;
@@ -1082,11 +1031,10 @@ package body Hostkit.Metadata is
 
       Status :=
         Get_Named_Security_Info
-          (C_Path, Se_File_Object,
+          (C_Path'Address, Se_File_Object,
            Owner_Information or Group_Information,
            Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
            Descriptor'Access);
-      Interfaces.C.Strings.Free (C_Path);
 
       if Status /= Success then
          Free_Descriptor;
@@ -1103,7 +1051,6 @@ package body Hostkit.Metadata is
 
    exception
       when others =>
-         Safe_Free (C_Path);
          Free_Descriptor;
          User_Id := 0;
          Group_Id := 0;
@@ -1775,8 +1722,7 @@ package body Hostkit.Metadata is
       User_Id  : Natural;
       Group_Id : Natural) return Boolean
    is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+      C_Path : aliased Wide_String := Wide (Path);
 
       Owner_Sid : aliased Sid_Buffer;
       Group_Sid : aliased Sid_Buffer;
@@ -1789,7 +1735,6 @@ package body Hostkit.Metadata is
       --  Only a SID this process has already seen can be named again: the
       --  identity the caller holds is a relative identifier, not a SID.
       if not Have_Owner and then not Have_Group then
-         Interfaces.C.Strings.Free (C_Path);
          return False;
       end if;
 
@@ -1802,17 +1747,15 @@ package body Hostkit.Metadata is
 
       Status :=
         Set_Named_Security_Info
-          (C_Path, Se_File_Object, Information,
+          (C_Path'Address, Se_File_Object, Information,
            (if Have_Owner then Owner_Sid (1)'Address else System.Null_Address),
            (if Have_Group then Group_Sid (1)'Address else System.Null_Address),
            System.Null_Address, System.Null_Address);
 
-      Interfaces.C.Strings.Free (C_Path);
       return Status = Success;
 
    exception
       when others =>
-         Safe_Free (C_Path);
          return False;
    end Set_Ownership;
 
