@@ -211,6 +211,17 @@ package Hostkit.Fs is
    --  @return Moved exactly when Move_No_Replace would return True.
    function Move_No_Replace_Outcome (Source : String; Target : String) return Move_Outcome;
 
+   --  The no-replace move Move_No_Replace_Outcome falls back to on a POSIX
+   --  filesystem without a native one (NFS, SMB, most FUSE mounts): link and
+   --  unlink for a non-directory, which never replaces; for a directory, or
+   --  where hard links are refused, a rename after checking the target is
+   --  free, so only an entry created in between could be replaced. Hosts
+   --  whose native move never lacks the guarantee answer Move_Unsupported.
+   --  @param Source Entry to move, including symbolic links.
+   --  @param Target New pathname, which must not exist.
+   --  @return Moved when Source moved and Target was free.
+   function Move_Without_Native_No_Replace (Source : String; Target : String) return Move_Outcome;
+
    --  Read the literal target of the symbolic link (or junction) at Path.
    --
    --  POSIX has readlink. Windows has no such call: a link is a reparse point, so this

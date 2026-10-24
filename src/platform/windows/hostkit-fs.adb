@@ -271,6 +271,12 @@ package body Hostkit.Fs is
       return Boolean
    is (Move_No_Replace_Outcome (Source, Target) = Moved);
 
+   function Move_Without_Native_No_Replace (Source : String; Target : String) return Move_Outcome is
+      pragma Unreferenced (Source, Target);
+   begin
+      return Move_Unsupported;
+   end Move_Without_Native_No_Replace;
+
    function Move_No_Replace_Outcome
      (Source : String;
       Target : String)

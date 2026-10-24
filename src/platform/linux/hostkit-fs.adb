@@ -510,6 +510,78 @@ package body Hostkit.Fs is
       return Boolean
    is (Move_No_Replace_Outcome (Source, Target) = Moved);
 
+   --  Errno values the fallback below tells apart.
+   Fallback_Eperm      : constant := 1;
+   Fallback_Exdev      : constant := 18;
+   Fallback_Emlink     : constant := 31;
+   Fallback_Enosys     : constant := 38;
+   Fallback_Eopnotsupp : constant := 95;
+
+   function C_Link (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "link";
+   function C_Unlink (Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "unlink";
+   function C_Plain_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "rename";
+   function C_Readlink
+     (Path : Interfaces.C.Strings.chars_ptr; Buffer : out Interfaces.C.char_array; Size : Interfaces.C.size_t)
+      return Interfaces.C.long
+     with Import => True, Convention => C, External_Name => "readlink";
+   function C_Access (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "access";
+
+   --  Whether anything, a dangling link included, is at Path.
+   function Present (Path : Interfaces.C.Strings.chars_ptr) return Boolean is
+      use type Interfaces.C.long;
+      Buffer : Interfaces.C.char_array (1 .. 1);
+   begin
+      return C_Readlink (Path, Buffer, 1) >= 0 or else C_Access (Path, 0) = 0;
+   end Present;
+
+   --  A filesystem without RENAME_NOREPLACE (NFS, most FUSE mounts): a
+   --  non-directory moves by link and unlink, which never replaces. A
+   --  directory, or a filesystem without hard links, falls back to a
+   --  rename after checking the target is free -- what mv -n does there;
+   --  only an entry created in between could be replaced.
+   function Without_Native_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return Move_Outcome is
+      Error : Integer;
+   begin
+      if C_Link (From, To) = 0 then
+         if C_Unlink (From) = 0 then
+            return Moved;
+         end if;
+         if C_Unlink (To) /= 0 then
+            null;
+         end if;
+         return Move_Refused;
+      end if;
+      Error := GNAT.OS_Lib.Errno;
+      if Error = Fallback_Exdev then
+         return Move_Cross_Device;
+      elsif Error not in Fallback_Eperm | Fallback_Emlink | Fallback_Enosys | Fallback_Eopnotsupp then
+         --  The target is taken, or the move is refused for good.
+         return Move_Refused;
+      end if;
+      if Present (To) then
+         return Move_Refused;
+      elsif C_Plain_Rename (From, To) = 0 then
+         return Moved;
+      elsif GNAT.OS_Lib.Errno = Fallback_Exdev then
+         return Move_Cross_Device;
+      end if;
+      return Move_Refused;
+   end Without_Native_No_Replace;
+
+   function Move_Without_Native_No_Replace (Source : String; Target : String) return Move_Outcome is
+      C_Source : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Source);
+      C_Target : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Target);
+      Outcome  : constant Move_Outcome := Without_Native_No_Replace (C_Source, C_Target);
+   begin
+      Interfaces.C.Strings.Free (C_Source);
+      Interfaces.C.Strings.Free (C_Target);
+      return Outcome;
+   end Move_Without_Native_No_Replace;
+
    function Move_No_Replace_Outcome
      (Source : String;
       Target : String)
@@ -531,6 +603,7 @@ package body Hostkit.Fs is
       Enosys           : constant := 38;
       Eopnotsupp       : constant := 95;
 
+
       function C_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
         (C_Rename_At (At_Fdcwd, From, At_Fdcwd, To, Rename_Noreplace));
 
@@ -543,15 +616,22 @@ package body Hostkit.Fs is
    begin
       Status := C_Rename (C_Source, C_Target);
       Error := GNAT.OS_Lib.Errno;
+      if Status /= 0 and then (Error = Einval or else Error = Enosys or else Error = Eopnotsupp) then
+         --  The filesystem lacks the no-replace rename itself.
+         declare
+            Outcome : constant Move_Outcome := Without_Native_No_Replace (C_Source, C_Target);
+         begin
+            Interfaces.C.Strings.Free (C_Source);
+            Interfaces.C.Strings.Free (C_Target);
+            return Outcome;
+         end;
+      end if;
       Interfaces.C.Strings.Free (C_Source);
       Interfaces.C.Strings.Free (C_Target);
       if Status = 0 then
          return Moved;
       elsif Error = Exdev then
          return Move_Cross_Device;
-      elsif Error = Einval or else Error = Enosys or else Error = Eopnotsupp then
-         --  The filesystem lacks the no-replace rename itself.
-         return Move_Unsupported;
       end if;
       return Move_Refused;
    exception
