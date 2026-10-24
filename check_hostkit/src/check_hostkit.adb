@@ -287,7 +287,7 @@ begin
    Require_Binding ("src/platform/linux/hostkit-watch.adb", "inotify_add_watch");
    Require_Binding ("src/platform/macos/hostkit-watch.adb", "kqueue");
    Require_Binding ("src/platform/macos/hostkit-watch.adb", "kevent");
-   Require_Binding ("src/platform/windows/hostkit-watch.adb", "FindFirstChangeNotificationA");
+   Require_Binding ("src/platform/windows/hostkit-watch.adb", "FindFirstChangeNotificationW");
 
    --  File metadata: what the filesystem says about a file.
    Require_Binding ("src/platform/linux/hostkit-metadata.adb", "statx");
@@ -307,16 +307,16 @@ begin
      ("src/platform/macos/arm64/hostkit-darwin_symbols.ads",
       "Statfs  : constant String := ""statfs"";",
       "Apple silicon macOS must bind statfs");
-   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetDiskFreeSpaceExA");
-   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExA");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetDiskFreeSpaceExW");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExW");
 
    --  Ownership. The Windows pair is what makes Metadata.Set_Ownership a
    --  different operation from Fs.Set_Owner, so losing it is losing a feature
    --  rather than losing a duplicate -- which is exactly what happened once.
    Require_Binding ("src/platform/linux/hostkit-metadata.adb", "chown");
    Require_Binding ("src/platform/macos/hostkit-metadata.adb", "chown");
-   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetNamedSecurityInfoA");
-   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "SetNamedSecurityInfoA");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetNamedSecurityInfoW");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "SetNamedSecurityInfoW");
 
    --  The host's own trash. Linux deliberately binds nothing: the freedesktop
    --  trash is a filesystem layout for the caller to write, not a call to make.
@@ -340,7 +340,7 @@ begin
    --  Login/session name used by logname-style callers.
    Require_Binding ("src/platform/linux/hostkit-host.adb", "getlogin_r");
    Require_Binding ("src/platform/macos/hostkit-host.adb", "getlogin_r");
-   Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserNameA");
+   Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserNameW");
 
    --  Reading a link's own target, which Windows has no readlink for.
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "readlink");

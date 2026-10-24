@@ -1,13 +1,12 @@
 with Ada.Unchecked_Conversion;
 
-with Interfaces.C.Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
 with System;
 
 package body Hostkit.Watch is
 
    use Ada.Strings.Unbounded;
    use type Interfaces.C.unsigned_long;
-   use type Interfaces.C.Strings.chars_ptr;
    use type System.Address;
 
    --  Windows offers ReadDirectoryChangesW, which is richer but asynchronous and
@@ -27,11 +26,11 @@ package body Hostkit.Watch is
    Wait_Object_0 : constant Interfaces.C.unsigned_long := 0;
 
    function Find_First_Change_Notification
-     (Path_Name    : Interfaces.C.Strings.chars_ptr;
+     (Path_Name    : System.Address;
       Watch_Subtree : Interfaces.C.int;
       Notify_Filter : Interfaces.C.unsigned_long) return System.Address
      with Import, Convention => Stdcall,
-          External_Name => "FindFirstChangeNotificationA";
+          External_Name => "FindFirstChangeNotificationW";
 
    function Find_Next_Change_Notification
      (Handle : System.Address) return Interfaces.C.int
@@ -91,8 +90,6 @@ package body Hostkit.Watch is
    end Release;
 
    procedure Watch_Path (State : in out Watch_State; Path : String) is
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.Null_Ptr;
       Handle : System.Address;
    begin
       if Path = "" then
@@ -108,9 +105,13 @@ package body Hostkit.Watch is
 
       Release (State);
 
-      C_Path := Interfaces.C.Strings.New_String (Path);
-      Handle := Find_First_Change_Notification (C_Path, 0, Notify_Mask);
-      Interfaces.C.Strings.Free (C_Path);
+      --  UTF-16, as the folder may not have an ASCII name.
+      declare
+         Wide_Path : aliased constant Wide_String :=
+           Ada.Strings.UTF_Encoding.Conversions.Convert (Path) & Wide_Character'Val (0);
+      begin
+         Handle := Find_First_Change_Notification (Wide_Path'Address, 0, Notify_Mask);
+      end;
 
       --  The call reports failure as INVALID_HANDLE_VALUE, which is -1 rather
       --  than null.
@@ -125,9 +126,6 @@ package body Hostkit.Watch is
 
    exception
       when others =>
-         if C_Path /= Interfaces.C.Strings.Null_Ptr then
-            Interfaces.C.Strings.Free (C_Path);
-         end if;
          Release (State);
    end Watch_Path;
 
