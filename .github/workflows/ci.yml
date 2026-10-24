@@ -93,6 +93,11 @@ jobs:
       - name: Build and run the test suite
         shell: bash
         working-directory: tests
+        #  Every runner can make links (Windows ones run with the privilege),
+        #  so a test whose link the host refused fails here instead of
+        #  passing with its link parts unrun.
+        env:
+          HOSTKIT_TESTS_NEED_LINKS: "1"
         run: |
           alr --non-interactive build
           # The binary is hostkit_tests.exe on Windows, and bash will not find it under

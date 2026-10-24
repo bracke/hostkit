@@ -44,6 +44,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- The suite's link tests no longer pass in silence on a host that refuses
+  links: each says so on standard error, and fails where
+  `HOSTKIT_TESTS_NEED_LINKS` is set, as CI now sets it on every runner, so the
+  Windows job's link race and no-follow parts are known to have run.
+
 - Linux `Durability.Reserve_Space` opens the file for reading and writing, as
   glibc's emulation on file systems without fallocate needs, retries an
   interrupted call, and answers `Not_Supported` where the file system cannot

@@ -67,6 +67,19 @@ package body Hostkit_Suite is
       return Base;
    end Scratch;
 
+   --  A test whose links the host refused says so on standard error, and
+   --  fails where HOSTKIT_TESTS_NEED_LINKS is set (as CI sets it), so a
+   --  host that skips the link parts cannot pass them unseen.
+   procedure Links_Refused (What : String) is
+   begin
+      Ada.Text_IO.Put_Line
+        (Ada.Text_IO.Standard_Error,
+         "note: " & What & ": the host refused to make a link; those parts were not run");
+      AUnit.Assertions.Assert
+        (not Ada.Environment_Variables.Exists ("HOSTKIT_TESTS_NEED_LINKS"),
+         What & ": links are needed here and the host refused one");
+   end Links_Refused;
+
    procedure Delete_Tree_If_Present (Path : String) is
    begin
       if Path /= "" and then Ada.Directories.Exists (Path) then
@@ -902,6 +915,8 @@ package body Hostkit_Suite is
          Assert (Ada.Directories.Exists (Outside_File), "a linked outside tree is untouched");
          if Linked then
             Assert (not Hostkit.Fs.Is_Link (Link), "the link itself is gone with the tree");
+         else
+            Links_Refused ("Delete_Tree_No_Follow, a link out of the tree");
          end if;
       end;
       Assert
@@ -991,6 +1006,8 @@ package body Hostkit_Suite is
                  "a directory link on the way is not followed");
          if Hostkit.Fs.Create_Link (Ada.Directories.Compose (Outside, "f.txt"), File_Link) then
             Assert (Read ("sub/file-link") = Hostkit.Fs.Read_Outside, "a file link is not followed");
+         else
+            Links_Refused ("Read_Beneath, a file link");
          end if;
 
          --  The race a check before the read loses: the directory on the
@@ -1030,6 +1047,8 @@ package body Hostkit_Suite is
             Assert (Read ("sub/f.txt") = Hostkit.Fs.Read_Done and then Ada.Strings.Unbounded.Index (Text, "inside") = 1,
                     "the file is read once the swapping stops" & Done_In'Image);
          end;
+      else
+         Links_Refused ("Read_Beneath, a directory link and the swap race");
       end if;
       Clean;
    exception
@@ -1160,6 +1179,9 @@ package body Hostkit_Suite is
             end if;
          end loop;
          Assert (Seen = (if Linked then 3 else 2), "every entry is listed");
+         if not Linked then
+            Links_Refused ("Directory_Listing, a link entry");
+         end if;
       end;
       Assert
         (not Hostkit.Directory_Listing.List (Ada.Directories.Compose (Root, "missing"), Entries),
@@ -1883,6 +1905,8 @@ package body Hostkit_Suite is
               (Hostkit.Metadata.Same_File (Original, Twin),
                "two names for one file are the same file");
             Ada.Directories.Delete_File (Twin);
+         else
+            Links_Refused ("Same_File, a hard link");
          end if;
       else
          --  The rule that matters on this host, and the one a case-only rename
@@ -1943,6 +1967,8 @@ package body Hostkit_Suite is
               (not Same (Identity, Hostkit.Metadata.Entry_Identity_Of (Link)),
                "a link's identity is its own, not its target's");
             Assert (Hostkit.Fs.Delete_Link (Link), "remove the identity-test link");
+         else
+            Links_Refused ("Entry_Identity_Of, a link");
          end if;
       end;
       Ada.Directories.Delete_File (Original);
