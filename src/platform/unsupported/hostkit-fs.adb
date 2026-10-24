@@ -6,6 +6,12 @@ with Ada.Strings.Fixed;
 package body Hostkit.Fs is
 
    --  An unknown host: nothing is claimed, and nothing is pretended.
+   function Is_Hidden (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Is_Hidden;
+
    function Is_Link (Path : String) return Boolean is
       pragma Unreferenced (Path);
    begin

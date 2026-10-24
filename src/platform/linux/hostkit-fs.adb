@@ -103,6 +103,12 @@ package body Hostkit.Fs is
    --  On POSIX these two GNAT helpers are honest: there is an lstat behind the first,
    --  and the mode bits behind the second. It is only on Windows that they answer
    --  without being able to know.
+   function Is_Hidden (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Is_Hidden;
+
    function Is_Link (Path : String) return Boolean is
    begin
       return GNAT.OS_Lib.Is_Symbolic_Link (Path);
@@ -602,7 +608,6 @@ package body Hostkit.Fs is
       Einval           : constant := 22;
       Enosys           : constant := 38;
       Eopnotsupp       : constant := 95;
-
 
       function C_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
         (C_Rename_At (At_Fdcwd, From, At_Fdcwd, To, Rename_Noreplace));

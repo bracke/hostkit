@@ -79,6 +79,53 @@ package body Hostkit.Fs is
    --  On POSIX these two GNAT helpers are honest: there is an lstat behind the first,
    --  and the mode bits behind the second. It is only on Windows that they answer
    --  without being able to know.
+   function Is_Hidden (Path : String) return Boolean is
+      use type Interfaces.Unsigned_32;
+      type Timespec is record
+         Seconds     : Interfaces.Integer_64 := 0;
+         Nanoseconds : Interfaces.Integer_64 := 0;
+      end record with Convention => C;
+      type Spare_Array is array (1 .. 2) of Interfaces.Integer_64 with Convention => C;
+      --  Darwin struct stat with 64-bit inodes, as Hostkit.Private_Paths reads it.
+      type Stat_Record is record
+         Device        : Interfaces.Integer_32 := 0;
+         Mode          : Interfaces.Unsigned_16 := 0;
+         Link_Count    : Interfaces.Unsigned_16 := 0;
+         Inode         : Interfaces.Unsigned_64 := 0;
+         User_Id       : Interfaces.Unsigned_32 := 0;
+         Group_Id      : Interfaces.Unsigned_32 := 0;
+         Raw_Device    : Interfaces.Integer_32 := 0;
+         Padding       : Interfaces.Integer_32 := 0;
+         Access_Time   : Timespec;
+         Modified_Time : Timespec;
+         Change_Time   : Timespec;
+         Birth_Time    : Timespec;
+         Size          : Interfaces.Integer_64 := 0;
+         Blocks        : Interfaces.Integer_64 := 0;
+         Block_Size    : Interfaces.Integer_32 := 0;
+         Flags         : Interfaces.Unsigned_32 := 0;
+         Generation    : Interfaces.Unsigned_32 := 0;
+         Long_Spare    : Interfaces.Integer_32 := 0;
+         Quad_Spare    : Spare_Array := [others => 0];
+      end record with Convention => C;
+      pragma Compile_Time_Error (Stat_Record'Size /= 144 * 8, "Darwin struct stat must be 144 bytes");
+
+      function C_Lstat
+        (Name : Interfaces.C.Strings.chars_ptr; Buffer : access Stat_Record) return Interfaces.C.int
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Lstat;
+
+      Uf_Hidden : constant Interfaces.Unsigned_32 := 16#0000_8000#;
+      C_Path    : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Info      : aliased Stat_Record;
+      Status    : constant Interfaces.C.int := C_Lstat (C_Path, Info'Access);
+   begin
+      Interfaces.C.Strings.Free (C_Path);
+      return Status = 0 and then (Info.Flags and Uf_Hidden) /= 0;
+   exception
+      when others =>
+         return False;
+   end Is_Hidden;
+
    function Is_Link (Path : String) return Boolean is
    begin
       return GNAT.OS_Lib.Is_Symbolic_Link (Path);
@@ -531,7 +578,9 @@ package body Hostkit.Fs is
       Error := GNAT.OS_Lib.Errno;
       if Error = Fallback_Exdev then
          return Move_Cross_Device;
-      elsif Error not in Fallback_Eperm | Fallback_Emlink | Fallback_Enotsup | Fallback_Enosys | Fallback_Eopnotsupp then
+      elsif Error not in
+        Fallback_Eperm | Fallback_Emlink | Fallback_Enotsup | Fallback_Enosys | Fallback_Eopnotsupp
+      then
          --  The target is taken, or the move is refused for good.
          return Move_Refused;
       end if;
@@ -572,7 +621,6 @@ package body Hostkit.Fs is
       Einval      : constant := 22;
       Enotsup     : constant := 45;
       Enosys      : constant := 78;
-
 
       function C_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
         (C_Renamex (From, To, Rename_Excl));

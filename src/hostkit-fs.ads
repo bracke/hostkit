@@ -17,6 +17,12 @@ package Hostkit.Fs is
    --  that is what is asked here.
    function Is_Link (Path : String) return Boolean;
 
+   --  Whether the host marks the entry at Path hidden by more than a leading
+   --  dot in its name: FILE_ATTRIBUTE_HIDDEN on Windows (desktop.ini,
+   --  NTUSER.DAT, System Volume Information), UF_HIDDEN on macOS (~/Library).
+   --  Linux has only the dot, so it answers False without asking.
+   function Is_Hidden (Path : String) return Boolean;
+
    --  Create a symbolic link at Link_Path pointing at Target.
    --
    --  False when the host will not: Windows needs Developer Mode or a privilege, and

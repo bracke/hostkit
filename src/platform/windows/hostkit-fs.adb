@@ -70,6 +70,17 @@ package body Hostkit.Fs is
    --  A symbolic link and a junction are both reparse points, and this is how Windows
    --  says so. There is no lstat, which is why GNAT's Is_Symbolic_Link cannot answer
    --  here and says False instead.
+   function Is_Hidden (Path : String) return Boolean is
+      File_Attribute_Hidden : constant C_DWord := 16#0000_0002#;
+      Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+   begin
+      return Attributes /= Invalid_File_Attributes and then (Attributes and File_Attribute_Hidden) /= 0;
+   exception
+      when others =>
+         return False;
+   end Is_Hidden;
+
    --  Only the symbolic-link and junction tags are links: OneDrive
    --  placeholders, deduplicated files and app-execution aliases are reparse
    --  points too, but ordinary files and folders to the user.
