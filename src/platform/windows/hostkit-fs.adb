@@ -124,12 +124,48 @@ package body Hostkit.Fs is
       Link_Path : String)
       return Boolean
    is
-      Wide_Target : aliased Wide_String := Wide (Target);
+      function Native (Path : String) return String;
+      function Seen_From_Link return String;
+
+      --  Windows resolves a link's target only with its own separators.
+      function Native (Path : String) return String is
+         Result : String := Path;
+      begin
+         for Item of Result loop
+            if Item = '/' then
+               Item := '\';
+            end if;
+         end loop;
+
+         return Result;
+      end Native;
+
+      --  A relative target is read from the link's folder, as following the
+      --  link reads it, not from the current one.
+      function Seen_From_Link return String is
+      begin
+         if Target'Length > 0
+           and then (Target (Target'First) in '/' | '\'
+                     or else (Target'Length > 1 and then Target (Target'First + 1) = ':'))
+         then
+            return Target;
+         end if;
+
+         for Index in reverse Link_Path'Range loop
+            if Link_Path (Index) in '/' | '\' then
+               return Link_Path (Link_Path'First .. Index) & Target;
+            end if;
+         end loop;
+
+         return Target;
+      end Seen_From_Link;
+
+      Wide_Target : aliased Wide_String := Wide (Native (Target));
       Wide_Link   : aliased Wide_String := Wide (Link_Path);
 
       Is_Directory : constant Boolean :=
-        (Ada.Directories.Exists (Target)
-         and then Ada.Directories.Kind (Target) = Ada.Directories.Directory);
+        (Ada.Directories.Exists (Seen_From_Link)
+         and then Ada.Directories.Kind (Seen_From_Link) = Ada.Directories.Directory);
 
       --  Windows will not make a link without either Developer Mode or the privilege,
       --  and refusing is a normal answer here rather than a fault.
