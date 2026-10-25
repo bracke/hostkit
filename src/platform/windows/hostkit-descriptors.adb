@@ -239,6 +239,21 @@ package body Hostkit.Descriptors is
       Item := Invalid;
    end Close;
 
+   function Close (Item : in out Descriptor) return Boolean is
+      Result : Interfaces.C.int;
+   begin
+      if Item = Invalid then
+         return True;
+      end if;
+
+      --  CloseHandle answers nonzero on success. Buffered data has already
+      --  gone to the system by then, so a failure here is a handle the host
+      --  did not recognise rather than a lost write; it is reported anyway.
+      Result := Close_Handle (To_Handle (Item));
+      Item := Invalid;
+      return Result /= 0;
+   end Close;
+
    ---------------
    -- Duplicate --
    ---------------

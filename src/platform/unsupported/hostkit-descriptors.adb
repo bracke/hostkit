@@ -23,6 +23,15 @@ package body Hostkit.Descriptors is
       Item := Invalid;
    end Close;
 
+   function Close (Item : in out Descriptor) return Boolean is
+      Was_Open : constant Boolean := Item /= Invalid;
+   begin
+      --  Nothing is ever opened here, so a descriptor that is not Invalid
+      --  is not one this host could have closed.
+      Item := Invalid;
+      return not Was_Open;
+   end Close;
+
    function Duplicate (Item : Descriptor) return Descriptor is
       pragma Unreferenced (Item);
    begin

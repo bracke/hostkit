@@ -2676,7 +2676,13 @@ package body Hostkit_Suite is
                  "the null device would not take what was written to it");
       end;
 
-      Hostkit.Descriptors.Close (Handle);
+      --  The checked close says how the close went, and leaves the handle
+      --  invalid, so that closing it again closes nothing and answers True.
+      Assert (Hostkit.Descriptors.Close (Handle),
+              "the null device's close was reported as failed");
+      Assert (not Hostkit.Descriptors.Is_Valid (Handle)
+              and then Hostkit.Descriptors.Close (Handle),
+              "a closed descriptor was not left invalid");
    end Test_The_Null_Device_Reads_As_Nothing;
 
    procedure Test_An_Identity_Reads_Beside_Another_Reader

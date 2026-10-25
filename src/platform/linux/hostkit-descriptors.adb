@@ -163,6 +163,21 @@ package body Hostkit.Descriptors is
       Item := Invalid;
    end Close;
 
+   function Close (Item : in out Descriptor) return Boolean is
+      Result : C_Int;
+   begin
+      if Item = Invalid then
+         return True;
+      end if;
+
+      --  close(2) answers 0 on success and -1 with errno otherwise; EIO and
+      --  ENOSPC there are a write that did not reach the file. The number is
+      --  given up either way, as Close says.
+      Result := C_Close (To_Fd (Item));
+      Item := Invalid;
+      return Result = 0;
+   end Close;
+
    ---------------
    -- Duplicate --
    ---------------

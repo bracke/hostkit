@@ -78,6 +78,20 @@ package Hostkit.Descriptors is
    --  @param Item Descriptor to close; Invalid afterwards.
    procedure Close (Item : in out Descriptor);
 
+   --  Close a descriptor, mark it invalid, and say whether the host reported
+   --  the close as successful.
+   --
+   --  A writer needs this answer: on NFS and some other file systems a write
+   --  that was accepted can still fail at close, and only close(2)'s result
+   --  says so -- a copy that ignores it can report success for a file that
+   --  never reached the disk. The descriptor is invalid afterwards either way,
+   --  for the reason Close gives. Closing Invalid closes nothing and answers
+   --  True.
+   --
+   --  @param Item Descriptor to close; Invalid afterwards.
+   --  @return True when the host reported the close as successful.
+   function Close (Item : in out Descriptor) return Boolean;
+
    --  Duplicate a descriptor. The copy refers to the same open file or pipe and
    --  must be closed separately. The copy is not inheritable.
    --
