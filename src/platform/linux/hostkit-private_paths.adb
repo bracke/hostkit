@@ -4,6 +4,9 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 
+with Hostkit.Host;
+with Hostkit.Linux_Abi;
+
 package body Hostkit.Private_Paths is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
@@ -56,8 +59,9 @@ package body Hostkit.Private_Paths is
      with Convention => C;
 
    O_Path      : constant C_Int := 8#10000000#;
-   O_Directory : constant C_Int := 8#00200000#;
-   O_Nofollow  : constant C_Int := 8#00400000#;
+   --  Per machine: arm, powerpc and m68k have their own (Hostkit.Linux_Abi).
+   O_Directory : constant C_Int := Hostkit.Linux_Abi.O_Directory (Hostkit.Host.Machine_Name);
+   O_Nofollow  : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
    O_Cloexec   : constant C_Int := 8#02000000#;
    At_Empty_Path : constant C_U32 := 16#1000#;
    Statx_Type_Uid : constant C_U32 := 16#0000_0009#;

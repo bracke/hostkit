@@ -13,6 +13,9 @@ with Interfaces.C.Strings;
 
 with Hostkit.Filesystem_Rules;
 
+with Hostkit.Host;
+with Hostkit.Linux_Abi;
+
 package body Hostkit.Fs is
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
@@ -25,6 +28,11 @@ package body Hostkit.Fs is
    subtype C_U32 is Interfaces.C.unsigned;
    subtype C_U64 is Interfaces.C.unsigned_long;
    subtype C_S64 is Interfaces.C.long;
+
+   --  O_DIRECTORY and O_NOFOLLOW differ on arm, powerpc and m68k; the x86
+   --  values there are O_DIRECT and O_LARGEFILE, and a final link is followed.
+   Machine_O_Directory : constant C_Int := Hostkit.Linux_Abi.O_Directory (Hostkit.Host.Machine_Name);
+   Machine_O_Nofollow  : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
 
    type U16_Array is array (Positive range <>) of C_U16
      with Convention => C;
@@ -720,8 +728,8 @@ package body Hostkit.Fs is
       Max_Entries : constant := 100_000;
       Max_Name_Bytes : constant := 64 * 1_024 * 1_024;
       O_Rdonly : constant C_Int := 0;
-      O_Directory : constant C_Int := 8#00200000#;
-      O_Nofollow : constant C_Int := 8#00400000#;
+      O_Directory : constant C_Int := Machine_O_Directory;
+      O_Nofollow : constant C_Int := Machine_O_Nofollow;
       O_Cloexec : constant C_Int := 8#02000000#;
       At_Symlink_Nofollow : constant C_U32 := 16#100#;
       At_Empty_Path : constant C_U32 := 16#1000#;
@@ -1094,8 +1102,8 @@ package body Hostkit.Fs is
 
       O_Rdonly    : constant C_Int := 0;
       O_Nonblock  : constant C_Int := 8#4000#;
-      O_Directory : constant C_Int := 8#00200000#;
-      O_Nofollow  : constant C_Int := 8#00400000#;
+      O_Directory : constant C_Int := Machine_O_Directory;
+      O_Nofollow  : constant C_Int := Machine_O_Nofollow;
       O_Cloexec   : constant C_Int := 8#02000000#;
       E_Intr      : constant C_Int := 4;
       E_Noent     : constant C_Int := 2;

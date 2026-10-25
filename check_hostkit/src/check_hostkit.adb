@@ -1,5 +1,6 @@
 with Ada.Command_Line;
 with Ada.Directories;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Text_IO;
 
@@ -219,6 +220,51 @@ procedure Check_Hostkit is
       end loop;
    end Require_Every_Host_Body_Parses;
 
+   --  No Linux body may spell O_NOFOLLOW or O_DIRECTORY as a number. Their
+   --  values differ by machine -- arm, powerpc and m68k have their own, and
+   --  there the x86 numbers are O_LARGEFILE and O_DIRECT -- so a literal
+   --  silently follows a final link on those machines. Four bodies did, and
+   --  nothing on an x86 runner could tell. Hostkit.Linux_Abi picks them.
+   procedure Require_Machine_Open_Flags is
+      Search : Ada.Directories.Search_Type;
+      Item   : Ada.Directories.Directory_Entry_Type;
+   begin
+      Ada.Directories.Start_Search
+        (Search, Root & "/src/platform/linux", "*.adb");
+      while Ada.Directories.More_Entries (Search) loop
+         Ada.Directories.Get_Next_Entry (Search, Item);
+         declare
+            Name : constant String := Ada.Directories.Simple_Name (Item);
+            File : File_Type;
+            Line_Number : Natural := 0;
+         begin
+            Open (File, In_File, Ada.Directories.Full_Name (Item));
+            while not End_Of_File (File) loop
+               declare
+                  Line   : constant String := Get_Line (File);
+                  Assign : constant Natural := Ada.Strings.Fixed.Index (Line, ":= ");
+               begin
+                  Line_Number := Line_Number + 1;
+                  if (Ada.Strings.Fixed.Index (Line, "O_Nofollow") > 0
+                      or else Ada.Strings.Fixed.Index (Line, "O_Directory") > 0)
+                    and then Assign > 0
+                    and then Assign + 3 <= Line'Last
+                    and then Line (Assign + 3) in '0' .. '9'
+                  then
+                     Error
+                       ("src/platform/linux/" & Name & ":"
+                        & Ada.Strings.Fixed.Trim (Natural'Image (Line_Number), Ada.Strings.Both)
+                        & " spells an open flag that differs by machine as a number;"
+                        & " take it from Hostkit.Linux_Abi");
+                  end if;
+               end;
+            end loop;
+            Close (File);
+         end;
+      end loop;
+      Ada.Directories.End_Search (Search);
+   end Require_Machine_Open_Flags;
+
    procedure Check_Generated_Artifacts is
       Hygiene_Errors : Natural := 0;
    begin
@@ -277,6 +323,7 @@ begin
 
    Require_A_Body_Per_Host;
    Require_Every_Host_Body_Parses;
+   Require_Machine_Open_Flags;
 
    --  The host calls, per body. Grouped by what they are for rather than by
    --  host, because the point of each row is that the same question is answered

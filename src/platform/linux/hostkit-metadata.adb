@@ -5,6 +5,8 @@ with Interfaces.C;
 
 with Interfaces.C.Strings;
 
+with Hostkit.Host;
+with Hostkit.Linux_Abi;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
@@ -25,6 +27,10 @@ package body Hostkit.Metadata is
    subtype C_U64 is Interfaces.C.unsigned_long;
    subtype C_S64 is Interfaces.C.long;
    subtype C_ULong is Interfaces.C.unsigned_long;
+
+   --  O_NOFOLLOW differs on arm, powerpc and m68k; the x86 value there is
+   --  O_LARGEFILE, and the held entry would be a link's target.
+   Machine_O_Nofollow : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
 
    At_FDCWD : constant C_Int := -100;
    At_Symlink_Nofollow : constant C_Unsigned := 16#100#;
@@ -506,7 +512,7 @@ package body Hostkit.Metadata is
    is
       pragma Unreferenced (Owner_Name, Group_Name);
       O_Path        : constant C_Int := 16#20_0000#;
-      O_Nofollow    : constant C_Int := 16#02_0000#;
+      O_Nofollow    : constant C_Int := Machine_O_Nofollow;
       O_Cloexec     : constant C_Int := 16#08_0000#;
       At_Empty_Path : constant C_Int := 16#1000#;
       File_Type     : constant C_U16 := 16#F000#;

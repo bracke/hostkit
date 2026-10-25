@@ -60,6 +60,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **On arm, powerpc and m68k Linux, a final symbolic link was followed where
+  it must not be.** `Lease_Files`, `Private_Paths`, `Fs` (the no-follow tree
+  delete and `Read_Beneath`) and `Metadata.Update_Entry_Metadata` spelled
+  O_NOFOLLOW and O_DIRECTORY as their x86 numbers, which on those machines are
+  O_LARGEFILE and O_DIRECT. They take the machine's values from `Linux_Abi`
+  now, and the release check refuses a Linux body that spells either as a
+  number.
+
 - A file owned by a uid or gid from 2**31 up (idmapped mounts, NFS's nobody
   at 4294967294) reported no ownership and, on Linux, no permissions either:
   the conversion to Natural raised, and the handler cleared the mode with the

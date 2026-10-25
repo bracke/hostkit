@@ -2,6 +2,9 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 
+with Hostkit.Host;
+with Hostkit.Linux_Abi;
+
 package body Hostkit.Lease_Files is
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
@@ -43,7 +46,8 @@ package body Hostkit.Lease_Files is
    O_Rdwr : constant C_Int := 2;
    O_Creat : constant C_Int := 16#40#;
    O_Excl : constant C_Int := 16#80#;
-   O_Nofollow : constant C_Int := 16#20_000#;
+   --  Per machine: arm, powerpc and m68k have their own (Hostkit.Linux_Abi).
+   O_Nofollow : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
    O_Cloexec : constant C_Int := 16#80_000#;
    Lock_Shared : constant C_Int := 1;
    Lock_Exclusive : constant C_Int := 2;
