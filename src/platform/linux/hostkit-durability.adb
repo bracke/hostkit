@@ -1,44 +1,18 @@
 with Interfaces.C.Strings;
 
+with Hostkit.Host;
+with Hostkit.Linux_Abi;
+
 package body Hostkit.Durability is
 
    use type Interfaces.C.int;
 
    subtype C_Int is Interfaces.C.int;
 
-   --  asm-generic/fcntl.h is right for x86, riscv and most targets, but arm,
-   --  arm64, powerpc and m68k define their own O_DIRECTORY (the generic bit
-   --  is O_DIRECT there), so pick by the running machine.
-   function Uses_Alternate_Open_Flags return Boolean is
-      use type Interfaces.C.char;
-      type Uts_Field is array (1 .. 65) of Interfaces.C.char with Convention => C;
-      type Uts_Name is record
-         Sysname, Nodename, Release, Version, Machine, Domainname : Uts_Field;
-      end record with Convention => C;
-      function uname (Buffer : access Uts_Name) return C_Int
-        with Import, Convention => C, External_Name => "uname";
-      Info    : aliased Uts_Name;
-      Machine : String (1 .. Uts_Field'Length);
-      Last    : Natural := 0;
-
-      function Starts (Prefix : String) return Boolean is
-        (Last >= Prefix'Length and then Machine (1 .. Prefix'Length) = Prefix);
-   begin
-      if uname (Info'Access) /= 0 then
-         return False;
-      end if;
-      for Char of Info.Machine loop
-         exit when Char = Interfaces.C.nul;
-         Last := Last + 1;
-         Machine (Last) := Interfaces.C.To_Ada (Char);
-      end loop;
-      return Starts ("arm") or else Starts ("aarch64") or else Starts ("ppc")
-        or else Starts ("powerpc") or else Starts ("m68k");
-   end Uses_Alternate_Open_Flags;
-
-   --  Linux O_RDONLY, and O_DIRECTORY in octal.
+   --  Linux O_RDONLY, and O_DIRECTORY for this machine (it differs on arm,
+   --  powerpc and m68k; Hostkit.Linux_Abi says how).
    O_Rdonly    : constant C_Int := 8#0#;
-   O_Directory : constant C_Int := (if Uses_Alternate_Open_Flags then 8#40000# else 8#200000#);
+   O_Directory : constant C_Int := Hostkit.Linux_Abi.O_Directory (Hostkit.Host.Machine_Name);
    O_Cloexec   : constant C_Int := 8#2000000#;
 
    function open (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int

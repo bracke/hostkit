@@ -1,3 +1,5 @@
+with Hostkit.Metadata.Natural_Ids;
+
 package body Hostkit.Metadata is
 
    function Entry_Identity_Of (Path : String) return Entry_Identity is
@@ -97,8 +99,8 @@ package body Hostkit.Metadata is
 
    procedure File_Ownership
      (Path      : String;
-      User_Id   : out Natural;
-      Group_Id  : out Natural;
+      User_Id   : out Account_Id;
+      Group_Id  : out Account_Id;
       Available : out Boolean)
    is
       pragma Unreferenced (Path);
@@ -112,8 +114,8 @@ package body Hostkit.Metadata is
      (Path                : String;
       Mode_Bits           : out Natural;
       Mode_Available      : out Boolean;
-      User_Id             : out Natural;
-      Group_Id            : out Natural;
+      User_Id             : out Account_Id;
+      Group_Id            : out Account_Id;
       Ownership_Available : out Boolean) is
    begin
       Mode_Bits := File_Permission_Bits (Path, Mode_Available);
@@ -139,7 +141,7 @@ package body Hostkit.Metadata is
    function User_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural
+      return Account_Id
    is
       pragma Unreferenced (Name);
    begin
@@ -150,7 +152,7 @@ package body Hostkit.Metadata is
    function Group_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural
+      return Account_Id
    is
       pragma Unreferenced (Name);
    begin
@@ -158,13 +160,13 @@ package body Hostkit.Metadata is
       return 0;
    end Group_Id_For_Name;
 
-   function User_Name_For_Id (Id : Natural) return String is
+   function User_Name_For_Id (Id : Account_Id) return String is
       pragma Unreferenced (Id);
    begin
       return "";
    end User_Name_For_Id;
 
-   function Group_Name_For_Id (Id : Natural) return String is
+   function Group_Name_For_Id (Id : Account_Id) return String is
       pragma Unreferenced (Id);
    begin
       return "";
@@ -172,8 +174,8 @@ package body Hostkit.Metadata is
 
    function Set_Ownership
      (Path     : String;
-      User_Id  : Natural;
-      Group_Id : Natural)
+      User_Id  : Account_Id;
+      Group_Id : Account_Id)
       return Boolean
    is
       pragma Unreferenced (Path, User_Id, Group_Id);
@@ -190,5 +192,29 @@ package body Hostkit.Metadata is
    begin
       return False;
    end Ownership_Supported;
+
+   procedure File_Ownership
+     (Path      : String;
+      User_Id   : out Natural;
+      Group_Id  : out Natural;
+      Available : out Boolean) renames Natural_Ids.File_Ownership;
+
+   procedure File_Mode_And_Ownership
+     (Path                : String;
+      Mode_Bits           : out Natural;
+      Mode_Available      : out Boolean;
+      User_Id             : out Natural;
+      Group_Id            : out Natural;
+      Ownership_Available : out Boolean) renames Natural_Ids.File_Mode_And_Ownership;
+
+   function User_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.User_Id_For_Name;
+
+   function Group_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.Group_Id_For_Name;
 
 end Hostkit.Metadata;

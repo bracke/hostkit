@@ -342,6 +342,41 @@ begin
    Require_Binding ("src/platform/macos/hostkit-host.adb", "getlogin_r");
    Require_Binding ("src/platform/windows/hostkit-host.adb", "GetUserNameW");
 
+   --  Opening only a regular file, the descriptor itself being asked what it
+   --  is, and writing a sparse copy. Moved here from files, which had bound
+   --  these itself in per-OS bodies of its own.
+   Require_Binding ("src/platform/linux/hostkit-regular_files.adb", "open");
+   Require_Binding ("src/platform/linux/hostkit-regular_files.adb", "statx");
+   Require_Binding ("src/platform/linux/hostkit-regular_files.adb", "lseek");
+   Require_Binding ("src/platform/linux/hostkit-regular_files.adb", "ftruncate");
+   Require_Binding ("src/platform/macos/hostkit-regular_files.adb", "open");
+   Require_Text
+     ("src/platform/macos/hostkit-regular_files.adb",
+      "External_Name => Hostkit.Darwin_Symbols.Fstat",
+      "src/platform/macos/hostkit-regular_files.adb must bind Darwin_Symbols.Fstat");
+   Require_Binding ("src/platform/macos/hostkit-regular_files.adb", "lseek");
+   Require_Binding ("src/platform/macos/hostkit-regular_files.adb", "ftruncate");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "CreateFileW");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "GetFileInformationByHandle");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_open_osfhandle");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "DeviceIoControl");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_lseeki64");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_chsize_s");
+
+   --  Lending a directory its owner's write bit for a rename, through a held
+   --  descriptor. Windows has no such rule, and its body binds nothing.
+   Require_Binding ("src/platform/linux/hostkit-directory_write_access.adb", "open");
+   Require_Binding ("src/platform/linux/hostkit-directory_write_access.adb", "statx");
+   Require_Binding ("src/platform/linux/hostkit-directory_write_access.adb", "geteuid");
+   Require_Binding ("src/platform/linux/hostkit-directory_write_access.adb", "chmod");
+   Require_Binding ("src/platform/macos/hostkit-directory_write_access.adb", "open");
+   Require_Text
+     ("src/platform/macos/hostkit-directory_write_access.adb",
+      "External_Name => Hostkit.Darwin_Symbols.Fstat",
+      "src/platform/macos/hostkit-directory_write_access.adb must bind Darwin_Symbols.Fstat");
+   Require_Binding ("src/platform/macos/hostkit-directory_write_access.adb", "geteuid");
+   Require_Binding ("src/platform/macos/hostkit-directory_write_access.adb", "fchmod");
+
    --  Reading a link's own target, which Windows has no readlink for.
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "readlink");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeviceIoControl");

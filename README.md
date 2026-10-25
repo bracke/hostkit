@@ -60,6 +60,8 @@ interface. The question to ask of a new subprogram is:
 | `Hostkit.Terminal_Control` | Terminal modes, window size, the foreground process group, and whether an interrupt reaches a program that is busy |
 | `Hostkit.Locks` | Advisory file locks |
 | `Hostkit.Lease_Files` | No-follow, identity-bound lease files combining process-held locks with durable positioned I/O |
+| `Hostkit.Regular_Files` | Opening a file only when the opened descriptor is a regular file (optionally refusing a final link), and writing holes into a sparse copy |
+| `Hostkit.Directory_Write_Access` | Lending a read-only directory its owner write bit for a rename, changed and restored through one held descriptor |
 
 Three of those answers exist because a shell asked and the honest answer was
 "that depends on the host":

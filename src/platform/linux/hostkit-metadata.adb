@@ -5,6 +5,8 @@ with Interfaces.C;
 
 with Interfaces.C.Strings;
 
+with Hostkit.Metadata.Natural_Ids;
+
 package body Hostkit.Metadata is
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
@@ -407,8 +409,8 @@ package body Hostkit.Metadata is
 
    procedure File_Ownership
      (Path      : String;
-      User_Id   : out Natural;
-      Group_Id  : out Natural;
+      User_Id   : out Account_Id;
+      Group_Id  : out Account_Id;
       Available : out Boolean)
    is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
@@ -423,8 +425,8 @@ package body Hostkit.Metadata is
 
       if Status = 0 then
          Available := True;
-         User_Id := Natural (Info.User_Id);
-         Group_Id := Natural (Info.Group_Id);
+         User_Id := Account_Id (Info.User_Id);
+         Group_Id := Account_Id (Info.Group_Id);
       end if;
    exception
       when others =>
@@ -681,8 +683,8 @@ package body Hostkit.Metadata is
      (Path                : String;
       Mode_Bits           : out Natural;
       Mode_Available      : out Boolean;
-      User_Id             : out Natural;
-      Group_Id            : out Natural;
+      User_Id             : out Account_Id;
+      Group_Id            : out Account_Id;
       Ownership_Available : out Boolean)
    is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
@@ -703,15 +705,15 @@ package body Hostkit.Metadata is
       if Status = 0 then
          Mode_Bits := Natural (Info.Mode and Permission_Mask);
          Mode_Available := True;
-         User_Id := Natural (Info.User_Id);
-         Group_Id := Natural (Info.Group_Id);
+         User_Id := Account_Id (Info.User_Id);
+         Group_Id := Account_Id (Info.Group_Id);
          Ownership_Available := True;
       end if;
    exception
       when others =>
+         --  The mode keeps whatever the statx above established: a failure on
+         --  the ownership side never takes the permissions with it.
          Safe_Free (C_Path);
-         Mode_Bits := 0;
-         Mode_Available := False;
          User_Id := 0;
          Group_Id := 0;
          Ownership_Available := False;
@@ -720,18 +722,18 @@ package body Hostkit.Metadata is
    function User_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural
+      return Account_Id
    is
       C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
       Entry_Ptr : access Passwd_Front;
-      Result : Natural := 0;
+      Result : Account_Id := 0;
    begin
       Found := False;
       Entry_Ptr := Getpwnam (C_Name);
       Interfaces.C.Strings.Free (C_Name);
       if Entry_Ptr /= null then
          Found := True;
-         Result := Natural (Entry_Ptr.Uid);
+         Result := Account_Id (Entry_Ptr.Uid);
       end if;
       return Result;
    exception
@@ -744,18 +746,18 @@ package body Hostkit.Metadata is
    function Group_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural
+      return Account_Id
    is
       C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
       Entry_Ptr : access Group_Front;
-      Result : Natural := 0;
+      Result : Account_Id := 0;
    begin
       Found := False;
       Entry_Ptr := Getgrnam (C_Name);
       Interfaces.C.Strings.Free (C_Name);
       if Entry_Ptr /= null then
          Found := True;
-         Result := Natural (Entry_Ptr.Gid);
+         Result := Account_Id (Entry_Ptr.Gid);
       end if;
       return Result;
    exception
@@ -765,7 +767,7 @@ package body Hostkit.Metadata is
          return 0;
    end Group_Id_For_Name;
 
-   function User_Name_For_Id (Id : Natural) return String is
+   function User_Name_For_Id (Id : Account_Id) return String is
       --  The returned struct points into a static libc buffer; do not free it.
       Entry_Ptr : constant access Passwd_Front := Getpwuid (C_U32 (Id));
    begin
@@ -781,7 +783,7 @@ package body Hostkit.Metadata is
          return "";
    end User_Name_For_Id;
 
-   function Group_Name_For_Id (Id : Natural) return String is
+   function Group_Name_For_Id (Id : Account_Id) return String is
       --  The returned struct points into a static libc buffer; do not free it.
       Entry_Ptr : constant access Group_Front := Getgrgid (C_U32 (Id));
    begin
@@ -799,8 +801,8 @@ package body Hostkit.Metadata is
 
    function Set_Ownership
      (Path     : String;
-      User_Id  : Natural;
-      Group_Id : Natural)
+      User_Id  : Account_Id;
+      Group_Id : Account_Id)
       return Boolean
    is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
@@ -824,5 +826,29 @@ package body Hostkit.Metadata is
    begin
       return True;
    end Ownership_Supported;
+
+   procedure File_Ownership
+     (Path      : String;
+      User_Id   : out Natural;
+      Group_Id  : out Natural;
+      Available : out Boolean) renames Natural_Ids.File_Ownership;
+
+   procedure File_Mode_And_Ownership
+     (Path                : String;
+      Mode_Bits           : out Natural;
+      Mode_Available      : out Boolean;
+      User_Id             : out Natural;
+      Group_Id            : out Natural;
+      Ownership_Available : out Boolean) renames Natural_Ids.File_Mode_And_Ownership;
+
+   function User_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.User_Id_For_Name;
+
+   function Group_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.Group_Id_For_Name;
 
 end Hostkit.Metadata;

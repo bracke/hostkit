@@ -26,6 +26,43 @@ package Hostkit.Metadata is
 
    subtype Identity_Field is Interfaces.Unsigned_64;
 
+   --  A numeric user or group id: uid_t and gid_t are unsigned 32-bit on
+   --  every POSIX host this crate has a body for, and every value is a real
+   --  one -- an idmapped mount shows ids from 2**31 up, and NFS's nobody is
+   --  4294967294. Natural ends at 2**31 - 1, and when these were Natural a
+   --  file owned by such an id answered no ownership and no permissions at
+   --  all. On Windows the number is one this package minted for an owner SID
+   --  and always fits Natural, but the type is the same.
+   type Account_Id is mod 2**32;
+
+   --  Account_Id'Image without its leading space: "4294967294".
+   function Account_Image (Id : Account_Id) return String is
+     (Account_Id'Image (Id) (2 .. Account_Id'Image (Id)'Last));
+
+   --  The outcome of reading an id out of text.
+   type Parsed_Account_Id is record
+      Valid : Boolean := False;
+      Id    : Account_Id := 0;
+   end record;
+
+   --  Read a decimal id typed or stored as text: one or more ASCII digits and
+   --  nothing else (no sign, no blanks, no base), at most 4294967295.
+   --  Account_Id'Value is not this: it accepts blanks, underscores and
+   --  16#FF#, and raises rather than answering for a value out of range.
+   --
+   --  @param Text Candidate decimal text.
+   --  @return Valid => True with the id, or Valid => False and 0.
+   function Parse_Account_Id (Text : String) return Parsed_Account_Id is
+     (if Text'Length in 1 .. 10
+        and then (for all Char of Text => Char in '0' .. '9')
+        and then Long_Long_Integer'Value (Text) <= Long_Long_Integer (Account_Id'Last)
+      then (Valid => True, Id => Account_Id (Long_Long_Integer'Value (Text)))
+      else (Valid => False, Id => 0));
+
+   --  Can Id be held by a caller that keeps ids as Natural?
+   function Fits_Natural (Id : Account_Id) return Boolean is
+     (Id <= Account_Id (Natural'Last));
+
    --  A no-follow identity for one directory entry. The generation fields
    --  carry birth time on POSIX and the upper half of a 128-bit file ID on
    --  Windows. Available is False rather than returning an inode alone when
@@ -200,8 +237,8 @@ package Hostkit.Metadata is
    --  @param Available True when ownership ids were obtained.
    procedure File_Ownership
      (Path      : String;
-      User_Id   : out Natural;
-      Group_Id  : out Natural;
+      User_Id   : out Account_Id;
+      Group_Id  : out Account_Id;
       Available : out Boolean);
 
    --  The permission bits and the ownership of Path, in one call to the host.
@@ -211,6 +248,10 @@ package Hostkit.Metadata is
    --  single statx with mode|uid|gid) it does, which halves the metadata syscalls
    --  a directory listing pays per file. Hosts that cannot delegate to the two
    --  individual calls and are therefore behaviour-identical either way.
+   --
+   --  The two answers are independent: an ownership the host would not give
+   --  never takes the mode with it. Mode_Available is exactly what
+   --  File_Permission_Bits would have said.
    --
    --  @param Path Path to inspect.
    --  @param Mode_Bits Permission bits in 0 .. 8#7777# when Mode_Available.
@@ -222,8 +263,8 @@ package Hostkit.Metadata is
      (Path                : String;
       Mode_Bits           : out Natural;
       Mode_Available      : out Boolean;
-      User_Id             : out Natural;
-      Group_Id            : out Natural;
+      User_Id             : out Account_Id;
+      Group_Id            : out Account_Id;
       Ownership_Available : out Boolean);
 
    --  Set the owner and group of Path to ids this package handed out.
@@ -248,8 +289,8 @@ package Hostkit.Metadata is
    --  @return True when the host applied it.
    function Set_Ownership
      (Path     : String;
-      User_Id  : Natural;
-      Group_Id : Natural)
+      User_Id  : Account_Id;
+      Group_Id : Account_Id)
       return Boolean;
 
    --  Does this host have file ownership to read and set? See Set_Ownership
@@ -308,7 +349,7 @@ package Hostkit.Metadata is
    function User_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural;
+      return Account_Id;
 
    --  A group name to its numeric id -- getgrnam(3) and its equivalents.
    --
@@ -318,18 +359,62 @@ package Hostkit.Metadata is
    function Group_Id_For_Name
      (Name  : String;
       Found : out Boolean)
-      return Natural;
+      return Account_Id;
 
    --  A numeric user id back to its name -- getpwuid(3) and its equivalents.
    --
    --  @param Id User id to resolve.
    --  @return The name, or the empty string when it does not resolve.
-   function User_Name_For_Id (Id : Natural) return String;
+   function User_Name_For_Id (Id : Account_Id) return String;
 
    --  A numeric group id back to its name -- getgrgid(3) and its equivalents.
    --
    --  @param Id Group id to resolve.
    --  @return The name, or the empty string when it does not resolve.
-   function Group_Name_For_Id (Id : Natural) return String;
+   function Group_Name_For_Id (Id : Account_Id) return String;
+
+   --  The same questions for a caller that holds ids as Natural, which every
+   --  one did before Account_Id. Each answers as its Account_Id twin does,
+   --  except that an id above Natural'Last cannot be handed back: such an
+   --  owner reads as Available/Found => False (the mode, in
+   --  File_Mode_And_Ownership, is still reported). Prefer the Account_Id
+   --  forms; these keep existing consumers building.
+
+   procedure File_Ownership
+     (Path      : String;
+      User_Id   : out Natural;
+      Group_Id  : out Natural;
+      Available : out Boolean);
+
+   procedure File_Mode_And_Ownership
+     (Path                : String;
+      Mode_Bits           : out Natural;
+      Mode_Available      : out Boolean;
+      User_Id             : out Natural;
+      Group_Id            : out Natural;
+      Ownership_Available : out Boolean);
+
+   function Set_Ownership
+     (Path     : String;
+      User_Id  : Natural;
+      Group_Id : Natural)
+      return Boolean is
+     (Set_Ownership (Path, Account_Id (User_Id), Account_Id (Group_Id)));
+
+   function User_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural;
+
+   function Group_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural;
+
+   function User_Name_For_Id (Id : Natural) return String is
+     (User_Name_For_Id (Account_Id (Id)));
+
+   function Group_Name_For_Id (Id : Natural) return String is
+     (Group_Name_For_Id (Account_Id (Id)));
 
 end Hostkit.Metadata;

@@ -6,6 +6,7 @@ with GNAT.OS_Lib;
 with Interfaces.C.Strings;
 with System;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
    use Ada.Strings.Unbounded;
@@ -432,8 +433,8 @@ package body Hostkit.Metadata is
 
    procedure File_Ownership
      (Path      : String;
-      User_Id   : out Natural;
-      Group_Id  : out Natural;
+      User_Id   : out Account_Id;
+      Group_Id  : out Account_Id;
       Available : out Boolean)
    is
       Buffer : aliased Stat_Record;
@@ -446,8 +447,8 @@ package body Hostkit.Metadata is
          return;
       end if;
 
-      User_Id := Natural (Buffer.User_Id);
-      Group_Id := Natural (Buffer.Group_Id);
+      User_Id := Account_Id (Buffer.User_Id);
+      Group_Id := Account_Id (Buffer.Group_Id);
       Available := True;
 
    exception
@@ -461,8 +462,8 @@ package body Hostkit.Metadata is
      (Path                : String;
       Mode_Bits           : out Natural;
       Mode_Available      : out Boolean;
-      User_Id             : out Natural;
-      Group_Id            : out Natural;
+      User_Id             : out Account_Id;
+      Group_Id            : out Account_Id;
       Ownership_Available : out Boolean) is
    begin
       Mode_Bits := File_Permission_Bits (Path, Mode_Available);
@@ -764,7 +765,7 @@ package body Hostkit.Metadata is
 
    function User_Id_For_Name
      (Name  : String;
-      Found : out Boolean) return Natural
+      Found : out Boolean) return Account_Id
    is
       C_Name : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Name);
@@ -779,7 +780,7 @@ package body Hostkit.Metadata is
       end if;
 
       Found := True;
-      return Natural (Item.User_Id);
+      return Account_Id (Item.User_Id);
 
    exception
       when others =>
@@ -790,7 +791,7 @@ package body Hostkit.Metadata is
 
    function Group_Id_For_Name
      (Name  : String;
-      Found : out Boolean) return Natural
+      Found : out Boolean) return Account_Id
    is
       C_Name : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Name);
@@ -805,7 +806,7 @@ package body Hostkit.Metadata is
       end if;
 
       Found := True;
-      return Natural (Item.Group_Id);
+      return Account_Id (Item.Group_Id);
 
    exception
       when others =>
@@ -814,7 +815,7 @@ package body Hostkit.Metadata is
          return 0;
    end Group_Id_For_Name;
 
-   function User_Name_For_Id (Id : Natural) return String is
+   function User_Name_For_Id (Id : Account_Id) return String is
       Item : constant Passwd_Access := C_Getpwuid (C_U32 (Id));
    begin
       if Item = null or else Item.Name = Interfaces.C.Strings.Null_Ptr then
@@ -828,7 +829,7 @@ package body Hostkit.Metadata is
          return "";
    end User_Name_For_Id;
 
-   function Group_Name_For_Id (Id : Natural) return String is
+   function Group_Name_For_Id (Id : Account_Id) return String is
       Item : constant Group_Access := C_Getgrgid (C_U32 (Id));
    begin
       if Item = null or else Item.Name = Interfaces.C.Strings.Null_Ptr then
@@ -844,8 +845,8 @@ package body Hostkit.Metadata is
 
    function Set_Ownership
      (Path     : String;
-      User_Id  : Natural;
-      Group_Id : Natural) return Boolean
+      User_Id  : Account_Id;
+      Group_Id : Account_Id) return Boolean
    is
       C_Path : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);
@@ -870,5 +871,29 @@ package body Hostkit.Metadata is
    begin
       return True;
    end Ownership_Supported;
+
+   procedure File_Ownership
+     (Path      : String;
+      User_Id   : out Natural;
+      Group_Id  : out Natural;
+      Available : out Boolean) renames Natural_Ids.File_Ownership;
+
+   procedure File_Mode_And_Ownership
+     (Path                : String;
+      Mode_Bits           : out Natural;
+      Mode_Available      : out Boolean;
+      User_Id             : out Natural;
+      Group_Id            : out Natural;
+      Ownership_Available : out Boolean) renames Natural_Ids.File_Mode_And_Ownership;
+
+   function User_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.User_Id_For_Name;
+
+   function Group_Id_For_Name
+     (Name  : String;
+      Found : out Boolean)
+      return Natural renames Natural_Ids.Group_Id_For_Name;
 
 end Hostkit.Metadata;

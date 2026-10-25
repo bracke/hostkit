@@ -20,14 +20,17 @@ with Ada.Streams;
 
 with Hostkit.Descriptors;
 with Hostkit.Directory_Listing;
+with Hostkit.Directory_Write_Access;
 with Hostkit.Durability;
 with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Lease_Files;
+with Hostkit.Linux_Abi;
 with Hostkit.Metadata;
 with Hostkit.Resources;
 with Hostkit.Process;
 with Hostkit.Private_Paths;
+with Hostkit.Regular_Files;
 with Hostkit.Shell;
 with Hostkit.Trash;
 with Hostkit.Watch;
@@ -38,6 +41,7 @@ package body Hostkit_Suite is
    use AUnit.Assertions;
    use Ada.Strings.Unbounded;
    use type Hostkit.Host.Kind;
+   use type Hostkit.Metadata.Account_Id;
 
    --  The suite's own directory: noop and failing are built beside it.
    function Companion (Name : String) return String is
@@ -1861,15 +1865,21 @@ package body Hostkit_Suite is
 
       Separate_Mode      : Natural;
       Separate_Mode_Ok   : Boolean;
-      Separate_User      : Natural;
-      Separate_Group     : Natural;
+      Separate_User      : Hostkit.Metadata.Account_Id;
+      Separate_Group     : Hostkit.Metadata.Account_Id;
       Separate_Owner_Ok  : Boolean;
 
       Joint_Mode         : Natural;
       Joint_Mode_Ok      : Boolean;
-      Joint_User         : Natural;
-      Joint_Group        : Natural;
+      Joint_User         : Hostkit.Metadata.Account_Id;
+      Joint_Group        : Hostkit.Metadata.Account_Id;
       Joint_Owner_Ok     : Boolean;
+
+      Narrow_Mode        : Natural;
+      Narrow_Mode_Ok     : Boolean;
+      Narrow_User        : Natural;
+      Narrow_Group       : Natural;
+      Narrow_Owner_Ok    : Boolean;
    begin
       Write_File (Path, "x");
 
@@ -1893,6 +1903,31 @@ package body Hostkit_Suite is
       if Separate_Owner_Ok then
          Assert (Joint_User = Separate_User, "the joint call reports the same owner");
          Assert (Joint_Group = Separate_Group, "the joint call reports the same group");
+      end if;
+
+      --  The Natural form kept for older callers answers the mode exactly as
+      --  the Account_Id form does, whatever it makes of the ownership: an
+      --  owner it cannot hand back as a Natural costs the ownership answer,
+      --  never the permissions.
+      Hostkit.Metadata.File_Mode_And_Ownership
+        (Path, Narrow_Mode, Narrow_Mode_Ok, Narrow_User, Narrow_Group, Narrow_Owner_Ok);
+      Assert (Narrow_Mode_Ok = Joint_Mode_Ok, "the Natural form reports mode availability the same way");
+      if Joint_Mode_Ok then
+         Assert (Narrow_Mode = Joint_Mode, "the Natural form reports the same mode bits");
+      end if;
+      Assert
+        (Narrow_Owner_Ok
+           = (Joint_Owner_Ok
+              and then Hostkit.Metadata.Fits_Natural (Joint_User)
+              and then Hostkit.Metadata.Fits_Natural (Joint_Group)),
+         "the Natural form reports ownership exactly when the ids fit a Natural");
+      if Narrow_Owner_Ok then
+         Assert
+           (Hostkit.Metadata.Account_Id (Narrow_User) = Joint_User,
+            "the Natural form reports the same owner");
+         Assert
+           (Hostkit.Metadata.Account_Id (Narrow_Group) = Joint_Group,
+            "the Natural form reports the same group");
       end if;
 
       --  A mode this host can set is a mode it reads back -- but only where the
@@ -2208,15 +2243,15 @@ package body Hostkit_Suite is
    is
       pragma Unreferenced (T);
       Path      : constant String := Ada.Directories.Compose (Scratch, "hk-meta-owner");
-      User_Id   : Natural;
-      Group_Id  : Natural;
+      User_Id   : Hostkit.Metadata.Account_Id;
+      Group_Id  : Hostkit.Metadata.Account_Id;
       Available : Boolean;
    begin
       if not Hostkit.Metadata.Ownership_Supported then
          --  Windows has no uid/gid pair; the host says so once, here, rather than
          --  every one of these answering with a plausible 0.
          Assert
-           (Hostkit.Metadata.User_Name_For_Id (0) = "",
+           (Hostkit.Metadata.User_Name_For_Id (Hostkit.Metadata.Account_Id'(0)) = "",
             "a host without ownership resolves no names");
          return;
       end if;
@@ -2228,7 +2263,7 @@ package body Hostkit_Suite is
       declare
          Name  : constant String := Hostkit.Metadata.User_Name_For_Id (User_Id);
          Found : Boolean;
-         Back  : Natural;
+         Back  : Hostkit.Metadata.Account_Id;
       begin
          Assert (Name /= "", "the owning user id resolves to a name");
 
@@ -2247,7 +2282,7 @@ package body Hostkit_Suite is
       declare
          Name  : constant String := Hostkit.Metadata.Group_Name_For_Id (Group_Id);
          Found : Boolean;
-         Back  : Natural;
+         Back  : Hostkit.Metadata.Account_Id;
       begin
          if Name /= "" and then Hostkit.Host.Current /= Hostkit.Host.Windows then
             Back := Hostkit.Metadata.Group_Id_For_Name (Name, Found);
@@ -2271,6 +2306,180 @@ package body Hostkit_Suite is
 
       Ada.Directories.Delete_File (Path);
    end Test_A_Name_Round_Trips_Through_Its_Id;
+
+   --  Ids from 2**31 up are real -- an idmapped mount's, NFS's nobody at
+   --  4294967294 -- and no fixture here owns a file as one, so the type that
+   --  carries them is checked on its own: every 32-bit value is held, printed
+   --  and read back exactly, and text that is not one is refused rather than
+   --  raised on.
+   procedure Test_A_Large_Account_Id_Round_Trips
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Nobody : constant Hostkit.Metadata.Account_Id := 4_294_967_294;
+      Parsed : Hostkit.Metadata.Parsed_Account_Id;
+   begin
+      Assert
+        (Hostkit.Metadata.Account_Image (Nobody) = "4294967294",
+         "a large id prints in full, with no sign and no leading blank");
+      Parsed := Hostkit.Metadata.Parse_Account_Id ("4294967294");
+      Assert (Parsed.Valid, "a large id reads back from its text");
+      Assert (Parsed.Id = Nobody, "as the id it was printed from");
+
+      Parsed := Hostkit.Metadata.Parse_Account_Id
+        (Hostkit.Metadata.Account_Image (Hostkit.Metadata.Account_Id'Last));
+      Assert (Parsed.Valid, "the largest id reads back");
+      Assert (Parsed.Id = Hostkit.Metadata.Account_Id'Last, "as itself");
+
+      Parsed := Hostkit.Metadata.Parse_Account_Id ("0");
+      Assert (Parsed.Valid, "id 0 reads back");
+      Assert (Parsed.Id = 0, "as 0");
+
+      Assert
+        (not Hostkit.Metadata.Parse_Account_Id ("4294967296").Valid,
+         "an id past 32 bits is refused");
+      Assert
+        (not Hostkit.Metadata.Parse_Account_Id ("99999999999").Valid,
+         "an eleven-digit id is refused");
+      Assert (not Hostkit.Metadata.Parse_Account_Id ("").Valid, "empty text is refused");
+      Assert (not Hostkit.Metadata.Parse_Account_Id ("-1").Valid, "a sign is refused");
+      Assert (not Hostkit.Metadata.Parse_Account_Id (" 1").Valid, "a blank is refused");
+      Assert (not Hostkit.Metadata.Parse_Account_Id ("16#FF#").Valid, "a based literal is refused");
+      Assert (not Hostkit.Metadata.Parse_Account_Id ("1_000").Valid, "an underscore is refused");
+
+      Assert
+        (Hostkit.Metadata.Fits_Natural (Hostkit.Metadata.Account_Id (Natural'Last)),
+         "the largest Natural id fits a Natural");
+      Assert
+        (not Hostkit.Metadata.Fits_Natural (Hostkit.Metadata.Account_Id (Natural'Last) + 1),
+         "2**31 does not fit a Natural");
+      Assert (not Hostkit.Metadata.Fits_Natural (Nobody), "nobody does not fit a Natural");
+   end Test_A_Large_Account_Id_Round_Trips;
+
+   --  The open(2) flags that differ by Linux machine. Pure logic over the
+   --  uname machine name, so every host checks every machine.
+   procedure Test_Linux_Open_Flags_Follow_The_Machine
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Linux_Abi.C_Int;
+
+      procedure Check (Machine : String; Alternate : Boolean) is
+      begin
+         Assert
+           (Hostkit.Linux_Abi.Uses_Alternate_Open_Flags (Machine) = Alternate,
+            "'" & Machine & "' picks the " & (if Alternate then "machine's own" else "asm-generic") & " flags");
+         Assert
+           (Hostkit.Linux_Abi.O_Nofollow (Machine) = (if Alternate then 16#8000# else 16#2_0000#),
+            "'" & Machine & "' O_NOFOLLOW");
+         Assert
+           (Hostkit.Linux_Abi.O_Directory (Machine) = (if Alternate then 16#4000# else 16#1_0000#),
+            "'" & Machine & "' O_DIRECTORY");
+      end Check;
+   begin
+      Check ("x86_64", False);
+      Check ("i686", False);
+      Check ("riscv64", False);
+      Check ("s390x", False);
+      Check ("", False);
+      Check ("aarch64", True);
+      Check ("armv7l", True);
+      Check ("ppc64le", True);
+      Check ("powerpc", True);
+      Check ("m68k", True);
+   end Test_Linux_Open_Flags_Follow_The_Machine;
+
+   --  The open is the check: a regular file opens, and what is not one --
+   --  a folder, a link when links are not to be followed -- does not.
+   procedure Test_Only_A_Regular_File_Opens
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type GNAT.OS_Lib.File_Descriptor;
+      File      : constant String := Ada.Directories.Compose (Scratch, "hk-regular-file");
+      Folder    : constant String := Ada.Directories.Compose (Scratch, "hk-regular-folder");
+      Link      : constant String := Ada.Directories.Compose (Scratch, "hk-regular-link");
+      Supported : Boolean;
+      Fd        : GNAT.OS_Lib.File_Descriptor;
+   begin
+      Write_File (File, "x");
+      if not Ada.Directories.Exists (Folder) then
+         Ada.Directories.Create_Directory (Folder);
+      end if;
+
+      Fd := Hostkit.Regular_Files.Open_Read (File, False, Supported);
+      if not Supported then
+         Assert (Hostkit.Host.Current = Hostkit.Host.Unsupported, "only an unknown host lacks the primitive");
+      else
+         Assert (Fd /= GNAT.OS_Lib.Invalid_FD, "a regular file opens");
+         GNAT.OS_Lib.Close (Fd);
+
+         Fd := Hostkit.Regular_Files.Open_Read (Folder, True, Supported);
+         Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a folder is not a regular file");
+
+         if Hostkit.Fs.Create_Link (File, Link) then
+            Fd := Hostkit.Regular_Files.Open_Read (Link, False, Supported);
+            Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a link is refused when links are not followed");
+            Fd := Hostkit.Regular_Files.Open_Read (Link, True, Supported);
+            Assert (Fd /= GNAT.OS_Lib.Invalid_FD, "and opens its regular target when they are");
+            GNAT.OS_Lib.Close (Fd);
+            Assert (Hostkit.Fs.Delete_Link (Link), "remove the link");
+         end if;
+      end if;
+
+      Ada.Directories.Delete_File (File);
+      Ada.Directories.Delete_Directory (Folder);
+   end Test_Only_A_Regular_File_Opens;
+
+   --  A read-only folder of one's own is lent its owner write bit through
+   --  the held descriptor, and given its mode back by Finish.
+   procedure Test_A_Read_Only_Folder_Is_Lent_Write_Access
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Folder    : constant String := Ada.Directories.Compose (Scratch, "hk-write-access");
+      State     : Hostkit.Directory_Write_Access.Context;
+      Mode      : Natural;
+      Available : Boolean;
+   begin
+      if not Ada.Directories.Exists (Folder) then
+         Ada.Directories.Create_Directory (Folder);
+      end if;
+
+      if Hostkit.Host.Current not in Hostkit.Host.Linux | Hostkit.Host.MacOS then
+         Assert
+           (Hostkit.Directory_Write_Access.Prepare (Folder, State),
+            "a host without the rule has nothing to lend and is ready");
+         Assert (Hostkit.Directory_Write_Access.Finish (State), "and nothing to give back");
+         Ada.Directories.Delete_Directory (Folder);
+         return;
+      end if;
+
+      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#555#), "make the folder read-only");
+      Assert (Hostkit.Directory_Write_Access.Prepare (Folder, State), "write access is lent");
+      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
+      Assert (Available, "the lent mode can be read");
+      Assert (Mode = 8#755#, "the owner write bit, and only it, is added");
+      Assert (Hostkit.Directory_Write_Access.Finish (State), "the mode is given back");
+      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
+      Assert (Available, "the restored mode can be read");
+      Assert (Mode = 8#555#, "the folder is read-only again");
+
+      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#755#), "make the folder writable");
+      Assert (Hostkit.Directory_Write_Access.Prepare (Folder, State), "an owner-writable folder is ready");
+      Assert (Hostkit.Directory_Write_Access.Finish (State), "with nothing to restore");
+      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
+      Assert (Available and then Mode = 8#755#, "and its mode untouched");
+
+      Ada.Directories.Delete_Directory (Folder);
+   exception
+      when others =>
+         Hostkit.Directory_Write_Access.Release (State);
+         if Hostkit.Metadata.Set_Permissions (Folder, 8#755#) then
+            Ada.Directories.Delete_Directory (Folder);
+         end if;
+         raise;
+   end Test_A_Read_Only_Folder_Is_Lent_Write_Access;
 
    procedure Test_A_Volume_Has_Room (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -2722,6 +2931,18 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_A_Name_Round_Trips_Through_Its_Id'Access,
          "metadata : an owner name round-trips through its numeric id");
+      Register_Routine
+        (T, Test_Linux_Open_Flags_Follow_The_Machine'Access,
+         "linux abi : O_NOFOLLOW and O_DIRECTORY take the machine's own values");
+      Register_Routine
+        (T, Test_Only_A_Regular_File_Opens'Access,
+         "regular files : only a regular file opens, and a link only when followed");
+      Register_Routine
+        (T, Test_A_Read_Only_Folder_Is_Lent_Write_Access'Access,
+         "directory write access : a read-only folder is lent owner write and given its mode back");
+      Register_Routine
+        (T, Test_A_Large_Account_Id_Round_Trips'Access,
+         "metadata : a user or group id from 2**31 up is held, printed and read back exactly");
       Register_Routine
         (T, Test_A_Volume_Has_Room'Access, "metadata : a mounted volume reports its capacity");
       Register_Routine

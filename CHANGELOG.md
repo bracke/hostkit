@@ -17,6 +17,22 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Regular_Files` (Open_Read, Skip_Zeros, Finish_Sparse) and
+  `Directory_Write_Access` (Prepare, Finish, Release), moved from files, which
+  bound open/statx/fstat/fchmod/lseek/ftruncate and CreateFileW itself in
+  per-OS bodies of its own. Behaviour unchanged.
+
+- `Metadata.Account_Id` (mod 2**32) for user and group ids, with
+  `Account_Image`, `Parse_Account_Id` and `Fits_Natural`. `File_Ownership`,
+  `File_Mode_And_Ownership`, `Set_Ownership`, `User_Id_For_Name`,
+  `Group_Id_For_Name`, `User_Name_For_Id` and `Group_Name_For_Id` take and
+  give it; their Natural forms remain as overloads for existing callers. A
+  call with an integer literal for the id (`User_Name_For_Id (0)`) is now
+  ambiguous and needs `Account_Id'(0)`.
+
+- `Linux_Abi`: the statx record and the machine-dependent O_NOFOLLOW and
+  O_DIRECTORY values, shared by the Linux bodies instead of copied into each.
+
 - `Metadata.Change_Stamp` on macOS (stat: modification and change times to
   the nanosecond, size, inode) and Windows (FILE_BASIC_INFO's LastWriteTime and
   ChangeTime as Unix seconds and nanoseconds, size, file index), in Linux's
@@ -43,6 +59,12 @@ recently enough to matter to somebody pinning it; the history before that is in
   nothing else readable in `/proc/<parent>/environ`. Ignored on other hosts.
 
 ### Fixed
+
+- A file owned by a uid or gid from 2**31 up (idmapped mounts, NFS's nobody
+  at 4294967294) reported no ownership and, on Linux, no permissions either:
+  the conversion to Natural raised, and the handler cleared the mode with the
+  ownership. Ownership is now an Account_Id, and a failure on the ownership
+  side of `File_Mode_And_Ownership` never clears `Mode_Available`.
 
 - **A file another task has open is read all the same.** GNAT's default
   open form refuses a file the program already has open (`Use_Error:

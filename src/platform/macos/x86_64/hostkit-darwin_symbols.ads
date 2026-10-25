@@ -1,9 +1,10 @@
 --  Intel macOS: since the 64-bit inode transition the unsuffixed names
 --  describe the older, narrower structs; the $INODE64 entry points fill the
 --  64-bit-inode layout the Ada records bind.
---  Public so that a consumer binding one of these calls on macOS -- files'
---  regular-file and rename checks fstat a descriptor -- takes the name for
---  this architecture from here rather than hard-coding the Intel one.
+--  Public so that every body binding one of these calls on macOS -- the
+--  regular-file and directory-write-access bodies fstat a descriptor, and a
+--  consumer may too -- takes the name for this architecture from here rather
+--  than hard-coding the Intel one.
 package Hostkit.Darwin_Symbols is
    Stat    : constant String := "stat$INODE64";
    Lstat   : constant String := "lstat$INODE64";
