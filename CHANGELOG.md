@@ -44,6 +44,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **A file another task has open is read all the same.** GNAT's default
+  open form refuses a file the program already has open (`Use_Error:
+  reopening shared file`), so `Process.Identity_Of` answered "" -- an
+  unknown process -- whenever another task was reading the boot's id at
+  the same moment. Every open for reading now says `shared=no`
+  (`Process.Identity_Of`, the child's stdin file, `Fs`'s mount table).
+  Tested with the boot's id held open.
+
 - The suite's link tests no longer pass in silence on a host that refuses
   links: each says so on standard error, and fails where
   `HOSTKIT_TESTS_NEED_LINKS` is set, as CI now sets it on every runner, so the

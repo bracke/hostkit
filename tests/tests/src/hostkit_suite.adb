@@ -2470,6 +2470,36 @@ package body Hostkit_Suite is
       Hostkit.Descriptors.Close (Handle);
    end Test_The_Null_Device_Reads_As_Nothing;
 
+   procedure Test_An_Identity_Reads_Beside_Another_Reader
+     (T : in out AUnit.Test_Cases.Test_Case'Class);
+
+   procedure Test_An_Identity_Reads_Beside_Another_Reader
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+
+      Boot_Id : constant String := "/proc/sys/kernel/random/boot_id";
+      Before  : constant String := Hostkit.Process.Identity_Of (1);
+      Held    : Ada.Text_IO.File_Type;
+   begin
+      if Before = "" or else not Ada.Directories.Exists (Boot_Id) then
+         --  A host whose identities are not read from these files.
+         return;
+      end if;
+
+      --  Another task reading the boot's id as this one asks: the run
+      --  time refuses a second open of a file under its default form.
+      Ada.Text_IO.Open (Held, Ada.Text_IO.In_File, Boot_Id);
+      declare
+         During : constant String := Hostkit.Process.Identity_Of (1);
+      begin
+         Ada.Text_IO.Close (Held);
+         Assert (During = Before,
+                 "a process's identity was not read while another reader had the boot's id open: """
+                 & During & """");
+      end;
+   end Test_An_Identity_Reads_Beside_Another_Reader;
+
    --  The suite is started with no arguments, so the two answers must agree
    --  on that -- and on a host where the command line has to be asked for and
    --  split (Windows: GetCommandLineW plus CommandLineToArgvW), agreeing at
@@ -2705,6 +2735,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_The_Null_Device_Reads_As_Nothing'Access,
          "fs : the null device reads as nothing and takes what is written");
+      Register_Routine
+        (T, Test_An_Identity_Reads_Beside_Another_Reader'Access,
+         "process : an identity reads while another reader has its files open");
    end Register_Tests;
 
    function Suite return AUnit.Test_Suites.Access_Test_Suite is

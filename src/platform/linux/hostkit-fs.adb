@@ -1507,7 +1507,7 @@ package body Hostkit.Fs is
       declare
          Absolute : constant String := Ada.Directories.Full_Name (Path);
       begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/mountinfo");
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/mountinfo", Form => "shared=no");
          while not Ada.Text_IO.End_Of_File (File) loop
             Append (Content, Ada.Text_IO.Get_Line (File));
             Append (Content, Ada.Characters.Latin_1.LF);

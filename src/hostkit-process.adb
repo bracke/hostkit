@@ -223,7 +223,7 @@ package body Hostkit.Process is
          File : Ada.Streams.Stream_IO.File_Type;
       begin
          Ada.Streams.Stream_IO.Open
-           (File, Ada.Streams.Stream_IO.In_File, Stdin_Path);
+           (File, Ada.Streams.Stream_IO.In_File, Stdin_Path, Form => "shared=no");
          Ada.Streams.Stream_IO.Close (File);
          return True;
       exception
@@ -277,7 +277,7 @@ package body Hostkit.Process is
       function First_Line (Path : String) return String is
          File : Ada.Text_IO.File_Type;
       begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path);
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Path, Form => "shared=no");
          declare
             Line : constant String := Ada.Text_IO.Get_Line (File);
          begin
