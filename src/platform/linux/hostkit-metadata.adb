@@ -60,6 +60,9 @@ package body Hostkit.Metadata is
       Birth_Time      : Statx_Timestamp;
       Change_Time     : Statx_Timestamp;
       Modified_Time   : Statx_Timestamp;
+      --  stx_rdev_*: the device a device-special file stands for (0 for
+      --  files and folders). stx_dev_*: the device that holds the file --
+      --  the one to compare for "same file" or "same volume".
       Device_Major    : C_U32;
       Device_Minor    : C_U32;
       File_Major      : C_U32;
@@ -639,8 +642,8 @@ package body Hostkit.Metadata is
 
       return L_Status = 0 and then R_Status = 0
         and then L_Info.Inode = R_Info.Inode
-        and then L_Info.Device_Major = R_Info.Device_Major
-        and then L_Info.Device_Minor = R_Info.Device_Minor;
+        and then L_Info.File_Major = R_Info.File_Major
+        and then L_Info.File_Minor = R_Info.File_Minor;
    exception
       when others =>
          Safe_Free (L_Path);
@@ -665,8 +668,8 @@ package body Hostkit.Metadata is
       end if;
 
       Available := True;
-      return Long_Long_Integer (Info.Device_Major) * 4_294_967_296
-        + Long_Long_Integer (Info.Device_Minor);
+      return Long_Long_Integer (Info.File_Major) * 4_294_967_296
+        + Long_Long_Integer (Info.File_Minor);
    exception
       when others =>
          Safe_Free (C_Path);

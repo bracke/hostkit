@@ -2183,6 +2183,22 @@ package body Hostkit_Suite is
          Assert (First_Device = Second_Device, "sibling files report the same device id");
       end if;
 
+      --  Equal ids for siblings also hold when every id is the same constant,
+      --  which is how reading the wrong statx pair (the device a special file
+      --  stands for, zero for files) went unnoticed. On Linux a file's volume
+      --  is never zero, and /proc is always a filesystem of its own.
+      if Hostkit.Host.Current = Hostkit.Host.Linux then
+         declare
+            Proc_Available : Boolean;
+            Proc_Device    : constant Long_Long_Integer := Hostkit.Metadata.Device_Id ("/proc", Proc_Available);
+         begin
+            Assert (First_Available and then First_Device /= 0, "a file reports the volume that holds it");
+            Assert
+              (Proc_Available and then Proc_Device /= First_Device,
+               "files on different filesystems report different device ids");
+         end;
+      end if;
+
       Ada.Directories.Delete_File (First);
       Ada.Directories.Delete_File (Second);
    end Test_Device_Id_Reports_A_Comparable_Volume;
