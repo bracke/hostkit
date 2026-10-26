@@ -27,6 +27,7 @@ with Hostkit.Host;
 with Hostkit.Lease_Files;
 with Hostkit.Linux_Abi;
 with Hostkit.Metadata;
+with Hostkit.Mounts;
 with Hostkit.Resources;
 with Hostkit.Process;
 with Hostkit.Private_Paths;
@@ -257,6 +258,52 @@ package body Hostkit_Suite is
            = DQ & "my prog" & DQ,
          "a program whose path has a space is quoted too");
    end Test_Windows_Command_Line_Quoting;
+
+   --  Linux lists its mounts, "/" among them, with escapes decoded; a host
+   --  without a table lists none, and a pseudo filesystem's source is no disk.
+   procedure Test_Mount_Table (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Table : constant Hostkit.Mounts.Mount_Vectors.Vector := Hostkit.Mounts.Table;
+      Found : Boolean;
+      Known : Boolean;
+      Root  : Hostkit.Mounts.Mount;
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Linux then
+         Root := Hostkit.Mounts.Find (Table, "/", Found);
+         Assert (Found, "the root filesystem is in the table");
+         Assert (Ada.Strings.Unbounded.Length (Root.Filesystem_Type) > 0, "with its type");
+         for Item of Table loop
+            Assert (Ada.Strings.Fixed.Index (Ada.Strings.Unbounded.To_String (Item.Mount_Point), "\040") = 0,
+                    "mount points are decoded");
+         end loop;
+      else
+         Assert (Table.Is_Empty, "a host without a mount table lists none");
+      end if;
+      Assert (not Hostkit.Mounts.Removable ("proc", Known) and then not Known,
+              "a pseudo filesystem's source is no disk, and that is not known to be fixed");
+   end Test_Mount_Table;
+
+   --  The host's default opener names the file by the caller's token, last;
+   --  Windows always has one (cmd /c start).
+   procedure Test_Default_Opener (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Program   : Ada.Strings.Unbounded.Unbounded_String;
+      Arguments : Hostkit.String_Vectors.Vector;
+      Found     : constant Boolean := Hostkit.Process.Default_Opener ("text/plain", "<FILE>", Program, Arguments);
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (Found, "Windows always has a default opener");
+      end if;
+      if Found then
+         Assert (Ada.Strings.Unbounded.Length (Program) > 0, "it names a program");
+         Assert (not Arguments.Is_Empty
+                 and then Ada.Strings.Unbounded.To_String (Arguments.Last_Element) = "<FILE>",
+                 "and the file, by the caller's token, last");
+      else
+         Assert (Ada.Strings.Unbounded.Length (Program) = 0 and then Arguments.Is_Empty,
+                 "no opener names no program");
+      end if;
+   end Test_Default_Opener;
 
    procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -2802,6 +2849,10 @@ package body Hostkit_Suite is
    begin
       Register_Routine
         (T, Test_Quoting'Access, "shell : the quoting matches the shell it quotes for");
+      Register_Routine
+        (T, Test_Mount_Table'Access, "mounts : the host's mount table, decoded, or none where it keeps none");
+      Register_Routine
+        (T, Test_Default_Opener'Access, "process : the default opener names the file by the caller's token");
       Register_Routine
         (T, Test_Writes_Are_Made_Durable'Access,
          "durability : what was written is put on the device, or it is said that it cannot be");

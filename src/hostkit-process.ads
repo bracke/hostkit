@@ -309,4 +309,28 @@ package Hostkit.Process is
    --  the path itself, and nothing quotes or parses anything.
    function Open_Native (Path : String) return Boolean;
 
+   --  The command line that opens a file in this host's default application
+   --  for it, for a caller that keeps opening as a command it can show and
+   --  run. Path_Token stands for the file in Arguments; Mime_Type, where
+   --  known, picks the application on Linux.
+   --
+   --  Windows: cmd (COMSPEC, else cmd on PATH) /c start "" <file>. macOS:
+   --  open <file>, where open is on PATH. Linux: a sh script that asks
+   --  xdg-mime for the type's desktop entry and launches it with gio or
+   --  gtk-launch, else xdg-open -- where xdg-open or gio is on PATH. False
+   --  where the host has no such command: then there is no default, which
+   --  is not the same as a default that does nothing.
+   --
+   --  @param Mime_Type The file's type, or "".
+   --  @param Path_Token What stands for the file in Arguments.
+   --  @param Program The program to run.
+   --  @param Arguments Its arguments.
+   --  @return True when the host has a default opener.
+   function Default_Opener
+     (Mime_Type  : String;
+      Path_Token : String;
+      Program    : out UString;
+      Arguments  : out String_Vectors.Vector)
+      return Boolean;
+
 end Hostkit.Process;

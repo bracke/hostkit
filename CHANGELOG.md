@@ -17,6 +17,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Mounts` (Table, Find, Removable): the mount table (Linux's /proc/mounts,
+  escapes decoded; empty where a host keeps none) and whether a block device
+  is on a removable disk (/sys/block), moved from files.
+
+- `Process.Default_Opener`: the command line that opens a file in the host's
+  default application (cmd /c start, open, or an xdg-mime/gio script), with
+  a caller's token for the file, moved from files.
+
 - `Regular_Files` (Open_Read, Skip_Zeros, Finish_Sparse) and
   `Directory_Write_Access` (Prepare, Finish, Release), moved from files, which
   bound open/statx/fstat/fchmod/lseek/ftruncate and CreateFileW itself in

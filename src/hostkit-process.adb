@@ -6,6 +6,7 @@ with Ada.Text_IO;
 
 with GNAT.OS_Lib;
 
+with Hostkit.Host;
 with Hostkit.Native;
 with Hostkit.Shell;
 with Hostkit.Windows_Command_Line;
@@ -414,6 +415,78 @@ package body Hostkit.Process is
          Value := Null_Unbounded_String;
          return False;
    end Environment_Value;
+
+   function Default_Opener
+     (Mime_Type  : String;
+      Path_Token : String;
+      Program    : out UString;
+      Arguments  : out String_Vectors.Vector)
+      return Boolean
+   is
+      use type Hostkit.Host.Kind;
+
+      Smart_Open_Script : constant String :=
+        "mime=""$1""; file=""$2""; "
+        & "if [ -z ""$mime"" ] && command -v file >/dev/null 2>&1; then "
+        & "mime=$(file --brief --mime-type -- ""$file"" 2>/dev/null); "
+        & "fi; "
+        & "desktop=""""; "
+        & "if [ -n ""$mime"" ]; then "
+        & "desktop=$(xdg-mime query default ""$mime"" 2>/dev/null); "
+        & "fi; "
+        & "if [ -n ""$desktop"" ]; then "
+        & "for dir in ""$HOME/.local/share/applications"" /usr/local/share/applications /usr/share/applications; do "
+        & "if [ -r ""$dir/$desktop"" ]; then "
+        & "if command -v gio >/dev/null 2>&1; then "
+        & "exec gio launch ""$dir/$desktop"" ""$file""; "
+        & "fi; "
+        & "if command -v gtk-launch >/dev/null 2>&1; then "
+        & "exec gtk-launch ""${desktop%.desktop}"" ""$file""; "
+        & "fi; "
+        & "fi; "
+        & "done; "
+        & "fi; "
+        & "exec xdg-open ""$file""";
+
+      procedure Add (Value : String) is
+      begin
+         Arguments.Append (To_Unbounded_String (Value));
+      end Add;
+   begin
+      Program := Null_Unbounded_String;
+      Arguments := String_Vectors.Empty_Vector;
+      --  The host comes from the body the build chose: COMSPEC is set on
+      --  Linux machines running Wine, and /usr/bin/open on Linux is
+      --  util-linux's, which means something else entirely.
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         --  cmd is on PATH even where COMSPEC was cleared.
+         Program := To_Unbounded_String
+           (if Ada.Environment_Variables.Value ("COMSPEC", "") /= ""
+            then Ada.Environment_Variables.Value ("COMSPEC", "")
+            else "cmd");
+         Add ("/c");
+         Add ("start");
+         Add ("");
+         Add (Path_Token);
+         return True;
+      elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
+         if Locate ("open") = "" then
+            return False;
+         end if;
+         Program := To_Unbounded_String ("open");
+         Add (Path_Token);
+         return True;
+      elsif Locate ("xdg-open") /= "" or else Locate ("gio") /= "" then
+         Program := To_Unbounded_String ("/bin/sh");
+         Add ("-c");
+         Add (Smart_Open_Script);
+         Add ("--");
+         Add (Mime_Type);
+         Add (Path_Token);
+         return True;
+      end if;
+      return False;
+   end Default_Opener;
 
    function Open_Native (Path : String) return Boolean is
    begin
