@@ -278,12 +278,12 @@ package body Hostkit.Descriptors is
       return C_Fcntl (To_Fd (Item), F_Setfl, Flags) = 0;
    end Set_Non_Blocking;
 
-   --------------------
-   -- Wait_Readable --
-   --------------------
+   -----------------------
+   -- Wait_For_Readable --
+   -----------------------
 
-   function Wait_Readable
-     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   function Wait_For_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Wait_Outcome
    is
       type Poll_Entry is record
          Fd      : C_Int := -1;
@@ -304,7 +304,7 @@ package body Hostkit.Descriptors is
       Answer  : C_Int;
    begin
       if Item = Invalid then
-         return False;
+         return Wait_Failed;
       end if;
 
       Watched.Fd := C_Int (Native_Value (Item));
@@ -321,9 +321,12 @@ package body Hostkit.Descriptors is
 
       --  Any answer at all -- readable, hung up, or an error on the
       --  descriptor -- means a read returns rather than waits, which is the
-      --  question that was asked.
-      return Answer > 0;
-   end Wait_Readable;
+      --  question that was asked. Only poll itself failing is a failure.
+      return
+        (if Answer > 0 then Wait_Ready
+         elsif Answer = 0 then Wait_Timed_Out
+         else Wait_Failed);
+   end Wait_For_Readable;
 
    ----------
    -- Read --

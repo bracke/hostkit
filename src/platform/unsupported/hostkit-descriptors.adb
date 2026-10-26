@@ -50,16 +50,15 @@ package body Hostkit.Descriptors is
       return False;
    end Set_Non_Blocking;
 
-   function Wait_Readable
-     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   function Wait_For_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Wait_Outcome
    is
       pragma Unreferenced (Item, Timeout_Ms);
    begin
-      --  A host this build does not know cannot say. False is the refusal, and
-      --  a caller that reads anyway may wait -- which is why it is documented
-      --  as a refusal rather than as "not ready yet".
-      return False;
-   end Wait_Readable;
+      --  A host this build does not know cannot say, and saying so is a
+      --  failure rather than "not ready yet": waiting again would not help.
+      return Wait_Failed;
+   end Wait_For_Readable;
 
    function Read
      (Item : Descriptor;

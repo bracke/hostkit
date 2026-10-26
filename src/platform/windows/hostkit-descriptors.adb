@@ -310,9 +310,9 @@ package body Hostkit.Descriptors is
       return False;
    end Set_Non_Blocking;
 
-   -------------------
-   -- Wait_Readable --
-   -------------------
+   -----------------------
+   -- Wait_For_Readable --
+   -----------------------
 
    --  Asked of the thing directly, because this host cannot poll: poll and
    --  select are for sockets here.
@@ -325,8 +325,8 @@ package body Hostkit.Descriptors is
    --  instead, and only a key going down with a character on it counts:
    --  releasing a key, moving a mouse and resizing a window are all events,
    --  and a read waits through every one of them.
-   function Wait_Readable
-     (Item : Descriptor; Timeout_Ms : Integer) return Boolean
+   function Wait_For_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Wait_Outcome
    is
       use type Interfaces.C.unsigned_short;
 
@@ -379,7 +379,7 @@ package body Hostkit.Descriptors is
       Slice : constant Integer := 10;
    begin
       if Item = Invalid then
-         return False;
+         return Wait_Failed;
       end if;
 
       --  A console is not a pipe, and the two are told apart by asking the one
@@ -397,7 +397,7 @@ package body Hostkit.Descriptors is
                   --  A console that will not answer. Ready is the safe reply
                   --  here for the same reason it is for a pipe that has gone:
                   --  the caller's read returns rather than waits.
-                  return True;
+                  return Wait_Ready;
                end if;
 
                for Index in 1 .. Natural (Taken) loop
@@ -405,7 +405,7 @@ package body Hostkit.Descriptors is
                     and then Waiting (Index).Key_Down /= 0
                     and then Waiting (Index).Character_Value /= 0
                   then
-                     return True;
+                     return Wait_Ready;
                   end if;
                end loop;
             end;
@@ -416,7 +416,7 @@ package body Hostkit.Descriptors is
             Waited := Waited + Slice;
          end loop;
 
-         return False;
+         return Wait_Timed_Out;
       end if;
 
       loop
@@ -431,11 +431,11 @@ package body Hostkit.Descriptors is
             --  is also what a handle that is not a pipe answers, and a caller
             --  told "not ready" about one of those would wait out its whole
             --  deadline for no reason.
-            return True;
+            return Wait_Ready;
          end if;
 
          if Available > 0 then
-            return True;
+            return Wait_Ready;
          end if;
 
          exit when Timeout_Ms >= 0 and then Waited >= Timeout_Ms;
@@ -444,8 +444,8 @@ package body Hostkit.Descriptors is
          Waited := Waited + Slice;
       end loop;
 
-      return False;
-   end Wait_Readable;
+      return Wait_Timed_Out;
+   end Wait_For_Readable;
 
    ----------
    -- Read --

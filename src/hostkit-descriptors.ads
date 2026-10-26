@@ -149,8 +149,25 @@ package Hostkit.Descriptors is
    --  @return True when a read would not wait. False on a timeout, and on a
    --          host that cannot answer -- which is a refusal, and a caller that
    --          reads anyway may block.
+   type Wait_Outcome is
+     ( --  A read would not wait: there are bytes, or the writer has gone.
+      Wait_Ready,
+
+      --  The deadline passed with nothing to read.
+      Wait_Timed_Out,
+
+      --  The host could not answer: the descriptor is not valid, the wait
+      --  itself failed, or this host cannot wait at all. Not a timeout -- a
+      --  caller that waited again would never hear anything.
+      Wait_Failed);
+
+   --  Wait_Readable, telling a failed wait from one that timed out.
+   function Wait_For_Readable
+     (Item : Descriptor; Timeout_Ms : Integer) return Wait_Outcome;
+
    function Wait_Readable
-     (Item : Descriptor; Timeout_Ms : Integer) return Boolean;
+     (Item : Descriptor; Timeout_Ms : Integer) return Boolean is
+     (Wait_For_Readable (Item, Timeout_Ms) = Wait_Ready);
 
    --  What became of a read.
    type Transfer_Outcome is
