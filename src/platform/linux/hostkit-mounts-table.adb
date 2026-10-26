@@ -69,7 +69,15 @@ begin
    Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/mounts", Form => "shared=no");
    while not Ada.Text_IO.End_Of_File (File) and then Natural (Result.Length) < Max_Mounts loop
       Ada.Text_IO.Get_Line (File, Buffer, Last);
-      exit when Last = Buffer'Last;
+      --  A line longer than a record can be (an overlay's lowerdir list):
+      --  skipped -- the rest of it read away -- and the table read on.
+      if Last = Buffer'Last then
+         while not Ada.Text_IO.End_Of_File (File) loop
+            Ada.Text_IO.Get_Line (File, Buffer, Last);
+            exit when Last < Buffer'Last;
+         end loop;
+         goto Next_Line;
+      end if;
       declare
          Line : constant String := Buffer (1 .. Last);
       begin
@@ -81,6 +89,7 @@ begin
                 Options         => Ada.Strings.Unbounded.To_Unbounded_String (Field (Line, 4))));
          end if;
       end;
+      <<Next_Line>>
    end loop;
    Ada.Text_IO.Close (File);
    return Result;
