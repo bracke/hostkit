@@ -2528,6 +2528,76 @@ package body Hostkit_Suite is
          raise;
    end Test_A_Read_Only_Folder_Is_Lent_Write_Access;
 
+   --  On Windows a mode is a DACL. Setting one on a directory must not reach
+   --  into what it holds: a file there that had only the ACEs it inherited
+   --  would be left readable by no one.
+   procedure Test_A_Folder_Mode_Leaves_Its_Files_Readable
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Folder : constant String :=
+        Ada.Directories.Compose (Ada.Directories.Current_Directory, "hostkit-folder-mode");
+      Inside : constant String := Ada.Directories.Compose (Folder, "inside");
+
+      function Inside_Reads return Boolean is
+         File : Ada.Text_IO.File_Type;
+      begin
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Inside);
+         declare
+            Line : constant String := Ada.Text_IO.Get_Line (File);
+         begin
+            Ada.Text_IO.Close (File);
+            return Line = "kept";
+         end;
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then
+               Ada.Text_IO.Close (File);
+            end if;
+            return False;
+      end Inside_Reads;
+
+      procedure Clean is
+         Ignored : Boolean;
+      begin
+         Ignored := Hostkit.Metadata.Set_Permissions (Folder, 8#755#);
+         if Ada.Directories.Exists (Folder) then
+            Ada.Directories.Delete_Tree (Folder);
+         end if;
+      end Clean;
+
+      Result : Hostkit.Metadata.Metadata_Update_Result;
+      File   : Ada.Text_IO.File_Type;
+   begin
+      Clean;
+      Ada.Directories.Create_Directory (Folder);
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Inside);
+      Ada.Text_IO.Put_Line (File, "kept");
+      Ada.Text_IO.Close (File);
+
+      if not Hostkit.Metadata.Permissions_Supported then
+         Clean;
+         return;
+      end if;
+
+      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#555#), "make the folder read-only");
+      Assert (Inside_Reads, "a file in a folder made read-only by path still reads");
+      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#755#), "make the folder writable");
+
+      Result := Hostkit.Metadata.Update_Entry_Metadata
+        (Folder, (others => <>), False, Hostkit.Metadata.Update_Permissions,
+         8#555#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
+      Assert
+        (not Result.Success or else Inside_Reads,
+         "and one in a folder made read-only through a handle");
+
+      Clean;
+   exception
+      when others =>
+         Clean;
+         raise;
+   end Test_A_Folder_Mode_Leaves_Its_Files_Readable;
+
    procedure Test_A_Volume_Has_Room (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
       Capacity : constant Hostkit.Metadata.Volume_Capacity :=
@@ -2997,6 +3067,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_A_Read_Only_Folder_Is_Lent_Write_Access'Access,
          "directory write access : a read-only folder is lent owner write and given its mode back");
+      Register_Routine
+        (T, Test_A_Folder_Mode_Leaves_Its_Files_Readable'Access,
+         "metadata : a folder's mode leaves the files in it readable");
       Register_Routine
         (T, Test_A_Large_Account_Id_Round_Trips'Access,
          "metadata : a user or group id from 2**31 up is held, printed and read back exactly");

@@ -48,12 +48,6 @@ package body Hostkit.Metadata is
    Group_Information : constant C_DWord := 16#0000_0002#;
    Dacl_Information  : constant C_DWord := 16#0000_0004#;
 
-   --  PROTECTED_DACL_SECURITY_INFORMATION. Without it the new DACL is merged
-   --  with whatever the parent directory hands down, so revoking a right does not
-   --  revoke it: an inherited ACE keeps granting it, and a mode set to 0600 reads
-   --  back with the group and Everyone bits still on.
-   Protected_Dacl : constant C_DWord := 16#8000_0000#;
-
    Trustee_Is_Sid     : constant C_Int := 0;
    Trustee_Is_Unknown : constant C_Int := 0;
    Grant_Access       : constant C_Int := 1;
@@ -216,6 +210,85 @@ package body Hostkit.Metadata is
       Sacl        : System.Address) return C_DWord
      with Import, Convention => Stdcall,
           External_Name => "SetSecurityInfo";
+
+   --  The low-level calls below set a DACL on the one object named. The
+   --  SetNamedSecurityInfo and SetSecurityInfo family also push inheritance
+   --  down to what a directory holds: a directory's fresh, non-inheritable
+   --  DACL there strips its children of the ACEs they inherited, and a child
+   --  with no others is left readable by no one.
+   Security_Descriptor_Revision : constant C_DWord := 1;
+   --  SE_DACL_PROTECTED. Without it the new DACL is merged with whatever the
+   --  parent directory hands down, so revoking a right does not revoke it: an
+   --  inherited ACE keeps granting it, and a mode set to 0600 reads back with
+   --  the group and Everyone bits still on.
+   Se_Dacl_Protected : constant Interfaces.C.unsigned_short := 16#1000#;
+
+   --  An absolute SECURITY_DESCRIPTOR: 20 bytes on 32-bit, 40 on 64-bit.
+   type Descriptor_Buffer is array (1 .. 8) of Interfaces.Unsigned_64
+     with Convention => C;
+
+   function Initialize_Security_Descriptor
+     (Descriptor : System.Address;
+      Revision   : C_DWord) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "InitializeSecurityDescriptor";
+
+   function Set_Security_Descriptor_Dacl
+     (Descriptor : System.Address;
+      Present    : C_Int;
+      Dacl       : System.Address;
+      Defaulted  : C_Int) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "SetSecurityDescriptorDacl";
+
+   function Set_Security_Descriptor_Control
+     (Descriptor : System.Address;
+      Interest   : Interfaces.C.unsigned_short;
+      Set        : Interfaces.C.unsigned_short) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "SetSecurityDescriptorControl";
+
+   function Set_File_Security
+     (File_Name   : System.Address;
+      Information : C_DWord;
+      Descriptor  : System.Address) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "SetFileSecurityW";
+
+   function Set_Kernel_Object_Security
+     (Handle      : System.Address;
+      Information : C_DWord;
+      Descriptor  : System.Address) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "SetKernelObjectSecurity";
+
+   --  Set Dacl, protected from what the parent hands down, on the object
+   --  named by the NUL-terminated wide Path, or else open as Handle; whether
+   --  it was set.
+   function Set_Own_Dacl
+     (Path   : System.Address;
+      Handle : System.Address;
+      Dacl   : System.Address) return Boolean
+   is
+      Descriptor : aliased Descriptor_Buffer := [others => 0];
+   begin
+      if Initialize_Security_Descriptor
+           (Descriptor'Address, Security_Descriptor_Revision) = 0
+        or else Set_Security_Descriptor_Dacl
+                  (Descriptor'Address, 1, Dacl, 0) = 0
+        or else Set_Security_Descriptor_Control
+                  (Descriptor'Address, Se_Dacl_Protected,
+                   Se_Dacl_Protected) = 0
+      then
+         return False;
+      elsif Path /= System.Null_Address then
+         return Set_File_Security
+           (Path, Dacl_Information, Descriptor'Address) /= 0;
+      else
+         return Set_Kernel_Object_Security
+           (Handle, Dacl_Information, Descriptor'Address) /= 0;
+      end if;
+   end Set_Own_Dacl;
 
    procedure Build_Trustee_With_Sid
      (Trustee : access Trustee_Record;
@@ -921,15 +994,13 @@ package body Hostkit.Metadata is
          return False;
       end if;
 
-      Status :=
-        Set_Named_Security_Info
-          (C_Path'Address, Se_File_Object, Dacl_Information or Protected_Dacl,
-           System.Null_Address, System.Null_Address,
-           New_Acl, System.Null_Address);
-
-      Free_Allocations;
-
-      return Status = Success;
+      declare
+         Applied : constant Boolean :=
+           Set_Own_Dacl (C_Path'Address, System.Null_Address, New_Acl);
+      begin
+         Free_Allocations;
+         return Applied;
+      end;
 
    exception
       when others =>
@@ -1442,10 +1513,8 @@ package body Hostkit.Metadata is
                  (3, Entries (1)'Address, System.Null_Address,
                   New_Acl'Access);
                if Status = Success and then New_Acl /= System.Null_Address then
-                  Answer.Success := Set_Security_Info
-                    (File, Se_File_Object, Dacl_Information or Protected_Dacl,
-                     System.Null_Address, System.Null_Address, New_Acl,
-                     System.Null_Address) = Success;
+                  Answer.Success :=
+                    Set_Own_Dacl (System.Null_Address, File, New_Acl);
                end if;
             end if;
          end;
