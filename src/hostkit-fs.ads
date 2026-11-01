@@ -469,6 +469,51 @@ package Hostkit.Fs is
    --  knows which one applies.
    function Application_Data_Directory return String;
 
+   --  A folder this host gives its user besides the mounted volumes.
+   type User_Place_Kind is
+     (Home_Place,
+      --  The home: HOME, the Windows profile folder.
+      Drive_Place,
+      --  A Windows drive's root: the profile's drive, the system drive.
+      Profile_Place,
+      --  HOMEDRIVE and HOMEPATH, which can name a folder apart from the home.
+      Network_Place,
+      --  The Windows home share (HOMESHARE).
+      Cloud_Place,
+      --  A synchronised cloud folder (OneDrive).
+      Removable_Media_Parent,
+      --  The folder removable media are mounted under (/run/media/<user>).
+      Desktop_Mounts_Parent);
+      --  The folder the desktop's own mounts appear under (gvfs).
+
+   type User_Place is record
+      Path : Ada.Strings.Unbounded.Unbounded_String;
+      Kind : User_Place_Kind := Home_Place;
+   end record;
+
+   type User_Place_List is array (Positive range <>) of User_Place;
+
+   --  The folders this host's conventions give the current user, in the
+   --  order a file manager lists them: each host its own -- the Windows
+   --  profile variables are not read elsewhere, nor the freedesktop mount
+   --  locations off Linux. Not checked for existence; a caller lists those
+   --  that are there.
+   --
+   --  @return The places; empty where the host names none.
+   function User_Places return User_Place_List;
+
+   type Path_List is array (Positive range <>) of Ada.Strings.Unbounded.Unbounded_String;
+
+   --  Where this desktop keeps its application entries' data folders, most
+   --  important first: on Linux the freedesktop base directories --
+   --  $XDG_DATA_HOME (else ~/.local/share), then $XDG_DATA_DIRS (else
+   --  /usr/local/share and /usr/share) -- whose applications folders hold the
+   --  .desktop files, so a Flatpak's or a Snap's apps are found as the
+   --  desktop finds them. Absolute folders only, each once.
+   --
+   --  @return The base folders; empty on a host without such entries.
+   function Application_Data_Directories return Path_List;
+
    --  Where this host keeps per-user caches -- regenerable data that may be
    --  deleted behind the program's back without losing anything.
    --

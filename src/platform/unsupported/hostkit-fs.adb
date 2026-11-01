@@ -219,6 +219,10 @@ package body Hostkit.Fs is
       return "";
    end Home_Directory_Of;
 
+   function User_Places return User_Place_List is ([]);
+
+   function Application_Data_Directories return Path_List is ([]);
+
    function Application_Data_Directory return String is
    begin
       return "";

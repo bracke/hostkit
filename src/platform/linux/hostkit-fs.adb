@@ -1416,6 +1416,60 @@ package body Hostkit.Fs is
          return "";
    end Home_Directory_Of;
 
+   function User_Places return User_Place_List is
+      use Ada.Strings.Unbounded;
+      Home    : constant String := Home_Directory;
+      Runtime : constant String :=
+        (if Ada.Environment_Variables.Exists ("XDG_RUNTIME_DIR")
+         then Ada.Environment_Variables.Value ("XDG_RUNTIME_DIR") else "");
+      User    : constant String :=
+        (if Ada.Environment_Variables.Exists ("USER") then Ada.Environment_Variables.Value ("USER") else "");
+      function Place (Path : String; Kind : User_Place_Kind) return User_Place_List is
+        (if Path = "" then [] else [1 => (Path => To_Unbounded_String (Path), Kind => Kind)]);
+   begin
+      return Place (Home, Home_Place)
+        & Place ((if Runtime = "" then "" else Runtime & "/gvfs"), Desktop_Mounts_Parent)
+        & Place ((if User = "" then "" else "/run/media/" & User), Removable_Media_Parent);
+   end User_Places;
+
+   function Application_Data_Directories return Path_List is
+      use Ada.Strings.Unbounded;
+      function Value (Name : String) return String is
+        (if Ada.Environment_Variables.Exists (Name) then Ada.Environment_Variables.Value (Name) else "");
+      Home      : constant String := Home_Directory;
+      Data_Home : constant String := Value ("XDG_DATA_HOME");
+      Data_Dirs : constant String := Value ("XDG_DATA_DIRS");
+      Search    : constant String :=
+        (if Data_Home /= "" then Data_Home elsif Home /= "" then Home & "/.local/share" else "")
+        & ':' & (if Data_Dirs /= "" then Data_Dirs else "/usr/local/share:/usr/share");
+      Result    : Path_List (1 .. Search'Length);
+      Last      : Natural := 0;
+      First     : Positive := Search'First;
+
+      procedure Add (Folder : String) is
+      begin
+         if Folder = "" or else Folder (Folder'First) /= '/' then
+            return;
+         end if;
+         for Known of Result (1 .. Last) loop
+            if To_String (Known) = Folder then
+               return;
+            end if;
+         end loop;
+         Last := Last + 1;
+         Result (Last) := To_Unbounded_String (Folder);
+      end Add;
+   begin
+      for Index in Search'Range loop
+         if Search (Index) = ':' then
+            Add (Search (First .. Index - 1));
+            First := Index + 1;
+         end if;
+      end loop;
+      Add (Search (First .. Search'Last));
+      return Result (1 .. Last);
+   end Application_Data_Directories;
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin

@@ -1303,6 +1303,29 @@ package body Hostkit.Fs is
       return "";
    end Home_Directory_Of;
 
+   function User_Places return User_Place_List is
+      use Ada.Strings.Unbounded;
+      function Value (Name : String) return String is
+        (if Ada.Environment_Variables.Exists (Name) then Ada.Environment_Variables.Value (Name) else "");
+      Drive  : constant String := Value ("HOMEDRIVE");
+      Path   : constant String := Value ("HOMEPATH");
+      System_Drive : constant String := Value ("SystemDrive");
+      function Place (Folder : String; Kind : User_Place_Kind) return User_Place_List is
+        (if Folder = "" then [] else [1 => (Path => To_Unbounded_String (Folder), Kind => Kind)]);
+   begin
+      return Place (Home_Directory, Home_Place)
+        & Place ((if Drive = "" then "" else Drive & "\"), Drive_Place)
+        & Place ((if Drive = "" or else Path = "" then "" else Drive & Path), Profile_Place)
+        & Place ((if System_Drive = "" then "" else System_Drive & "\"), Drive_Place)
+        & Place (Value ("HOMESHARE"), Network_Place)
+        & Place (Value ("OneDrive"), Cloud_Place)
+        & Place (Value ("OneDriveCommercial"), Cloud_Place)
+        & Place (Value ("OneDriveConsumer"), Cloud_Place);
+   end User_Places;
+
+   --  Windows keeps no freedesktop application entries.
+   function Application_Data_Directories return Path_List is ([]);
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin

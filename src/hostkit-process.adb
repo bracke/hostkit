@@ -6,6 +6,7 @@ with Ada.Text_IO;
 
 with GNAT.OS_Lib;
 
+with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Native;
 with Hostkit.Shell;
@@ -426,7 +427,7 @@ package body Hostkit.Process is
       use type Hostkit.Host.Kind;
 
       Smart_Open_Script : constant String :=
-        "mime=""$1""; file=""$2""; "
+        "mime=""$1""; count=""$2""; shift 2; for file in ""$@""; do :; done; "
         & "if [ -z ""$mime"" ] && command -v file >/dev/null 2>&1; then "
         & "mime=$(file --brief --mime-type -- ""$file"" 2>/dev/null); "
         & "fi; "
@@ -435,7 +436,11 @@ package body Hostkit.Process is
         & "desktop=$(xdg-mime query default ""$mime"" 2>/dev/null); "
         & "fi; "
         & "if [ -n ""$desktop"" ]; then "
-        & "for dir in ""$HOME/.local/share/applications"" /usr/local/share/applications /usr/share/applications; do "
+        & "seen=0; "
+        & "for base in ""$@""; do "
+        & "seen=$((seen + 1)); "
+        & "if [ ""$seen"" -gt ""$count"" ]; then break; fi; "
+        & "dir=""$base/applications""; "
         & "if [ -r ""$dir/$desktop"" ]; then "
         & "if command -v gio >/dev/null 2>&1; then "
         & "exec gio launch ""$dir/$desktop"" ""$file""; "
@@ -482,6 +487,17 @@ package body Hostkit.Process is
          Add (Smart_Open_Script);
          Add ("--");
          Add (Mime_Type);
+         --  Where the desktop keeps its entries, as files' "Open with" finds
+         --  them: the XDG data folders, not three fixed ones. Counted, so the
+         --  file still comes last.
+         declare
+            Bases : constant Hostkit.Fs.Path_List := Hostkit.Fs.Application_Data_Directories;
+         begin
+            Add (Ada.Strings.Fixed.Trim (Natural'Image (Bases'Length), Ada.Strings.Left));
+            for Base of Bases loop
+               Add (To_String (Base));
+            end loop;
+         end;
          Add (Path_Token);
          return True;
       end if;

@@ -1427,6 +1427,17 @@ package body Hostkit.Fs is
          return "";
    end Home_Directory_Of;
 
+   function User_Places return User_Place_List is
+      use Ada.Strings.Unbounded;
+      Home : constant String := Home_Directory;
+   begin
+      --  Volumes appear in the mount table (/Volumes); the home is the place.
+      return (if Home = "" then [] else [1 => (Path => To_Unbounded_String (Home), Kind => Home_Place)]);
+   end User_Places;
+
+   --  macOS keeps no freedesktop application entries.
+   function Application_Data_Directories return Path_List is ([]);
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin
