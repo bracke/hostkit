@@ -615,6 +615,13 @@ package body Hostkit.Fs is
       type Disposition_Info is record
          Delete_File : Interfaces.C.int;
       end record with Convention => C;
+      type Disposition_Info_Ex is record
+         Flags : C_DWord;
+      end record with Convention => C;
+      type Attribute_Tag_Info is record
+         Attributes : C_DWord;
+         Reparse_Tag : Interfaces.Unsigned_32;
+      end record with Convention => C;
       type Child (Length : Natural) is record
          Name : U16_Array (1 .. Length);
          Id   : Interfaces.Unsigned_64;
@@ -637,6 +644,12 @@ package body Hostkit.Fs is
       Id_Both_Directory_Info : constant Interfaces.C.int := 10;
       Id_Both_Directory_Restart_Info : constant Interfaces.C.int := 11;
       File_Disposition_Info : constant Interfaces.C.int := 4;
+      File_Attribute_Tag_Info : constant Interfaces.C.int := 9;
+      File_Disposition_Info_Ex : constant Interfaces.C.int := 21;
+      --  FILE_DISPOSITION_FLAG_DELETE, _POSIX_SEMANTICS and
+      --  _IGNORE_READONLY_ATTRIBUTE: a read-only file (git marks its objects
+      --  so) is deleted like any other, as it is on POSIX hosts.
+      Disposition_Delete_Flags : constant C_DWord := 16#1# + 16#2# + 16#10#;
       Error_No_More_Files : constant C_DWord := 18;
 
       function Create_File_W
@@ -672,14 +685,18 @@ package body Hostkit.Fs is
         (Interfaces.Unsigned_64 (Info.Index_High) * 2 ** 32
          + Interfaces.Unsigned_64 (Info.Index_Low));
 
+      --  Read Directory's children from its start. Full is True when
+      --  Max_Entries were read and more may follow: the caller deletes those,
+      --  then reads again, so a folder of any size is deleted in batches.
       function Read_Children
-        (Directory : System.Address; Items : in out Child_Vectors.Vector)
+        (Directory : System.Address; Items : in out Child_Vectors.Vector; Full : out Boolean)
          return Boolean
       is
          Buffer : aliased Byte_Array (0 .. 65_535);
          Kind : Interfaces.C.int := Id_Both_Directory_Restart_Info;
          Name_Bytes : Natural := 0;
       begin
+         Full := False;
          loop
             if Get_File_Information_Ex
               (Directory, Kind, Buffer'Address, C_DWord (Buffer'Length)) = 0
@@ -716,7 +733,8 @@ package body Hostkit.Fs is
                         if Natural (Items.Length) >= Max_Entries
                           or else Natural (Header.Name_Length) > Max_Name_Bytes - Name_Bytes
                         then
-                           return False;
+                           Full := True;
+                           return True;
                         end if;
                         Item.Id := Header.File_Id;
                         Items.Append (Item);
@@ -765,51 +783,80 @@ package body Hostkit.Fs is
          end;
       end Child_Path;
 
+      --  Whether the held entry is a link to leave alone rather than a
+      --  folder to empty: only the symbolic-link and junction tags are, as
+      --  in Is_Link. A OneDrive placeholder folder is a reparse point too,
+      --  and its contents are the user's. An unreadable tag counts as a link.
+      function Is_Held_Link (Held : System.Address; Info : Handle_Info) return Boolean is
+         Tag_Info : aliased Attribute_Tag_Info;
+      begin
+         if (Info.Attributes and File_Attribute_Reparse_Point) = 0 then
+            return False;
+         end if;
+         if Get_File_Information_Ex
+           (Held, File_Attribute_Tag_Info, Tag_Info'Address, C_DWord (Attribute_Tag_Info'Size / 8)) = 0
+         then
+            return True;
+         end if;
+         return Tag_Info.Reparse_Tag = Io_Reparse_Tag_Symlink
+           or else Tag_Info.Reparse_Tag = Io_Reparse_Tag_Mount_Point;
+      end Is_Held_Link;
+
       function Delete_Held (Held : System.Address; Depth : Natural) return Boolean is
          Info : aliased Handle_Info;
          Items : Child_Vectors.Vector;
          Ok : Boolean := Depth <= Max_Depth
            and then Get_File_Information (Held, Info'Access) /= 0;
+         Full : Boolean := True;
          Ignored : Interfaces.C.int;
       begin
          if Ok and then (Info.Attributes and File_Attribute_Directory) /= 0
-           and then (Info.Attributes and File_Attribute_Reparse_Point) = 0
+           and then not Is_Held_Link (Held, Info)
          then
-            Ok := Read_Children (Held, Items);
-            for Item of Items loop
-               exit when not Ok;
-               declare
-                  Name : constant U16_Array := Child_Path (Held, Item.Name);
-                  Child_Handle : System.Address :=
-                    (if Name'Length = 0 then Invalid_Handle else
-                       Create_File_W
-                         (Name'Address,
-                          Delete_Access + File_Read_Attributes + File_List_Directory,
-                          Share_All, System.Null_Address, Open_Existing,
-                          Backup_Semantics + Open_Reparse_Point,
-                          System.Null_Address));
-                  Child_Info : aliased Handle_Info;
-               begin
-                  Ok := Child_Handle /= Invalid_Handle
-                    and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
-                    and then Child_Info.Volume = Info.Volume
-                    and then File_Index (Child_Info) = Item.Id;
-                  if Ok then
-                     Ok := Delete_Held (Child_Handle, Depth + 1);
-                     Child_Handle := Invalid_Handle;
-                  elsif Child_Handle /= Invalid_Handle then
-                     Ignored := Close_Handle (Child_Handle);
-                  end if;
-               end;
+            while Ok and then Full loop
+               Items.Clear;
+               Ok := Read_Children (Held, Items, Full);
+               for Item of Items loop
+                  exit when not Ok;
+                  declare
+                     Name : constant U16_Array := Child_Path (Held, Item.Name);
+                     Child_Handle : System.Address :=
+                       (if Name'Length = 0 then Invalid_Handle else
+                          Create_File_W
+                            (Name'Address,
+                             Delete_Access + File_Read_Attributes + File_List_Directory,
+                             Share_All, System.Null_Address, Open_Existing,
+                             Backup_Semantics + Open_Reparse_Point,
+                             System.Null_Address));
+                     Child_Info : aliased Handle_Info;
+                  begin
+                     Ok := Child_Handle /= Invalid_Handle
+                       and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
+                       and then Child_Info.Volume = Info.Volume
+                       and then File_Index (Child_Info) = Item.Id;
+                     if Ok then
+                        Ok := Delete_Held (Child_Handle, Depth + 1);
+                        Child_Handle := Invalid_Handle;
+                     elsif Child_Handle /= Invalid_Handle then
+                        Ignored := Close_Handle (Child_Handle);
+                     end if;
+                  end;
+               end loop;
             end loop;
          end if;
          if Ok then
             declare
+               Disposition_Ex : aliased Disposition_Info_Ex := (Flags => Disposition_Delete_Flags);
                Disposition : aliased Disposition_Info := (Delete_File => 1);
             begin
+               --  The extended form needs Windows 10 1809 and NTFS; elsewhere
+               --  the plain one still deletes what is not read-only.
                Ok := Set_File_Information
-                 (Held, File_Disposition_Info, Disposition'Address,
-                  C_DWord (Disposition_Info'Size / 8)) /= 0;
+                 (Held, File_Disposition_Info_Ex, Disposition_Ex'Address,
+                  C_DWord (Disposition_Info_Ex'Size / 8)) /= 0
+                 or else Set_File_Information
+                   (Held, File_Disposition_Info, Disposition'Address,
+                    C_DWord (Disposition_Info'Size / 8)) /= 0;
             end;
          end if;
          Ignored := Close_Handle (Held);

@@ -1077,6 +1077,10 @@ package body Hostkit_Suite is
       Ada.Directories.Create_Path (Child);
       Ada.Directories.Create_Path (Outside);
       Write_File (Ada.Directories.Compose (Child, "payload.txt"), "payload");
+      --  Read-only, as git leaves its objects: Windows refuses a plain
+      --  delete of one, and the tree must still go.
+      Write_File (Ada.Directories.Compose (Child, "read-only.txt"), "kept read-only");
+      GNAT.OS_Lib.Set_Read_Only (Ada.Directories.Compose (Child, "read-only.txt"));
       Write_File (Outside_File, "keep");
       declare
          Linked : constant Boolean := Hostkit.Fs.Create_Link (Outside, Link);
@@ -1109,6 +1113,39 @@ package body Hostkit_Suite is
          Delete_Tree_If_Present (Outside);
          raise;
    end Test_Delete_Tree_No_Follow;
+
+   --  A folder with more entries than one read takes is deleted in batches,
+   --  not refused half-way.
+   procedure Test_Delete_Tree_Large_Folder
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Hostkit.Fs.Delete_Tree_Outcome;
+      Root : constant String := Ada.Directories.Compose (Scratch, "hk-delete-large");
+      Count : constant := 100_001;
+   begin
+      Delete_Tree_If_Present (Root);
+      Ada.Directories.Create_Path (Root);
+      for Index in 1 .. Count loop
+         declare
+            Image : constant String := Index'Image;
+            Fd : constant GNAT.OS_Lib.File_Descriptor :=
+              GNAT.OS_Lib.Create_New_File
+                (Ada.Directories.Compose (Root, "f" & Image (Image'First + 1 .. Image'Last)),
+                 GNAT.OS_Lib.Binary);
+         begin
+            GNAT.OS_Lib.Close (Fd);
+         end;
+      end loop;
+      Assert
+        (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Deleted,
+         "a folder of" & Count'Image & " entries is deleted");
+      Assert (not Ada.Directories.Exists (Root), "and is gone");
+   exception
+      when others =>
+         Delete_Tree_If_Present (Root);
+         raise;
+   end Test_Delete_Tree_Large_Folder;
 
    procedure Test_Relative_Link_Is_Read_From_Its_Folder
      (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -2977,6 +3014,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Delete_Tree_No_Follow'Access,
          "fs : secure tree deletion never follows a link outside the tree");
+      Register_Routine
+        (T, Test_Delete_Tree_Large_Folder'Access,
+         "fs : secure tree deletion empties a folder larger than one read in batches");
       Register_Routine
         (T, Test_Relative_Link_Is_Read_From_Its_Folder'Access,
          "fs : a relative link's target is read from the link's folder");

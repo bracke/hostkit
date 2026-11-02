@@ -850,13 +850,28 @@ package body Hostkit.Fs is
       function Is_Directory (Item : Identity) return Boolean is
         (Item.Available and then (Item.Mode and File_Type_Mask) = Directory_Type);
 
-      function Read_Names (Held : C_Int; Names : in out Name_Vectors.Vector) return Boolean is
-         Scan : C_Int := C_Dup (Held);
+      function C_Lseek (Fd : C_Int; Offset : Interfaces.C.long; Whence : C_Int) return Interfaces.C.long
+        with Import, Convention => C, External_Name => "lseek";
+
+      --  Read Held's names from its start. Full is True when Max_Entries
+      --  names were read and more may follow: the caller deletes those, then
+      --  reads again, so a folder of any size is deleted in batches.
+      function Read_Names
+        (Held : C_Int; Names : in out Name_Vectors.Vector; Full : out Boolean) return Boolean
+      is
+         Scan : C_Int;
          Directory : System.Address := System.Null_Address;
          Pointer : System.Address;
          Name_Bytes : Natural := 0;
          Ignored : C_Int;
       begin
+         Full := False;
+         --  The duplicate shares Held's position: start it over, as the
+         --  names read before were deleted.
+         if Interfaces.C."<" (C_Lseek (Held, 0, 0), 0) then
+            return False;
+         end if;
+         Scan := C_Dup (Held);
          if Scan < 0 then
             return False;
          end if;
@@ -879,7 +894,8 @@ package body Hostkit.Fs is
                     or else Name'Length > Max_Name_Bytes - Name_Bytes
                   then
                      Ignored := C_Closedir (Directory);
-                     return False;
+                     Full := True;
+                     return True;
                   end if;
                   Names.Append (Name);
                   Name_Bytes := Name_Bytes + Name'Length;
@@ -909,51 +925,59 @@ package body Hostkit.Fs is
       is
          Names : Name_Vectors.Vector;
          Ok : Boolean;
+         Full : Boolean := True;
       begin
-         if Depth > Max_Depth or else not Read_Names (Held, Names) then
+         if Depth > Max_Depth then
             Close (Held);
             return False;
          end if;
-         for Name of Names loop
-            declare
-               Observed : constant Identity := Info_At (Held, Name, At_Symlink_Nofollow);
-               C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
-               Child : C_Int := -1;
-            begin
-               if not Observed.Available then
-                  Ok := False;
-               elsif not Is_Directory (Observed) then
-                  Ok := C_Unlinkat (Held, C_Name, 0) = 0;
-               else
-                  Child := C_Openat (Held, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
-                  declare
-                     Child_Info : constant Identity := Info_Of (Child);
-                  begin
-                     Ok := Child >= 0 and then Is_Directory (Child_Info) and then Same (Observed, Child_Info);
-                     if Ok then
-                        Close (Held);
-                        Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
-                        Held := Child;
+         while Full loop
+            Names.Clear;
+            if not Read_Names (Held, Names, Full) then
+               Close (Held);
+               return False;
+            end if;
+            for Name of Names loop
+               declare
+                  Observed : constant Identity := Info_At (Held, Name, At_Symlink_Nofollow);
+                  C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
+                  Child : C_Int := -1;
+               begin
+                  if not Observed.Available then
+                     Ok := False;
+                  elsif not Is_Directory (Observed) then
+                     Ok := C_Unlinkat (Held, C_Name, 0) = 0;
+                  else
+                     Child := C_Openat (Held, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
+                     declare
+                        Child_Info : constant Identity := Info_Of (Child);
+                     begin
+                        Ok := Child >= 0 and then Is_Directory (Child_Info) and then Same (Observed, Child_Info);
                         if Ok then
-                           Ok := Same (Held_Info, Info_Of (Held));
+                           Close (Held);
+                           Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
+                           Held := Child;
+                           if Ok then
+                              Ok := Same (Held_Info, Info_Of (Held));
+                           end if;
+                        else
+                           Close (Child);
                         end if;
-                     else
-                        Close (Child);
-                     end if;
-                  end;
-               end if;
-               Free (C_Name);
-               if not Ok then
-                  Close (Held);
-                  return False;
-               end if;
-            exception
-               when others =>
+                     end;
+                  end if;
                   Free (C_Name);
-                  Close (Child);
-                  Close (Held);
-                  return False;
-            end;
+                  if not Ok then
+                     Close (Held);
+                     return False;
+                  end if;
+               exception
+                  when others =>
+                     Free (C_Name);
+                     Close (Child);
+                     Close (Held);
+                     return False;
+               end;
+            end loop;
          end loop;
          declare
             Dotdot : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String ("..");

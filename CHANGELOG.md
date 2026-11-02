@@ -68,6 +68,18 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **`Fs.Delete_Tree_No_Follow` no longer gives up on a folder of more than
+  100,000 entries.** It read every name before deleting any, refused past the
+  cap, and left the entries already visited deleted. It now deletes in batches
+  of that size, reading the folder again from its start after each, on every
+  host.
+- **On Windows, `Fs.Delete_Tree_No_Follow` deletes read-only files and the
+  contents of cloud placeholder folders.** The plain delete disposition refuses
+  a read-only file (git marks its objects so); it now asks for
+  `FileDispositionInfoEx` with the ignore-read-only and POSIX flags first.
+  Every reparse-point folder was treated as a leaf; only symbolic links and
+  junctions are now, as `Is_Link` already decided, so a OneDrive folder is
+  emptied rather than refused.
 - **On arm, powerpc and m68k Linux, a final symbolic link was followed where
   it must not be.** `Lease_Files`, `Private_Paths`, `Fs` (the no-follow tree
   delete and `Read_Beneath`) and `Metadata.Update_Entry_Metadata` spelled
