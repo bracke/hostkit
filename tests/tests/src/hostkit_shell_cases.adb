@@ -15,6 +15,7 @@ with Hostkit.Descriptors;
 with Hostkit.Fs;
 with Hostkit.Limits;
 with Hostkit.Locks;
+with Hostkit.Microphone;
 with Hostkit.Pty;
 with Hostkit.Host;
 with Hostkit.Process;
@@ -36,6 +37,7 @@ package body Hostkit_Shell_Cases is
    use type Hostkit.Spawn.Spawn_Outcome;
    use type Hostkit.Spawn.Wait_State;
    use type Hostkit.Locks.Lock_Outcome;
+   use type Hostkit.Microphone.Outcome;
    use type Hostkit.Terminal_Control.Mode;
    use type Ada.Directories.File_Size;
 
@@ -2851,9 +2853,45 @@ package body Hostkit_Shell_Cases is
    -- Register_Tests --
    --------------------
 
+   --  A microphone opens or says why not, never both and never neither: a
+   --  host that cannot record answers Unsupported and is not open; a read
+   --  of a device never opened fails rather than handing back silence as
+   --  though it were recorded. Whether one opens depends on the machine --
+   --  a CI runner has no sound server -- so what is held is the agreement.
+   procedure Test_A_Microphone_Opens_Or_Says_Why_Not
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Device : Hostkit.Microphone.Device;
+      Result : Hostkit.Microphone.Outcome;
+      Reason : Unbounded_String;
+      Chunk  : Ada.Streams.Stream_Element_Array (1 .. Hostkit.Microphone.Chunk_Bytes);
+   begin
+      Hostkit.Microphone.Read (Device, Chunk, Result, Reason);
+      Assert (Result = Hostkit.Microphone.Failed, "a device never opened read as though recorded");
+      Hostkit.Microphone.Open (Device, "", Result, Reason);
+      Assert (Hostkit.Microphone.Is_Open (Device) = (Result = Hostkit.Microphone.Done),
+              "an open's answer and the device disagree");
+      Assert ((Result = Hostkit.Microphone.Done) = (Length (Reason) = 0),
+              "a refusal without a reason, or a reason without a refusal");
+      if not Hostkit.Microphone.Is_Supported then
+         Assert (Result = Hostkit.Microphone.Unsupported, "a host that cannot record did not say so");
+      end if;
+      if Result = Hostkit.Microphone.Done then
+         Hostkit.Microphone.Read (Device, Chunk, Result, Reason);
+         Assert (Result = Hostkit.Microphone.Done, "an open microphone did not read: " & To_String (Reason));
+      end if;
+      Hostkit.Microphone.Close (Device);
+      Hostkit.Microphone.Close (Device);
+      Assert (not Hostkit.Microphone.Is_Open (Device), "a closed microphone is open");
+   end Test_A_Microphone_Opens_Or_Says_Why_Not;
+
    overriding procedure Register_Tests (T : in out Case_Type) is
       use AUnit.Test_Cases.Registration;
    begin
+      Register_Routine
+        (T, Test_A_Microphone_Opens_Or_Says_Why_Not'Access,
+         "microphone : a microphone opens or says why not, and a closed one does not read");
       Register_Routine
         (T, Test_A_Pipe_Carries_Bytes_And_Then_Ends'Access,
          "descriptors : a pipe carries bytes and ends when the writer closes");

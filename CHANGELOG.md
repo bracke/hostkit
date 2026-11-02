@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Microphone` (Open, Read, Close, Is_Supported): one channel of 16-bit
+  samples at 16 kHz from the default or a named source. Linux records through
+  libpulse-simple, opened by name, which pipewire-pulse also answers; macOS
+  and Windows answer Unsupported until they are done. For model_runner's
+  speech input.
+
 - `Mounts` (Table, Find, Removable): the mount table (Linux's /proc/mounts,
   escapes decoded; empty where a host keeps none) and whether a block device
   is on a removable disk (/sys/block), moved from files.
