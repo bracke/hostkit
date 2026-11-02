@@ -18,7 +18,10 @@ with System;
 --    name at the first Open, never linked -- a host without it runs
 --    everything else and refuses here with Unsupported. pipewire-pulse
 --    answers the same calls. The stream is asked to deliver a tenth of a
---    second at a time, so a Read returns that often.
+--    second at a time, so a Read returns that often. A source named that
+--    the server does not have is not refused by PipeWire's pulse server: it
+--    records the default source instead, so a caller that must know which
+--    source it records asks the server itself.
 --  * macOS and Windows: not yet recorded. Open answers Unsupported. That is
 --    a refusal, not a guess: nothing here pretends a microphone opened.
 --
