@@ -1,5 +1,3 @@
-with Hostkit.Process;
-
 package body Hostkit.Native is
 
    --  An unknown host: nothing is claimed, and nothing is pretended.
