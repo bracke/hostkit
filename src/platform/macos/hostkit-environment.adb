@@ -19,4 +19,14 @@ package body Hostkit.Environment is
       return (if Found then Text else Default);
    end Value;
 
+   procedure Set (Name : String; Value : String) is
+   begin
+      Ada.Environment_Variables.Set (Name, Value);
+   end Set;
+
+   procedure Clear (Name : String) is
+   begin
+      Ada.Environment_Variables.Clear (Name);
+   end Clear;
+
 end Hostkit.Environment;

@@ -17,4 +17,16 @@ package Hostkit.Environment is
    --  @return Its value as UTF-8, or Default when it is not set.
    function Value (Name : String; Default : String) return String;
 
+   --  Set Name for this process and the programs it starts, from UTF-8 (on
+   --  Windows through SetEnvironmentVariableW, which Value reads back).
+   --
+   --  @param Name The variable.
+   --  @param Value Its new value as UTF-8 (on Windows, "" removes it).
+   procedure Set (Name : String; Value : String);
+
+   --  Remove Name from this process's environment.
+   --
+   --  @param Name The variable.
+   procedure Clear (Name : String);
+
 end Hostkit.Environment;

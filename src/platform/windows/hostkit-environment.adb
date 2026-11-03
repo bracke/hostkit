@@ -13,6 +13,15 @@ package body Hostkit.Environment is
       return Interfaces.C.unsigned_long
      with Import, Convention => Stdcall, External_Name => "GetEnvironmentVariableW";
 
+   function Set_Environment_Variable_W
+     (Name  : System.Address;
+      Value : System.Address)
+      return Interfaces.C.int
+     with Import, Convention => Stdcall, External_Name => "SetEnvironmentVariableW";
+
+   function Wide_Of (Text : String) return Wide_String is
+     (Ada.Strings.UTF_Encoding.Conversions.Convert (Text) & Wide_Character'Val (0));
+
    function Value (Name : String; Found : out Boolean) return String is
       Wide_Name : aliased constant Wide_String :=
         Ada.Strings.UTF_Encoding.Conversions.Convert (Name) & Wide_Character'Val (0);
@@ -53,5 +62,27 @@ package body Hostkit.Environment is
    begin
       return (if Found then Text else Default);
    end Value;
+
+   --  Not through Ada.Environment_Variables: the C runtime hands its value
+   --  to Windows in the ANSI code page, and Value, reading the wide block,
+   --  would get those bytes back as other characters.
+   procedure Set (Name : String; Value : String) is
+      Wide_Name  : aliased constant Wide_String := Wide_Of (Name);
+      Wide_Value : aliased constant Wide_String := Wide_Of (Value);
+      Result     : constant Interfaces.C.int :=
+        Set_Environment_Variable_W
+          (Wide_Name'Address, (if Value = "" then System.Null_Address else Wide_Value'Address));
+      pragma Unreferenced (Result);
+   begin
+      null;
+   end Set;
+
+   procedure Clear (Name : String) is
+      Wide_Name : aliased constant Wide_String := Wide_Of (Name);
+      Result    : constant Interfaces.C.int := Set_Environment_Variable_W (Wide_Name'Address, System.Null_Address);
+      pragma Unreferenced (Result);
+   begin
+      null;
+   end Clear;
 
 end Hostkit.Environment;

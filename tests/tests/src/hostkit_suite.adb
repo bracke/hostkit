@@ -23,6 +23,7 @@ with Hostkit.Directory_Listing;
 with Hostkit.Directory_Write_Access;
 with Hostkit.Durability;
 with Hostkit.Fs;
+with Hostkit.Environment;
 with Hostkit.Host;
 with Hostkit.Lease_Files;
 with Hostkit.Linux_Abi;
@@ -405,7 +406,41 @@ package body Hostkit_Suite is
         (Hostkit.Process.Is_Runnable (Ada.Command_Line.Command_Name)
          or else not Ada.Directories.Exists (Ada.Command_Line.Command_Name),
          "the running test program, named by its path, is runnable");
+      --  And a bare name found on the search path: the host's own shell.
+      Assert
+        (Hostkit.Process.Is_Runnable (if Hostkit.Host.Current = Hostkit.Host.Windows then "cmd" else "sh"),
+         "the host's shell, named bare, is found and runnable");
    end Test_Is_Runnable;
+
+   procedure Test_Current_User_Account (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Account : Hostkit.Metadata.Account_Id;
+      Id      : Natural;
+      Known   : constant Boolean := Hostkit.Process.Current_User_Account (Account);
+   begin
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (not Known, "Windows has no numeric user id to give");
+         return;
+      end if;
+      Assert (Known, "a POSIX host gives the process's user id");
+      Assert
+        (not Hostkit.Process.Current_User_Id (Id) or else Hostkit.Metadata.Account_Id (Id) = Account,
+         "the narrow and the full user id agree");
+      --  A file this process makes is owned by it.
+      declare
+         Path      : constant String := Ada.Directories.Compose (Scratch, "hostkit-owned-by-me");
+         File      : Ada.Text_IO.File_Type;
+         Owner     : Hostkit.Metadata.Account_Id;
+         Group     : Hostkit.Metadata.Account_Id;
+         Available : Boolean;
+      begin
+         Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+         Ada.Text_IO.Close (File);
+         Hostkit.Metadata.File_Ownership (Path, Owner, Group, Available);
+         Ada.Directories.Delete_File (Path);
+         Assert (Available and then Owner = Account, "a new file's owner is the current user account");
+      end;
+   end Test_Current_User_Account;
 
    procedure Test_Path_Containment (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -484,6 +519,26 @@ package body Hostkit_Suite is
             "an inherited non-ASCII value comes back as UTF-8, got"
             & Natural'Image (Length (Value)) & " bytes");
       end if;
+
+      --  And one this process sets itself: Set takes UTF-8 and Value gives
+      --  the same bytes back (Windows' C runtime would pass them on in the
+      --  ANSI code page), and Clear removes it.
+      declare
+         Jurgen : constant String := "J" & Character'Val (16#C3#) & Character'Val (16#BC#) & "rgen";
+         Found  : Boolean;
+      begin
+         Hostkit.Environment.Set (Name, Jurgen);
+         Assert
+           (Hostkit.Environment.Value (Name, Found) = Jurgen and then Found,
+            "a non-ASCII value set here is read back as the same UTF-8");
+         Assert
+           (Hostkit.Process.Environment_Value (Name, Value) and then To_String (Value) = Jurgen,
+            "the process view of the environment reads it back the same");
+         Hostkit.Environment.Clear (Name);
+         Assert
+           (Hostkit.Environment.Value (Name, Found) = "" and then not Found,
+            "a cleared variable is gone");
+      end;
    end Test_Environment_Value;
 
    procedure Test_Shell_Quoting_Holds (T : in out AUnit.Test_Cases.Test_Case'Class) is
@@ -3061,6 +3116,8 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Launch_Does_Not_Wait'Access, "process : Launch starts and does not wait");
       Register_Routine (T, Test_Is_Runnable'Access, "process : a path or a name is runnable only if it can start");
+      Register_Routine
+        (T, Test_Current_User_Account'Access, "process : the current user account owns what the process makes");
       Register_Routine
         (T, Test_Path_Containment'Access, "fs : separators, containment and rebasing follow the host");
       Register_Routine
