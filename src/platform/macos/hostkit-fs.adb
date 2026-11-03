@@ -1547,6 +1547,19 @@ package body Hostkit.Fs is
       return False;
    end Uses_Dos_Filename_Rules;
 
+   function Folds_Name_Case (Directory : String) return Boolean is
+      --  <sys/unistd.h>: 1 when the volume tells case apart, 0 when it folds.
+      PC_Case_Sensitive : constant Interfaces.C.int := 11;
+
+      function Pathconf (Path : Interfaces.C.char_array; Name : Interfaces.C.int) return Interfaces.C.long
+        with Import, Convention => C, External_Name => "pathconf";
+      use type Interfaces.C.long;
+      Answer : constant Interfaces.C.long := Pathconf (Interfaces.C.To_C (Directory), PC_Case_Sensitive);
+   begin
+      --  -1: the volume does not say; the native ones fold unless told not to.
+      return Answer /= 1;
+   end Folds_Name_Case;
+
    ---------------
    -- Separator --
    ---------------

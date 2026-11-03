@@ -412,6 +412,67 @@ package body Hostkit_Suite is
          "the host's shell, named bare, is found and runnable");
    end Test_Is_Runnable;
 
+   procedure Test_Terminal (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Saved : constant String := Hostkit.Environment.Value ("TERMINAL", Default => "");
+      Had   : constant Boolean := Ada.Environment_Variables.Exists ("TERMINAL");
+      Self  : constant String := Ada.Directories.Full_Name (Ada.Command_Line.Command_Name);
+   begin
+      --  TERMINAL wins when it names something runnable, and is passed over
+      --  when it does not.
+      Hostkit.Environment.Set ("TERMINAL", Self);
+      Assert (Hostkit.Process.Default_Terminal = Self, "TERMINAL naming a runnable program is the terminal");
+      Hostkit.Environment.Set ("TERMINAL", "hostkit-no-such-terminal-anywhere");
+      Assert
+        (Hostkit.Process.Default_Terminal /= "hostkit-no-such-terminal-anywhere",
+         "TERMINAL naming nothing runnable is ignored");
+      if Had then
+         Hostkit.Environment.Set ("TERMINAL", Saved);
+      else
+         Hostkit.Environment.Clear ("TERMINAL");
+      end if;
+
+      --  A terminal that starts where it is started is started in the folder.
+      declare
+         Folder  : constant String := Ada.Directories.Compose (Scratch, "a folder");
+         Command : constant String := Hostkit.Process.Terminal_Command ("xterm", Folder);
+      begin
+         Assert
+           (Ada.Strings.Fixed.Index (Command, Hostkit.Shell.Quote (Folder)) > 0
+            and then Ada.Strings.Fixed.Tail (Command, Hostkit.Shell.Quote ("xterm")'Length)
+              = Hostkit.Shell.Quote ("xterm"),
+            "the command changes into the folder, then starts the terminal: " & Command);
+      end;
+      --  The ones that must be told the folder are told it.
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert
+           (Ada.Strings.Fixed.Index (Hostkit.Process.Terminal_Command ("wt", "C:\x"), "-d") > 0,
+            "Windows Terminal is given the folder with -d");
+      elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
+         Assert
+           (Ada.Strings.Fixed.Index (Hostkit.Process.Terminal_Command ("open", "/x"), "Terminal") > 0,
+            "on macOS open -a Terminal is handed the folder");
+      end if;
+   end Test_Terminal;
+
+   procedure Test_Folds_Name_Case (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Path : constant String := Ada.Directories.Compose (Scratch, "CaseProbe");
+      File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Close (File);
+      declare
+         Found_Folded : constant Boolean := Ada.Directories.Exists (Ada.Directories.Compose (Scratch, "caseprobe"));
+      begin
+         Ada.Directories.Delete_File (Path);
+         Assert
+           (Hostkit.Fs.Folds_Name_Case (Scratch) = Found_Folded,
+            "Folds_Name_Case says what the volume does: a name in other case "
+            & (if Found_Folded then "finds" else "does not find") & " the file");
+      end;
+   end Test_Folds_Name_Case;
+
    procedure Test_Current_User_Account (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
       Account : Hostkit.Metadata.Account_Id;
@@ -3116,6 +3177,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Launch_Does_Not_Wait'Access, "process : Launch starts and does not wait");
       Register_Routine (T, Test_Is_Runnable'Access, "process : a path or a name is runnable only if it can start");
+      Register_Routine (T, Test_Terminal'Access, "process : the default terminal and how it is opened in a folder");
+      Register_Routine
+        (T, Test_Folds_Name_Case'Access, "fs : whether a volume folds name case is what it does");
       Register_Routine
         (T, Test_Current_User_Account'Access, "process : the current user account owns what the process makes");
       Register_Routine

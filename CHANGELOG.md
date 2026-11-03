@@ -17,6 +17,15 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Fs.Folds_Name_Case (Directory)`: whether a volume takes names differing
+  only in case for one file -- Windows yes, macOS asks the volume
+  (`pathconf _PC_CASE_SENSITIVE`), Linux yes for a DOS-family volume.
+
+- `Process.Default_Terminal` and `Process.Terminal_Command`, moved from
+  files: TERMINAL, else the host's usual terminals; and the command line
+  that opens one in a folder (Windows Terminal's `-d`, macOS's
+  `open -a Terminal`).
+
 - `Environment.Set` and `Environment.Clear`, taking UTF-8: on Windows through
   `SetEnvironmentVariableW`, so a non-ASCII value set in-process reads back
   unchanged (`Ada.Environment_Variables` passed it on in the ANSI code page).

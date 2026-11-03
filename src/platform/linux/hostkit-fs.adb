@@ -1612,6 +1612,9 @@ package body Hostkit.Fs is
          return False;
    end Uses_Dos_Filename_Rules;
 
+   function Folds_Name_Case (Directory : String) return Boolean is
+     (Uses_Dos_Filename_Rules (Directory));
+
    ---------------
    -- Separator --
    ---------------

@@ -613,4 +613,17 @@ package Hostkit.Fs is
    --  Windows answers True.
    function Uses_Dos_Filename_Rules (Path : String) return Boolean;
 
+   --  Whether the filesystem holding Directory takes two names that differ
+   --  only in letter case for the same file ("Notes.txt" and "notes.txt"),
+   --  so a new name must not differ from an existing one by case alone.
+   --
+   --  Windows answers True; macOS asks the volume (pathconf's
+   --  _PC_CASE_SENSITIVE: APFS and HFS+ fold case unless formatted not to)
+   --  and answers True when it cannot tell; Linux answers True for a
+   --  DOS-family volume (Uses_Dos_Filename_Rules) and False otherwise.
+   --
+   --  @param Directory A directory on the filesystem in question.
+   --  @return True when names on it are compared without regard to case.
+   function Folds_Name_Case (Directory : String) return Boolean;
+
 end Hostkit.Fs;

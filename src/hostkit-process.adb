@@ -542,6 +542,97 @@ package body Hostkit.Process is
       return False;
    end Default_Opener;
 
+   function Default_Terminal return String is
+      type Terminal_List is array (Positive range <>) of UString;
+
+      Configured : constant String := Hostkit.Environment.Value ("TERMINAL", Default => "");
+
+      --  Most to least preferred. Each is a bare name looked up on PATH, so
+      --  one the host lacks costs nothing.
+      Posix_Candidates : constant Terminal_List :=
+        [To_Unbounded_String ("x-terminal-emulator"),
+         To_Unbounded_String ("gnome-terminal"),
+         To_Unbounded_String ("konsole"),
+         To_Unbounded_String ("xfce4-terminal"),
+         To_Unbounded_String ("tilix"),
+         To_Unbounded_String ("terminator"),
+         To_Unbounded_String ("alacritty"),
+         To_Unbounded_String ("kitty"),
+         To_Unbounded_String ("wezterm"),
+         To_Unbounded_String ("ghostty"),
+         To_Unbounded_String ("foot"),
+         To_Unbounded_String ("urxvt"),
+         To_Unbounded_String ("xterm")];
+
+      --  Windows Terminal ships with Windows 11; PowerShell 7 is the modern
+      --  shell; Windows PowerShell and cmd are always there.
+      Windows_Candidates : constant Terminal_List :=
+        [To_Unbounded_String ("wt"),
+         To_Unbounded_String ("pwsh"),
+         To_Unbounded_String ("powershell"),
+         To_Unbounded_String ("cmd")];
+
+      function First_Available (Candidates : Terminal_List) return String is
+      begin
+         for Candidate of Candidates loop
+            if Is_Runnable (To_String (Candidate)) then
+               return To_String (Candidate);
+            end if;
+         end loop;
+         return "";
+      end First_Available;
+   begin
+      if Configured /= "" and then Is_Runnable (Configured) then
+         return Configured;
+      end if;
+      case Hostkit.Host.Current is
+         when Hostkit.Host.Windows =>
+            return First_Available (Windows_Candidates);
+         when Hostkit.Host.MacOS =>
+            --  A macOS terminal is an application bundle, not a program on
+            --  PATH: `open` starts it, and Terminal.app comes with the system.
+            return (if Is_Runnable ("open") then "open" else "");
+         when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
+            return First_Available (Posix_Candidates);
+      end case;
+   exception
+      when others =>
+         return "";
+   end Default_Terminal;
+
+   function Terminal_Command (Terminal : String; Directory : String) return String is
+      --  A terminal that has to be told the directory, with Options before it.
+      function Told (Program : String; Options : String_Vectors.Vector) return String is
+         Arguments : String_Vectors.Vector := Options;
+      begin
+         Arguments.Append (To_Unbounded_String (Directory));
+         return Hostkit.Shell.Command_Line (Program, Arguments);
+      end Told;
+   begin
+      case Hostkit.Host.Current is
+         when Hostkit.Host.MacOS =>
+            --  Terminal.app has no working directory of its own to inherit:
+            --  `open` hands it the folder, and it opens a window there.
+            if Terminal = "open" then
+               return Told ("open", [To_Unbounded_String ("-a"), To_Unbounded_String ("Terminal")]);
+            end if;
+         when Hostkit.Host.Windows =>
+            --  Windows Terminal ignores the directory it was started in for
+            --  its profile's (usually home); -d tells it otherwise.
+            if Terminal = "wt" then
+               return Told ("wt", [To_Unbounded_String ("-d")]);
+            end if;
+         when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
+            null;
+      end case;
+      --  The others start where they are started. "cd /d" on cmd, because a
+      --  plain cd does not cross to another drive.
+      return
+        (if Hostkit.Shell.Is_Command_Shell then "cd /d " else "cd ")
+        & Hostkit.Shell.Quote (Directory)
+        & " && " & Hostkit.Shell.Quote (Terminal);
+   end Terminal_Command;
+
    function Open_Native (Path : String) return Boolean is
    begin
       return Hostkit.Native.Open_Native (Path);

@@ -303,6 +303,12 @@ package body Hostkit.Fs is
       return False;
    end Uses_Dos_Filename_Rules;
 
+   function Folds_Name_Case (Directory : String) return Boolean is
+      pragma Unreferenced (Directory);
+   begin
+      return False;
+   end Folds_Name_Case;
+
    ---------------
    -- Separator --
    ---------------
@@ -342,7 +348,6 @@ package body Hostkit.Fs is
    ------------------
    -- Null_Device --
    ------------------
-
 
    -------------------
    -- Creation_Mask --

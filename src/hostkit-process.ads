@@ -354,4 +354,24 @@ package Hostkit.Process is
       Arguments  : out String_Vectors.Vector)
       return Boolean;
 
+   --  The terminal to open a folder in. TERMINAL first, when it names a
+   --  program this host runs (a name there it cannot run is ignored, not
+   --  launched); else the first the host has of its usual ones: on Linux the
+   --  Debian alternatives shim, the desktops' own, then standalone ones down
+   --  to xterm; on Windows Windows Terminal, PowerShell 7, Windows
+   --  PowerShell, cmd; on macOS `open` (which starts Terminal.app).
+   --
+   --  @return The terminal's program, or "" when the host has none.
+   function Default_Terminal return String;
+
+   --  The shell command line (for Shell.Executable) that opens Terminal, as
+   --  Default_Terminal names it, in Directory. Most terminals take the
+   --  directory they are started in; Windows Terminal is told it (-d), and
+   --  on macOS `open -a Terminal` is handed it.
+   --
+   --  @param Terminal The terminal's program.
+   --  @param Directory The folder to open it in.
+   --  @return The command line, quoted for the host's shell.
+   function Terminal_Command (Terminal : String; Directory : String) return String;
+
 end Hostkit.Process;

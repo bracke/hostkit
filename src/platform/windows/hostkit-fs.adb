@@ -1474,6 +1474,14 @@ package body Hostkit.Fs is
       return True;
    end Uses_Dos_Filename_Rules;
 
+   function Folds_Name_Case (Directory : String) return Boolean is
+      pragma Unreferenced (Directory);
+   begin
+      --  NTFS can be told per directory to tell case apart, but nothing
+      --  Windows itself makes is; FAT and exFAT never do.
+      return True;
+   end Folds_Name_Case;
+
    ---------------
    -- Separator --
    ---------------
