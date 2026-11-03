@@ -177,7 +177,10 @@ package body Hostkit.Watch is
       return State.Events;
    end Event_Count;
 
-   --  FILE_NOTIFY_CHANGE_SIZE and _LAST_WRITE are in the filter.
-   function Sees_File_Writes return Boolean is (True);
+   --  FILE_NOTIFY_CHANGE_SIZE and _LAST_WRITE are in the filter, but the
+   --  system reports them only once the cache writes the file's data out:
+   --  a file written while it stays open can go unreported for as long as
+   --  the cache holds it (a CI runner showed exactly that).
+   function Sees_File_Writes return Boolean is (False);
 
 end Hostkit.Watch;
