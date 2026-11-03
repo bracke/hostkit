@@ -44,7 +44,7 @@ project Hostkit is
             --  inherits both, so nobody has to know that asking Hostkit to open
             --  something, to trash it, or to say which Windows this is drags in a
             --  Windows library.
-            for Linker_Options use ("-lshell32", "-lntdll");
+            for Linker_Options use ("-lshell32", "-lntdll", "-lwinmm");
          when "macos" =>
             --  Foundation and the Objective-C runtime for the trash (NSFileManager,
             --  through objc_msgSend), CoreFoundation for the host locale

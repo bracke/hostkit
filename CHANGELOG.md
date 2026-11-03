@@ -17,6 +17,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Microphone` on Windows (winmm's waveIn, `-lwinmm` linked) and macOS
+  (AudioToolbox's input queue, opened by name); a Read gives up after three
+  seconds of nothing on every host. `Source_Present ("")` asks for the
+  default.
+
 - `Microphone.Source_Present` (Present, Absent, Unknown): whether the sound
   server has a source of a name, through libpulse's introspection opened by
   name; `Open` refuses a source the server does not have, or cannot be asked

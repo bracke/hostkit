@@ -256,7 +256,8 @@ package body Hostkit.Microphone is
       Context : System.Address := System.Null_Address;
       Result  : Source_Answer := Unknown;
       Text    : C.Strings.chars_ptr := C.Strings.New_String ("model_runner");
-      Wanted  : C.Strings.chars_ptr := C.Strings.New_String (Name);
+      --  The default is asked for by the server's own name for it.
+      Wanted  : C.Strings.chars_ptr := C.Strings.New_String (if Name = "" then "@DEFAULT_SOURCE@" else Name);
       --  Two seconds of a hundredth each, never waiting on the server.
       Tries   : Natural := 200;
    begin

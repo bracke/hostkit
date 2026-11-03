@@ -23,8 +23,15 @@ with System;
 --    not have, so a source named is looked for first, through libpulse's
 --    introspection, and Open refuses one the server does not have -- and
 --    one it cannot tell about.
---  * macOS and Windows: not yet recorded. Open answers Unsupported. That is
---    a refusal, not a guess: nothing here pretends a microphone opened.
+--  * Windows: winmm's waveIn, through the wave mapper or the input device
+--    whose name a source gives; four buffers of a tenth of a second.
+--  * macOS: AudioToolbox's input queue on the default input, the framework
+--    opened by name; a source named is refused, naming one not being done
+--    there, and a machine where the user has not allowed the microphone
+--    delivers nothing, which a Read reports after three seconds.
+--
+--  A Read on every host gives up after three seconds of nothing arriving,
+--  answering Failed rather than waiting for ever.
 --
 --  Nothing recorded is written anywhere: the samples go to the caller's
 --  buffer and nowhere else.
@@ -61,10 +68,11 @@ package Hostkit.Microphone is
    type Source_Answer is (Present, Absent, Unknown);
 
    --  Ask the sound server whether it has a source. Unknown where there is
-   --  no server, no library, or no answer within two seconds -- never
-   --  Present for not knowing.
+   --  no server, no library, or no answer within two seconds, and on macOS
+   --  -- never Present for not knowing.
    --
-   --  @param Name The source's name, as the server gives it.
+   --  @param Name The source's name, as the server gives it; "" for the
+   --    server's default.
    --  @return What the server said.
    function Source_Present (Name : String) return Source_Answer;
 

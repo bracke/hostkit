@@ -2896,7 +2896,7 @@ package body Hostkit_Shell_Cases is
       Assert (Length (Reason) > 0, "a source that is not there was refused without a reason");
       --  And the server's own name for its default is never said to be
       --  missing where there is a server to ask.
-      Assert (Hostkit.Microphone.Source_Present ("@DEFAULT_SOURCE@") /= Hostkit.Microphone.Absent,
+      Assert (Hostkit.Microphone.Source_Present ("") /= Hostkit.Microphone.Absent,
               "the default source was said not to be there");
    end Test_A_Microphone_Opens_Or_Says_Why_Not;
 
