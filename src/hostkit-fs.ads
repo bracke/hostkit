@@ -438,6 +438,40 @@ package Hostkit.Fs is
        then Base & Part
        else Base & Separator & Part);
 
+   --  Whether C separates path components here: '/' everywhere, and '\'
+   --  where it is the host's separator (on POSIX it is a filename byte).
+   --
+   --  @param C Character to test.
+   --  @return True when C is a separator.
+   function Is_Separator (C : Character) return Boolean is (C = '/' or else C = Separator);
+
+   --  Whether Child is Parent or lies under it, compared as text: Parent's
+   --  last component must end where Child has a separator, so /a/bc is not
+   --  under /a/b. A Parent that ends in a separator (a root) holds every
+   --  longer path that starts with it. Normalising both (resolving links,
+   --  making them absolute) is the caller's choice.
+   --
+   --  @param Child Candidate path.
+   --  @param Parent Candidate ancestor.
+   --  @return True when Child is Parent or a descendant of it.
+   function Is_Same_Or_Inside (Child : String; Parent : String) return Boolean is
+     (Child /= "" and then Parent /= ""
+      and then (Child = Parent
+                or else (Child'Length > Parent'Length
+                         and then Child (Child'First .. Child'First + Parent'Length - 1) = Parent
+                         and then (Is_Separator (Parent (Parent'Last))
+                                   or else Is_Separator (Child (Child'First + Parent'Length))))));
+
+   --  Path as it reads once From has moved to To: From itself becomes To, a
+   --  path inside From keeps its tail, and any other path is unchanged.
+   --
+   --  @param Path The path to rebase.
+   --  @param From Where the tree was.
+   --  @param To Where it is now.
+   --  @return The rebased path.
+   function Rebase (Path : String; From : String; To : String) return String is
+     (if Is_Same_Or_Inside (Path, From) then To & Path (Path'First + From'Length .. Path'Last) else Path);
+
    --  This user's home directory.
    --
    --  HOME is a convention a process can be started without; the host has a
