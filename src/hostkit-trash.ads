@@ -59,4 +59,14 @@ package Hostkit.Trash is
    --          is untouched.
    function Move_To_Trash (Path : String) return Boolean;
 
+   --  Whether Move_To_Trash would keep Path, so it can be restored, rather
+   --  than refuse it or destroy it. Windows answers False for a path on a
+   --  network share, a removable or optical drive, or a volume without a
+   --  Recycle Bin: asked to recycle there, the shell deletes the item for
+   --  good. A host with no trash of its own answers False.
+   --
+   --  @param Path The file or directory to be trashed.
+   --  @return True when the host's trash would hold Path.
+   function Can_Hold (Path : String) return Boolean;
+
 end Hostkit.Trash;

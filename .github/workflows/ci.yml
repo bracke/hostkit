@@ -98,6 +98,9 @@ jobs:
         #  passing with its link parts unrun.
         env:
           HOSTKIT_TESTS_NEED_LINKS: "1"
+          #  Read back by Test_Environment_Value: a profile path such as
+          #  C:\Users\Jürgen must arrive as UTF-8, not in the ANSI code page.
+          HOSTKIT_TEST_NON_ASCII: "Jürgen"
         run: |
           alr --non-interactive build
           # The binary is hostkit_tests.exe on Windows, and bash will not find it under

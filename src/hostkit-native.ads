@@ -1,5 +1,6 @@
 --  The parts of starting a program that only the host can answer. One body per OS;
 --  everything above this is portable and shared.
+with Hostkit.Metadata;
 with Hostkit.Process;
 
 private package Hostkit.Native is
@@ -70,10 +71,10 @@ private package Hostkit.Native is
    function Native_Backend_Label return String;
 
    --  The host process user id, when the host has a uid-style identity.
-   function Current_User_Id (User_Id : out Natural) return Boolean;
+   function Current_User_Id (User_Id : out Hostkit.Metadata.Account_Id) return Boolean;
 
    --  The host process primary group id, when the host has a gid-style identity.
-   function Current_Group_Id (Group_Id : out Natural) return Boolean;
+   function Current_Group_Id (Group_Id : out Hostkit.Metadata.Account_Id) return Boolean;
 
    --  The host process supplementary group ids, when the host exposes them.
    function Current_Supplementary_Group_Ids

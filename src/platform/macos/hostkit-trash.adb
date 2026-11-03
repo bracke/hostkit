@@ -139,4 +139,12 @@ package body Hostkit.Trash is
          return False;
    end Move_To_Trash;
 
+   --  NSFileManager refuses a volume with no trash rather than deleting
+   --  from it, so whatever it takes it keeps.
+   function Can_Hold (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return True;
+   end Can_Hold;
+
 end Hostkit.Trash;

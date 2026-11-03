@@ -604,11 +604,11 @@ package body Hostkit.Native is
       return "POSIX/fork-exec-waitpid-kill";
    end Native_Backend_Label;
 
-   function Current_User_Id (User_Id : out Natural) return Boolean is
+   function Current_User_Id (User_Id : out Hostkit.Metadata.Account_Id) return Boolean is
       function Getuid return Interfaces.C.unsigned
         with Import => True, Convention => C, External_Name => "getuid";
    begin
-      User_Id := Natural (Getuid);
+      User_Id := Hostkit.Metadata.Account_Id (Getuid);
       return True;
    exception
       when others =>
@@ -616,11 +616,11 @@ package body Hostkit.Native is
          return False;
    end Current_User_Id;
 
-   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+   function Current_Group_Id (Group_Id : out Hostkit.Metadata.Account_Id) return Boolean is
       function Getgid return Interfaces.C.unsigned
         with Import => True, Convention => C, External_Name => "getgid";
    begin
-      Group_Id := Natural (Getgid);
+      Group_Id := Hostkit.Metadata.Account_Id (Getgid);
       return True;
    exception
       when others =>

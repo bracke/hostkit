@@ -1,3 +1,5 @@
+with Hostkit.Metadata;
+
 --  Starting other programs.
 --
 --  Two constraints shaped all of this, and both are easy to get wrong:
@@ -176,13 +178,23 @@ package Hostkit.Process is
 
    --  The numeric user id for the current process when the host exposes one.
    --  POSIX returns getuid(); hosts without a uid concept return False.
+   --  False, too, for an id past Natural'Last (NFS's nobody, 4294967294, or
+   --  an idmapped mount's): ask Current_User_Account for every id.
    function Current_User_Id (User_Id : out Natural) return Boolean;
+
+   --  The numeric user id for the current process, every 32-bit value.
+   --  POSIX returns getuid(); hosts without a uid concept return False.
+   function Current_User_Account (User_Id : out Hostkit.Metadata.Account_Id) return Boolean;
 
    type Group_Id_List is array (Positive range <>) of Natural;
 
    --  The numeric primary group id for the current process when the host exposes one.
    --  POSIX returns getgid(); hosts without a gid concept return False.
+   --  False, too, for an id past Natural'Last: see Current_Group_Account.
    function Current_Group_Id (Group_Id : out Natural) return Boolean;
+
+   --  The numeric primary group id for the current process, every 32-bit value.
+   function Current_Group_Account (Group_Id : out Hostkit.Metadata.Account_Id) return Boolean;
 
    --  Supplementary group ids for the current process. Groups is caller-owned
    --  bounded storage; Last is the number of entries written, or zero on failure.

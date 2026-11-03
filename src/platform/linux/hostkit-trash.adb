@@ -27,4 +27,11 @@ package body Hostkit.Trash is
       return False;
    end Move_To_Trash;
 
+   --  Nothing is attempted here, so nothing is held.
+   function Can_Hold (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Can_Hold;
+
 end Hostkit.Trash;

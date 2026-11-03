@@ -346,22 +346,44 @@ package body Hostkit.Process is
       return Hostkit.Native.Native_Backend_Label;
    end Native_Backend_Label;
 
-   function Current_User_Id (User_Id : out Natural) return Boolean is
+   function Current_User_Account (User_Id : out Hostkit.Metadata.Account_Id) return Boolean is
    begin
       return Hostkit.Native.Current_User_Id (User_Id);
    exception
       when others =>
          User_Id := 0;
          return False;
-   end Current_User_Id;
+   end Current_User_Account;
 
-   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+   function Current_Group_Account (Group_Id : out Hostkit.Metadata.Account_Id) return Boolean is
    begin
       return Hostkit.Native.Current_Group_Id (Group_Id);
    exception
       when others =>
          Group_Id := 0;
          return False;
+   end Current_Group_Account;
+
+   function Current_User_Id (User_Id : out Natural) return Boolean is
+      Id : Hostkit.Metadata.Account_Id;
+   begin
+      User_Id := 0;
+      if Current_User_Account (Id) and then Hostkit.Metadata.Fits_Natural (Id) then
+         User_Id := Natural (Id);
+         return True;
+      end if;
+      return False;
+   end Current_User_Id;
+
+   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+      Id : Hostkit.Metadata.Account_Id;
+   begin
+      Group_Id := 0;
+      if Current_Group_Account (Id) and then Hostkit.Metadata.Fits_Natural (Id) then
+         Group_Id := Natural (Id);
+         return True;
+      end if;
+      return False;
    end Current_Group_Id;
 
    function Current_Supplementary_Group_Ids

@@ -437,6 +437,18 @@ package body Hostkit_Suite is
          "the environment value is returned without consumer-side probing");
 
       Ada.Environment_Variables.Clear (Name);
+
+      --  A value this process inherited with a non-ASCII letter in it, as a
+      --  user profile path has one (C:\Users\Jürgen): it must come back as
+      --  UTF-8, which every path call here takes, and not in a code page.
+      --  CI sets the variable on every runner; a local run without it has
+      --  nothing to compare.
+      if Hostkit.Process.Environment_Value ("HOSTKIT_TEST_NON_ASCII", Value) then
+         Assert
+           (To_String (Value) = "J" & Character'Val (16#C3#) & Character'Val (16#BC#) & "rgen",
+            "an inherited non-ASCII value comes back as UTF-8, got"
+            & Natural'Image (Length (Value)) & " bytes");
+      end if;
    end Test_Environment_Value;
 
    procedure Test_Shell_Quoting_Holds (T : in out AUnit.Test_Cases.Test_Case'Class) is
@@ -1769,6 +1781,25 @@ package body Hostkit_Suite is
                end;
             end if;
 
+            --  Where the Recycle Bin is not, the shell destroys what it is
+            --  asked to recycle; Can_Hold must say so first. The runner's
+            --  own drive has a bin; an administrative share of the same
+            --  drive is a network path, which has none.
+            if Hostkit.Host.Current = Hostkit.Host.Windows then
+               declare
+                  Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-held");
+               begin
+                  Write_File (Path, "kept");
+                  Assert (Hostkit.Trash.Can_Hold (Path), "a file on the local drive can go to the Recycle Bin");
+                  Assert
+                    (not Hostkit.Trash.Can_Hold ("\\localhost\C$\Windows\win.ini"),
+                     "a file on a network share cannot");
+                  Ada.Directories.Delete_File (Path);
+               end;
+            else
+               Assert (Hostkit.Trash.Can_Hold (Scratch), "macOS keeps whatever its trash takes");
+            end if;
+
          when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
             Assert (not Facility.Available, "this host has no trash of its own to call");
             Assert (Facility.Api_Name = Null_Unbounded_String, "and names no call");
@@ -1782,6 +1813,7 @@ package body Hostkit_Suite is
                Write_File (Path, "still here");
                Assert (not Hostkit.Trash.Move_To_Trash (Path), "a host with no trash declines");
                Assert (Ada.Directories.Exists (Path), "and leaves the file exactly where it was");
+               Assert (not Hostkit.Trash.Can_Hold (Path), "and holds nothing");
                Ada.Directories.Delete_File (Path);
             end;
       end case;

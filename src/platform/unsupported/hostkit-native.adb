@@ -91,13 +91,13 @@ package body Hostkit.Native is
       return "none";
    end Native_Backend_Label;
 
-   function Current_User_Id (User_Id : out Natural) return Boolean is
+   function Current_User_Id (User_Id : out Hostkit.Metadata.Account_Id) return Boolean is
    begin
       User_Id := 0;
       return False;
    end Current_User_Id;
 
-   function Current_Group_Id (Group_Id : out Natural) return Boolean is
+   function Current_Group_Id (Group_Id : out Hostkit.Metadata.Account_Id) return Boolean is
    begin
       Group_Id := 0;
       return False;
