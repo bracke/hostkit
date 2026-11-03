@@ -17,6 +17,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Environment.Set` and `Environment.Clear`, taking UTF-8: on Windows through
+  `SetEnvironmentVariableW`, so a non-ASCII value set in-process reads back
+  unchanged (`Ada.Environment_Variables` passed it on in the ANSI code page).
+
 - `Microphone` on Windows (winmm's waveIn, `-lwinmm` linked) and macOS
   (AudioToolbox's input queue, opened by name); there a Read gives up after
   three seconds of nothing. `Source_Present ("")` asks for the
