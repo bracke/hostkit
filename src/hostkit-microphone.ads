@@ -30,8 +30,9 @@ with System;
 --    there, and a machine where the user has not allowed the microphone
 --    delivers nothing, which a Read reports after three seconds.
 --
---  A Read on every host gives up after three seconds of nothing arriving,
---  answering Failed rather than waiting for ever.
+--  On Windows and macOS a Read gives up after three seconds of nothing
+--  arriving, answering Failed rather than waiting for ever; on Linux the
+--  server delivers a tenth of a second every tenth, silence included.
 --
 --  Nothing recorded is written anywhere: the samples go to the caller's
 --  buffer and nowhere else.

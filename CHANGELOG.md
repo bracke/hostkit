@@ -18,8 +18,8 @@ recently enough to matter to somebody pinning it; the history before that is in
 ### Added
 
 - `Microphone` on Windows (winmm's waveIn, `-lwinmm` linked) and macOS
-  (AudioToolbox's input queue, opened by name); a Read gives up after three
-  seconds of nothing on every host. `Source_Present ("")` asks for the
+  (AudioToolbox's input queue, opened by name); there a Read gives up after
+  three seconds of nothing. `Source_Present ("")` asks for the
   default.
 
 - `Microphone.Source_Present` (Present, Absent, Unknown): whether the sound
