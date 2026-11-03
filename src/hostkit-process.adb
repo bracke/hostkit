@@ -1,5 +1,5 @@
 with Ada.Streams.Stream_IO;
-with Ada.Environment_Variables;
+with Hostkit.Environment;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Text_IO;
@@ -425,14 +425,13 @@ package body Hostkit.Process is
       return Boolean
    is
    begin
-      Value := Null_Unbounded_String;
-
-      if Name = "" or else not Ada.Environment_Variables.Exists (Name) then
-         return False;
-      end if;
-
-      Value := To_Unbounded_String (Ada.Environment_Variables.Value (Name));
-      return True;
+      declare
+         Found : Boolean;
+         Text  : constant String := Hostkit.Environment.Value (Name, Found);
+      begin
+         Value := To_Unbounded_String (Text);
+         return Found;
+      end;
    exception
       when others =>
          Value := Null_Unbounded_String;
@@ -488,8 +487,8 @@ package body Hostkit.Process is
       if Hostkit.Host.Current = Hostkit.Host.Windows then
          --  cmd is on PATH even where COMSPEC was cleared.
          Program := To_Unbounded_String
-           (if Ada.Environment_Variables.Value ("COMSPEC", "") /= ""
-            then Ada.Environment_Variables.Value ("COMSPEC", "")
+           (if Hostkit.Environment.Value ("COMSPEC", "") /= ""
+            then Hostkit.Environment.Value ("COMSPEC", "")
             else "cmd");
          Add ("/c");
          Add ("start");

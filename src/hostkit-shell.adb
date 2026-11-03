@@ -1,4 +1,4 @@
-with Ada.Environment_Variables;
+with Hostkit.Environment;
 with Ada.Strings.Unbounded;
 
 with Hostkit.Host;
@@ -8,11 +8,7 @@ package body Hostkit.Shell is
 
    function Value (Name : String) return String is
    begin
-      if Ada.Environment_Variables.Exists (Name) then
-         return Ada.Environment_Variables.Value (Name);
-      end if;
-
-      return "";
+      return Hostkit.Environment.Value (Name, Default => "");
    exception
       when others =>
          return "";

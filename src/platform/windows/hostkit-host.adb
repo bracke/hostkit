@@ -1,6 +1,6 @@
 with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Conversions;
-with Ada.Environment_Variables;
+with Hostkit.Environment;
 
 with Interfaces.C;
 with System;
@@ -265,10 +265,8 @@ package body Hostkit.Host is
       --  On success Size is the name's length, without the terminator.
       if Get_Computer_Name (Buffer'Address, Size'Access) /= 0 and then Size <= 256 then
          return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Size)));
-      elsif Ada.Environment_Variables.Exists ("COMPUTERNAME") then
-         return Ada.Environment_Variables.Value ("COMPUTERNAME");
       else
-         return "";
+         return Hostkit.Environment.Value ("COMPUTERNAME", "");
       end if;
    exception
       when others =>
@@ -340,11 +338,7 @@ package body Hostkit.Host is
 
    function Machine_Name return String is
    begin
-      if Ada.Environment_Variables.Exists ("PROCESSOR_ARCHITECTURE") then
-         return Ada.Environment_Variables.Value ("PROCESSOR_ARCHITECTURE");
-      else
-         return "";
-      end if;
+      return Hostkit.Environment.Value ("PROCESSOR_ARCHITECTURE", "");
    exception
       when others =>
          return "";

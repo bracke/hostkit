@@ -1,8 +1,8 @@
+with Hostkit.Environment;
 with Ada.Calendar;
 with Ada.Characters.Handling;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Directories;
-with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Strings.Wide_Unbounded;
@@ -1325,10 +1325,7 @@ package body Hostkit.Fs is
    --  domain login sets instead. HOME exists only where something POSIX-shaped
    --  put it there, which is why it is last rather than first.
    function Home_Directory return String is
-      function Env (Name : String) return String is
-        (if Ada.Environment_Variables.Exists (Name)
-         then Ada.Environment_Variables.Value (Name)
-         else "");
+      function Env (Name : String) return String is (Hostkit.Environment.Value (Name, ""));
    begin
       if Env ("USERPROFILE") /= "" then
          return Env ("USERPROFILE");
@@ -1352,8 +1349,7 @@ package body Hostkit.Fs is
 
    function User_Places return User_Place_List is
       use Ada.Strings.Unbounded;
-      function Value (Name : String) return String is
-        (if Ada.Environment_Variables.Exists (Name) then Ada.Environment_Variables.Value (Name) else "");
+      function Value (Name : String) return String is (Hostkit.Environment.Value (Name, ""));
       Drive  : constant String := Value ("HOMEDRIVE");
       Path   : constant String := Value ("HOMEPATH");
       System_Drive : constant String := Value ("SystemDrive");
@@ -1376,10 +1372,8 @@ package body Hostkit.Fs is
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin
-      if Ada.Environment_Variables.Exists ("APPDATA")
-        and then Ada.Environment_Variables.Value ("APPDATA") /= ""
-      then
-         return Ada.Environment_Variables.Value ("APPDATA");
+      if Hostkit.Environment.Value ("APPDATA", "") /= "" then
+         return Hostkit.Environment.Value ("APPDATA", "");
       end if;
       return (if Home = "" then "" else Home & "\AppData\Roaming");
    end Application_Data_Directory;
@@ -1388,10 +1382,8 @@ package body Hostkit.Fs is
       Home : constant String := Home_Directory;
    begin
       --  LOCALAPPDATA, the non-roaming half of the profile. See the spec.
-      if Ada.Environment_Variables.Exists ("LOCALAPPDATA")
-        and then Ada.Environment_Variables.Value ("LOCALAPPDATA") /= ""
-      then
-         return Ada.Environment_Variables.Value ("LOCALAPPDATA");
+      if Hostkit.Environment.Value ("LOCALAPPDATA", "") /= "" then
+         return Hostkit.Environment.Value ("LOCALAPPDATA", "");
       end if;
       return (if Home = "" then "" else Home & "\AppData\Local");
    end Cache_Directory;
