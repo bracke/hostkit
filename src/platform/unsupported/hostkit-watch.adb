@@ -38,4 +38,7 @@ package body Hostkit.Watch is
       return State.Events;
    end Event_Count;
 
+   --  There is no watch here.
+   function Sees_File_Writes return Boolean is (False);
+
 end Hostkit.Watch;

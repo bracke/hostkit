@@ -177,4 +177,7 @@ package body Hostkit.Watch is
       return State.Events;
    end Event_Count;
 
+   --  FILE_NOTIFY_CHANGE_SIZE and _LAST_WRITE are in the filter.
+   function Sees_File_Writes return Boolean is (True);
+
 end Hostkit.Watch;

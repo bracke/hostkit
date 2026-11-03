@@ -2731,6 +2731,23 @@ package body Hostkit_Suite is
       Assert (Wait_For_Change (State), "creating a file is noticed");
       Assert (not Hostkit.Watch.Poll (State), "the change is consumed, not reported twice");
 
+      --  A file written while it stays open -- a download growing -- where
+      --  the host's watch says it sees writes within files.
+      if Hostkit.Watch.Sees_File_Writes then
+         declare
+            Output : Ada.Text_IO.File_Type;
+         begin
+            Ada.Text_IO.Open
+              (Output, Ada.Text_IO.Append_File, Ada.Directories.Compose (Directory, "created.txt"));
+            Drain (State);
+            Ada.Text_IO.Put_Line (Output, "more");
+            Ada.Text_IO.Flush (Output);
+            Assert (Wait_For_Change (State), "a write into an open file is noticed");
+            Ada.Text_IO.Close (Output);
+            Drain (State);
+         end;
+      end if;
+
       Ada.Directories.Delete_File (Ada.Directories.Compose (Directory, "created.txt"));
       Assert (Wait_For_Change (State), "deleting a file is noticed");
 

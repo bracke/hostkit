@@ -14,11 +14,12 @@ package body Hostkit.Watch is
    Nonblock : constant Interfaces.C.int := 2_048;
    Cloexec  : constant Interfaces.C.int := 524_288;
 
-   --  IN_ATTRIB, IN_CLOSE_WRITE, IN_MOVED_FROM, IN_MOVED_TO, IN_CREATE,
-   --  IN_DELETE, IN_DELETE_SELF, IN_MOVE_SELF, IN_MODIFY and friends: every way
-   --  the contents of a directory can change under us.
+   --  IN_MODIFY, IN_ATTRIB, IN_CLOSE_WRITE, IN_MOVED_FROM, IN_MOVED_TO,
+   --  IN_CREATE, IN_DELETE, IN_DELETE_SELF, IN_MOVE_SELF and friends: every way
+   --  the contents of a directory can change under us, a file growing in it
+   --  included (IN_MODIFY was named here and missing from the mask).
    Event_Mask : constant Interfaces.C.unsigned :=
-     16#00000004# or 16#00000008# or 16#00000040# or 16#00000080#
+     16#00000002# or 16#00000004# or 16#00000008# or 16#00000040# or 16#00000080#
      or 16#00000100# or 16#00000200# or 16#00000400# or 16#00000800#
      or 16#00002000# or 16#00004000# or 16#01000000#;
 
@@ -152,5 +153,8 @@ package body Hostkit.Watch is
    begin
       return State.Events;
    end Event_Count;
+
+   --  IN_MODIFY is in the mask.
+   function Sees_File_Writes return Boolean is (True);
 
 end Hostkit.Watch;

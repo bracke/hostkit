@@ -51,6 +51,14 @@ package Hostkit.Watch is
    --  @return True when the host is delivering notifications.
    function Is_Active (State : Watch_State) return Boolean;
 
+   --  Whether this host's watch also reports a write inside a file already
+   --  there (a download growing, a log appended to), and not only entries
+   --  added, removed or renamed. Where it does not, a caller that shows sizes
+   --  and times must keep re-reading the directory on a short timer.
+   --
+   --  @return True where an active watch sees writes within files.
+   function Sees_File_Writes return Boolean;
+
    --  How many notifications this watch has consumed, for diagnostics.
    --
    --  @param State The watch.

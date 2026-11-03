@@ -203,4 +203,7 @@ package body Hostkit.Watch is
       return State.Events;
    end Event_Count;
 
+   --  kqueue on a directory hears entries come and go, not a child file's writes.
+   function Sees_File_Writes return Boolean is (False);
+
 end Hostkit.Watch;
