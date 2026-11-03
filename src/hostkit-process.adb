@@ -1,3 +1,4 @@
+with Ada.Directories;
 with Ada.Streams.Stream_IO;
 with Hostkit.Environment;
 with Ada.Strings.Fixed;
@@ -13,6 +14,7 @@ with Hostkit.Shell;
 with Hostkit.Windows_Command_Line;
 
 package body Hostkit.Process is
+   use type Ada.Directories.File_Kind;
    use Ada.Strings.Unbounded;
    use type GNAT.OS_Lib.Argument_List_Access;
    use type GNAT.OS_Lib.Process_Id;
@@ -132,6 +134,21 @@ package body Hostkit.Process is
       when others =>
          return "";
    end Locate;
+
+   function Is_Runnable (Program : String) return Boolean is
+   begin
+      if Program = "" then
+         return False;
+      elsif (for some C of Program => Hostkit.Fs.Is_Separator (C)) then
+         return Ada.Directories.Exists (Program)
+           and then Ada.Directories.Kind (Program) = Ada.Directories.Ordinary_File
+           and then Hostkit.Fs.Is_Executable (Program);
+      end if;
+      return Locate (Program) /= "";
+   exception
+      when others =>
+         return False;
+   end Is_Runnable;
 
    function Run
      (Program     : String;

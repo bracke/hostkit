@@ -93,6 +93,15 @@ package Hostkit.Process is
    --  "setfacl.exe".
    function Locate (Program : String) return String;
 
+   --  Whether Program names something this host will run: a path (it holds
+   --  a separator) must be a regular file Fs.Is_Executable accepts -- GNAT's
+   --  own check says yes to a directory on Windows -- and a bare name must be
+   --  found by Locate. What a desktop entry's TryExec and an open action ask.
+   --
+   --  @param Program A path or a program name.
+   --  @return True when it can be started.
+   function Is_Runnable (Program : String) return Boolean;
+
    function Run
      (Program     : String;
       Arguments   : String_Vectors.Vector;

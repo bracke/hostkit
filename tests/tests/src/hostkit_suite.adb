@@ -392,6 +392,21 @@ package body Hostkit_Suite is
          "a launch with no program to run does not claim to have started");
    end Test_Launch_Does_Not_Wait;
 
+   procedure Test_Is_Runnable (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+   begin
+      Assert (not Hostkit.Process.Is_Runnable (""), "nothing is not a program");
+      Assert
+        (not Hostkit.Process.Is_Runnable ("hostkit-no-such-program-anywhere"),
+         "a name not on the search path is not runnable");
+      --  A folder is not a program, whatever GNAT's own check says on Windows.
+      Assert (not Hostkit.Process.Is_Runnable (Ada.Directories.Current_Directory), "a directory is not runnable");
+      Assert
+        (Hostkit.Process.Is_Runnable (Ada.Command_Line.Command_Name)
+         or else not Ada.Directories.Exists (Ada.Command_Line.Command_Name),
+         "the running test program, named by its path, is runnable");
+   end Test_Is_Runnable;
+
    procedure Test_Path_Containment (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
       Sep : constant Character := Hostkit.Fs.Separator;
@@ -3045,6 +3060,7 @@ package body Hostkit_Suite is
         (T, Test_Run_Reports_Exit_Status'Access, "process : Run reports the program's own exit status");
       Register_Routine
         (T, Test_Launch_Does_Not_Wait'Access, "process : Launch starts and does not wait");
+      Register_Routine (T, Test_Is_Runnable'Access, "process : a path or a name is runnable only if it can start");
       Register_Routine
         (T, Test_Path_Containment'Access, "fs : separators, containment and rebasing follow the host");
       Register_Routine
