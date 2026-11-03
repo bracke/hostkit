@@ -38,6 +38,7 @@ package body Hostkit_Shell_Cases is
    use type Hostkit.Spawn.Wait_State;
    use type Hostkit.Locks.Lock_Outcome;
    use type Hostkit.Microphone.Outcome;
+   use type Hostkit.Microphone.Source_Answer;
    use type Hostkit.Terminal_Control.Mode;
    use type Ada.Directories.File_Size;
 
@@ -2884,6 +2885,19 @@ package body Hostkit_Shell_Cases is
       Hostkit.Microphone.Close (Device);
       Hostkit.Microphone.Close (Device);
       Assert (not Hostkit.Microphone.Is_Open (Device), "a closed microphone is open");
+
+      --  A source the server does not have is not taken for its default:
+      --  never said to be there, and refused, never opened.
+      Assert (Hostkit.Microphone.Source_Present ("hostkit-test-no-such-source") /= Hostkit.Microphone.Present,
+              "a source that is not there was said to be");
+      Hostkit.Microphone.Open (Device, "hostkit-test-no-such-source", Result, Reason);
+      Assert (Result /= Hostkit.Microphone.Done and then not Hostkit.Microphone.Is_Open (Device),
+              "a source that is not there was opened");
+      Assert (Length (Reason) > 0, "a source that is not there was refused without a reason");
+      --  And the server's own name for its default is never said to be
+      --  missing where there is a server to ask.
+      Assert (Hostkit.Microphone.Source_Present ("@DEFAULT_SOURCE@") /= Hostkit.Microphone.Absent,
+              "the default source was said not to be there");
    end Test_A_Microphone_Opens_Or_Says_Why_Not;
 
    overriding procedure Register_Tests (T : in out Case_Type) is

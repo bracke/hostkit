@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Microphone.Source_Present` (Present, Absent, Unknown): whether the sound
+  server has a source of a name, through libpulse's introspection opened by
+  name; `Open` refuses a source the server does not have, or cannot be asked
+  about, where PipeWire's pulse server would have recorded the default
+  instead.
+
 - `Microphone` (Open, Read, Close, Is_Supported): one channel of 16-bit
   samples at 16 kHz from the default or a named source. Linux records through
   libpulse-simple, opened by name, which pipewire-pulse also answers; macOS

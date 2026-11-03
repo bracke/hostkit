@@ -73,6 +73,33 @@ package body Hostkit.Microphone is
    type Error_Text_Function is access function (Error : C.int) return C.Strings.chars_ptr
      with Convention => C;
 
+   --  libpulse's introspection, for whether a source is there.
+   type Mainloop_New_Function is access function return System.Address with Convention => C;
+   type Address_Of_Function is access function (Item : System.Address) return System.Address with Convention => C;
+   type Context_New_Function is access function
+     (Api : System.Address; Name : C.Strings.chars_ptr) return System.Address with Convention => C;
+   type Connect_Function is access function
+     (Context : System.Address; Server : C.Strings.chars_ptr; Flags : C.int; Spawn : System.Address) return C.int
+     with Convention => C;
+   type State_Function is access function (Item : System.Address) return C.int with Convention => C;
+   type Iterate_Function is access function
+     (Loop_Item : System.Address; Block : C.int; Result : System.Address) return C.int with Convention => C;
+   type Source_Callback is access procedure
+     (Context : System.Address; Info : System.Address; Last : C.int; User : System.Address) with Convention => C;
+   type By_Name_Function is access function
+     (Context : System.Address; Name : C.Strings.chars_ptr; Callback : Source_Callback; User : System.Address)
+      return System.Address with Convention => C;
+   type Release_Function is access procedure (Item : System.Address) with Convention => C;
+
+   function To_Mainloop_New is new Ada.Unchecked_Conversion (System.Address, Mainloop_New_Function);
+   function To_Address_Of is new Ada.Unchecked_Conversion (System.Address, Address_Of_Function);
+   function To_Context_New is new Ada.Unchecked_Conversion (System.Address, Context_New_Function);
+   function To_Connect is new Ada.Unchecked_Conversion (System.Address, Connect_Function);
+   function To_State is new Ada.Unchecked_Conversion (System.Address, State_Function);
+   function To_Iterate is new Ada.Unchecked_Conversion (System.Address, Iterate_Function);
+   function To_By_Name is new Ada.Unchecked_Conversion (System.Address, By_Name_Function);
+   function To_Release is new Ada.Unchecked_Conversion (System.Address, Release_Function);
+
    function To_New is new Ada.Unchecked_Conversion (System.Address, New_Function);
    function To_Read is new Ada.Unchecked_Conversion (System.Address, Read_Function);
    function To_Free is new Ada.Unchecked_Conversion (System.Address, Free_Function);
@@ -86,6 +113,19 @@ package body Hostkit.Microphone is
       Tried : Boolean := False;
       Ready : Boolean := False;
    end Library;
+
+   Mainloop_New : Mainloop_New_Function;
+   Mainloop_Api : Address_Of_Function;
+   Mainloop_Iterate : Iterate_Function;
+   Mainloop_Free : Release_Function;
+   Context_New : Context_New_Function;
+   Context_Connect : Connect_Function;
+   Context_State : State_Function;
+   Context_Disconnect, Context_Release : Release_Function;
+   Source_By_Name : By_Name_Function;
+   Operation_State : State_Function;
+   Operation_Release : Release_Function;
+   Introspects : Boolean := False;
 
    Simple_New : New_Function;
    Simple_Read : Read_Function;
@@ -133,6 +173,31 @@ package body Hostkit.Microphone is
                return;
             end if;
             Simple_New := To_New (New_At);
+            declare
+               Found : constant array (1 .. 12) of System.Address :=
+                 [Symbol (Pulse, "pa_mainloop_new"), Symbol (Pulse, "pa_mainloop_get_api"),
+                  Symbol (Pulse, "pa_mainloop_iterate"), Symbol (Pulse, "pa_mainloop_free"),
+                  Symbol (Pulse, "pa_context_new"), Symbol (Pulse, "pa_context_connect"),
+                  Symbol (Pulse, "pa_context_get_state"), Symbol (Pulse, "pa_context_disconnect"),
+                  Symbol (Pulse, "pa_context_unref"), Symbol (Pulse, "pa_context_get_source_info_by_name"),
+                  Symbol (Pulse, "pa_operation_get_state"), Symbol (Pulse, "pa_operation_unref")];
+            begin
+               if (for all A of Found => A /= System.Null_Address) then
+                  Mainloop_New := To_Mainloop_New (Found (1));
+                  Mainloop_Api := To_Address_Of (Found (2));
+                  Mainloop_Iterate := To_Iterate (Found (3));
+                  Mainloop_Free := To_Release (Found (4));
+                  Context_New := To_Context_New (Found (5));
+                  Context_Connect := To_Connect (Found (6));
+                  Context_State := To_State (Found (7));
+                  Context_Disconnect := To_Release (Found (8));
+                  Context_Release := To_Release (Found (9));
+                  Source_By_Name := To_By_Name (Found (10));
+                  Operation_State := To_State (Found (11));
+                  Operation_Release := To_Release (Found (12));
+                  Introspects := True;
+               end if;
+            end;
             Simple_Read := To_Read (Read_At);
             Simple_Free := To_Free (Free_At);
             Error_Text := To_Error_Text (Error_At);
@@ -154,6 +219,101 @@ package body Hostkit.Microphone is
    begin
       return (if C.Strings."=" (Text, C.Strings.Null_Ptr) then "error" & Code'Image else C.Strings.Value (Text));
    end Server_Reason;
+
+   --  What a lookup by name came to, written by the server's callback.
+   type Lookup is record
+      Found, Finished : Boolean := False;
+   end record
+     with Convention => C;
+
+   type Lookup_Access is access all Lookup;
+   function To_Lookup is new Ada.Unchecked_Conversion (System.Address, Lookup_Access);
+
+   procedure On_Source (Context : System.Address; Info : System.Address; Last : C.int; User : System.Address)
+     with Convention => C;
+
+   procedure On_Source (Context : System.Address; Info : System.Address; Last : C.int; User : System.Address) is
+      pragma Unreferenced (Context);
+      Answer : constant Lookup_Access := To_Lookup (User);
+   begin
+      if Last /= 0 then
+         Answer.Finished := True;
+      elsif Info /= System.Null_Address then
+         Answer.Found := True;
+      end if;
+   end On_Source;
+
+   --  The context's ready, failed and terminated states, and an
+   --  operation's running one.
+   Context_Ready  : constant C.int := 4;
+   Context_Failed : constant C.int := 5;
+   Context_Ended  : constant C.int := 6;
+   Operation_Running : constant C.int := 0;
+
+   function Source_Present (Name : String) return Source_Answer is
+      Answer  : aliased Lookup;
+      Main    : System.Address;
+      Context : System.Address := System.Null_Address;
+      Result  : Source_Answer := Unknown;
+      Text    : C.Strings.chars_ptr := C.Strings.New_String ("model_runner");
+      Wanted  : C.Strings.chars_ptr := C.Strings.New_String (Name);
+      --  Two seconds of a hundredth each, never waiting on the server.
+      Tries   : Natural := 200;
+   begin
+      Library.Ensure;
+      if not Library.Found or else not Introspects then
+         C.Strings.Free (Text);
+         C.Strings.Free (Wanted);
+         return Unknown;
+      end if;
+      Main := Mainloop_New.all;
+      if Main /= System.Null_Address then
+         Context := Context_New (Mainloop_Api (Main), Text);
+      end if;
+      if Context /= System.Null_Address
+        and then Context_Connect (Context, C.Strings.Null_Ptr, 0, System.Null_Address) >= 0
+      then
+         while Tries > 0 and then Context_State (Context) not in Context_Ready | Context_Failed | Context_Ended loop
+            if Mainloop_Iterate (Main, 0, System.Null_Address) < 0 then
+               exit;
+            end if;
+            delay 0.01;
+            Tries := Tries - 1;
+         end loop;
+         if Context_State (Context) = Context_Ready then
+            declare
+               Operation : constant System.Address :=
+                 Source_By_Name (Context, Wanted, On_Source'Access, Answer'Address);
+            begin
+               if Operation /= System.Null_Address then
+                  while Tries > 0 and then not Answer.Finished and then not Answer.Found
+                    and then Operation_State (Operation) = Operation_Running
+                  loop
+                     exit when Mainloop_Iterate (Main, 0, System.Null_Address) < 0;
+                     delay 0.01;
+                     Tries := Tries - 1;
+                  end loop;
+                  if Answer.Found then
+                     Result := Present;
+                  elsif Answer.Finished then
+                     Result := Absent;
+                  end if;
+                  Operation_Release (Operation);
+               end if;
+            end;
+         end if;
+         Context_Disconnect (Context);
+      end if;
+      if Context /= System.Null_Address then
+         Context_Release (Context);
+      end if;
+      if Main /= System.Null_Address then
+         Mainloop_Free (Main);
+      end if;
+      C.Strings.Free (Text);
+      C.Strings.Free (Wanted);
+      return Result;
+   end Source_Present;
 
    procedure Open
      (Item   : in out Device;
@@ -178,6 +338,12 @@ package body Hostkit.Microphone is
       if not Is_Supported then
          Result := Unsupported;
          Reason := To_Unbounded_String ("libpulse-simple is not installed");
+      elsif Source /= "" and then Source_Present (Source) /= Present then
+         --  PipeWire would record the default source in its place.
+         Result := Refused;
+         Reason := To_Unbounded_String
+           ((if Source_Present (Source) = Absent then "the sound server has no source "
+             else "the sound server could not be asked for source ") & Source);
       else
          Item.Stream := Simple_New
            (C.Strings.Null_Ptr, Name, Record_Direction, Device_Name, Stream, Spec'Access, System.Null_Address,

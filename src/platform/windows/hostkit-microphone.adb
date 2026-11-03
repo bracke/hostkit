@@ -6,6 +6,12 @@ package body Hostkit.Microphone is
 
    function Is_Supported return Boolean is (False);
 
+   function Source_Present (Name : String) return Source_Answer is
+      pragma Unreferenced (Name);
+   begin
+      return Unknown;
+   end Source_Present;
+
    procedure Open
      (Item   : in out Device;
       Source : String;

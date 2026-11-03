@@ -18,10 +18,11 @@ with System;
 --    name at the first Open, never linked -- a host without it runs
 --    everything else and refuses here with Unsupported. pipewire-pulse
 --    answers the same calls. The stream is asked to deliver a tenth of a
---    second at a time, so a Read returns that often. A source named that
---    the server does not have is not refused by PipeWire's pulse server: it
---    records the default source instead, so a caller that must know which
---    source it records asks the server itself.
+--    second at a time, so a Read returns that often. PipeWire's pulse
+--    server records the default source where it is asked for one it does
+--    not have, so a source named is looked for first, through libpulse's
+--    introspection, and Open refuses one the server does not have -- and
+--    one it cannot tell about.
 --  * macOS and Windows: not yet recorded. Open answers Unsupported. That is
 --    a refusal, not a guess: nothing here pretends a microphone opened.
 --
@@ -55,6 +56,17 @@ package Hostkit.Microphone is
    --
    --  @return True when an Open can succeed.
    function Is_Supported return Boolean;
+
+   --  Whether the sound server has a source of a name.
+   type Source_Answer is (Present, Absent, Unknown);
+
+   --  Ask the sound server whether it has a source. Unknown where there is
+   --  no server, no library, or no answer within two seconds -- never
+   --  Present for not knowing.
+   --
+   --  @param Name The source's name, as the server gives it.
+   --  @return What the server said.
+   function Source_Present (Name : String) return Source_Answer;
 
    type Device is limited private;
 
