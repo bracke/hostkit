@@ -599,6 +599,15 @@ package body Hostkit_Suite is
          Assert
            (Hostkit.Environment.Value (Name, Found) = "" and then not Found,
             "a cleared variable is gone");
+         --  The C runtime's own copy follows, which Ada.Environment_Variables
+         --  (and every getenv) reads.
+         Hostkit.Environment.Set (Name, "hostkit-runtime-copy");
+         Assert
+           (Ada.Environment_Variables.Exists (Name)
+            and then Ada.Environment_Variables.Value (Name) = "hostkit-runtime-copy",
+            "a value set here is seen by Ada.Environment_Variables too");
+         Hostkit.Environment.Clear (Name);
+         Assert (not Ada.Environment_Variables.Exists (Name), "and so is its clearing");
       end;
    end Test_Environment_Value;
 

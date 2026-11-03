@@ -19,6 +19,12 @@ package body Hostkit.Environment is
       return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "SetEnvironmentVariableW";
 
+   --  The C runtime keeps its own copy of the environment, which getenv and
+   --  Ada.Environment_Variables read; _wputenv updates it (from wide text,
+   --  so nothing is lost on the way) as well as the process's own block.
+   function Wide_Put_Env (Assignment : System.Address) return Interfaces.C.int
+     with Import, Convention => C, External_Name => "_wputenv";
+
    function Wide_Of (Text : String) return Wide_String is
      (Ada.Strings.UTF_Encoding.Conversions.Convert (Text) & Wide_Character'Val (0));
 
@@ -65,22 +71,27 @@ package body Hostkit.Environment is
 
    --  Not through Ada.Environment_Variables: the C runtime hands its value
    --  to Windows in the ANSI code page, and Value, reading the wide block,
-   --  would get those bytes back as other characters.
+   --  would get those bytes back as other characters. Both copies are set
+   --  from the wide text: the C runtime's, and the process block Value reads.
    procedure Set (Name : String; Value : String) is
-      Wide_Name  : aliased constant Wide_String := Wide_Of (Name);
-      Wide_Value : aliased constant Wide_String := Wide_Of (Value);
-      Result     : constant Interfaces.C.int :=
+      Wide_Name   : aliased constant Wide_String := Wide_Of (Name);
+      Wide_Value  : aliased constant Wide_String := Wide_Of (Value);
+      Assignment  : aliased constant Wide_String := Wide_Of (Name & "=" & Value);
+      Runtime_Set : constant Interfaces.C.int := Wide_Put_Env (Assignment'Address);
+      Block_Set   : constant Interfaces.C.int :=
         Set_Environment_Variable_W
           (Wide_Name'Address, (if Value = "" then System.Null_Address else Wide_Value'Address));
-      pragma Unreferenced (Result);
+      pragma Unreferenced (Runtime_Set, Block_Set);
    begin
       null;
    end Set;
 
    procedure Clear (Name : String) is
-      Wide_Name : aliased constant Wide_String := Wide_Of (Name);
-      Result    : constant Interfaces.C.int := Set_Environment_Variable_W (Wide_Name'Address, System.Null_Address);
-      pragma Unreferenced (Result);
+      Wide_Name     : aliased constant Wide_String := Wide_Of (Name);
+      Assignment    : aliased constant Wide_String := Wide_Of (Name & "=");
+      Runtime_Clear : constant Interfaces.C.int := Wide_Put_Env (Assignment'Address);
+      Block_Clear   : constant Interfaces.C.int := Set_Environment_Variable_W (Wide_Name'Address, System.Null_Address);
+      pragma Unreferenced (Runtime_Clear, Block_Clear);
    begin
       null;
    end Clear;
