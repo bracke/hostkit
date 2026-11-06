@@ -98,6 +98,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- `Process.Run_Captured` on Linux starts its child as glibc's posix_spawn does -- clone with the
+  caller's memory, the caller held until the exec, on a stack of its own, every signal blocked
+  meanwhile and the caller's handlers set back to default in the child -- not by fork. fork copied
+  the caller's page tables for every program run: a third of the kernel time of a test suite whose
+  process held 1.7 GB. The child allocates nothing; everything it opens or runs is made before.
 - **`Fs.Delete_Tree_No_Follow` no longer gives up on a folder of more than
   100,000 entries.** It read every name before deleting any, refused past the
   cap, and left the entries already visited deleted. It now deletes in batches

@@ -1,6 +1,7 @@
 with Ada.Environment_Variables;
 with Ada.Calendar;
 with Ada.Strings.Unbounded;
+with Ada.Unchecked_Deallocation;
 
 with GNAT.OS_Lib;
 
@@ -8,6 +9,7 @@ with Interfaces.C.Strings;
 with Interfaces.C;
 
 with System;
+with System.Storage_Elements;
 
 package body Hostkit.Native is
    use Ada.Strings.Unbounded;
@@ -62,6 +64,181 @@ package body Hostkit.Native is
       return False;
    end Run_Command_Line;
 
+   subtype C_Int is Interfaces.C.int;
+
+   --  What a child started by Run_Captured does before it execs, all of it
+   --  made by the caller beforehand: the child runs in the caller's memory
+   --  and may allocate nothing in it. Null paths are not redirected.
+   type Child_Plan is record
+      Stdin_Path, Stdout_Path, Stderr_Path, Directory : Interfaces.C.Strings.chars_ptr;
+      Same_Error, Group, Clean, Forked_By : C_Int;
+      Program : Interfaces.C.Strings.chars_ptr;
+      Argv, Env : System.Address;
+   end record with Convention => C;
+
+   function Chars_Or_Null (Item : String) return Interfaces.C.Strings.chars_ptr is
+     (if Item = "" then Interfaces.C.Strings.Null_Ptr else Interfaces.C.Strings.New_String (Item));
+
+   procedure Free_Plan (Plan : in out Child_Plan) is
+   begin
+      Interfaces.C.Strings.Free (Plan.Stdin_Path);
+      Interfaces.C.Strings.Free (Plan.Stdout_Path);
+      Interfaces.C.Strings.Free (Plan.Stderr_Path);
+      Interfaces.C.Strings.Free (Plan.Directory);
+   end Free_Plan;
+
+   --  The child's own stack, the clone's: 64 KiB, more than the few calls
+   --  it makes before exec need.
+   type Child_Stack is array (1 .. 65_536) of Interfaces.Unsigned_8 with Alignment => 16;
+   type Stack_Access is access Child_Stack;
+   procedure Free_Stack is new Ada.Unchecked_Deallocation (Child_Stack, Stack_Access);
+
+   --  Where a stack that grows down starts: past its last byte.
+   function Top_Of (Stack : Stack_Access) return System.Address is
+     (System.Storage_Elements."+" (Stack.all'Address, System.Storage_Elements.Storage_Offset (Child_Stack'Length)));
+
+   type Signal_Set is array (1 .. 128) of Interfaces.C.unsigned_char with Convention => C;
+   function Set_Mask (How : C_Int; Set : access constant Signal_Set; Old : System.Address) return C_Int
+     with Import => True, Convention => C, External_Name => "sigprocmask";
+   SIG_SETMASK : constant C_Int := 2;
+   No_Signals  : aliased constant Signal_Set := [others => 0];
+   All_Signals : aliased constant Signal_Set := [others => 16#FF#];
+
+   function Clone (Start : System.Address; Stack : System.Address; Flags : C_Int; Argument : System.Address)
+     return C_Int
+     with Import => True, Convention => C_Variadic_4, External_Name => "clone";
+   CLONE_VM    : constant C_Int := 16#100#;
+   CLONE_VFORK : constant C_Int := 16#4000#;
+   SIGCHLD     : constant C_Int := 17;
+
+   function C_Open (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int; Mode : Interfaces.C.unsigned)
+     return C_Int
+     with Import => True, Convention => C_Variadic_2, External_Name => "open";
+   function Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
+     with Import => True, Convention => C, External_Name => "dup2";
+   function C_Close (Fd : C_Int) return C_Int
+     with Import => True, Convention => C, External_Name => "close";
+   function Chdir (Path : Interfaces.C.Strings.chars_ptr) return C_Int
+     with Import => True, Convention => C, External_Name => "chdir";
+   function Execvp (File : Interfaces.C.Strings.chars_ptr; Argv : System.Address) return C_Int
+     with Import => True, Convention => C, External_Name => "execvp";
+   function Execve (File : Interfaces.C.Strings.chars_ptr; Argv : System.Address; Envp : System.Address)
+     return C_Int
+     with Import => True, Convention => C, External_Name => "execve";
+   function New_Session return C_Int
+     with Import => True, Convention => C, External_Name => "setsid";
+   --  prctl (PR_SET_PDEATHSIG, SIGTERM): the child is told when the thread
+   --  that started it ends, however it ends -- kill -9 included.
+   function Set_Death_Signal (Option : C_Int; Signal : Interfaces.C.unsigned_long) return C_Int
+     with Import => True, Convention => C_Variadic_1, External_Name => "prctl";
+   function Parent_Id return C_Int
+     with Import => True, Convention => C, External_Name => "getppid";
+   function Set_Handler (Signal : C_Int; Handler : System.Address) return System.Address
+     with Import => True, Convention => C, External_Name => "signal";
+   --  sigaction's old action, of which only the handler, its first word,
+   --  is read: the room is more than the 152 bytes the struct takes here.
+   type Action_Room is array (0 .. 31) of Interfaces.C.unsigned_long with Convention => C;
+   function Action_Of (Signal : C_Int; Given : System.Address; Old : access Action_Room) return C_Int
+     with Import => True, Convention => C, External_Name => "sigaction";
+   procedure Underscore_Exit (Status : C_Int)
+     with Import => True, Convention => C, External_Name => "_exit";
+   PR_SET_PDEATHSIG : constant C_Int := 1;
+   O_Rdonly : constant C_Int := 0;
+   O_Wronly : constant C_Int := 1;
+   O_Creat  : constant C_Int := 64;
+   O_Trunc  : constant C_Int := 512;
+
+   --  The child, between the clone and the exec. Nothing here may return:
+   --  on any failure it _exits, 127 as a shell says a command could not be
+   --  run.
+   function Child_Side (Plan_At : System.Address) return C_Int
+     with Convention => C;
+
+   function Child_Side (Plan_At : System.Address) return C_Int is
+      use type Interfaces.C.Strings.chars_ptr;
+      use type Interfaces.C.unsigned_long;
+      Plan    : Child_Plan with Import, Address => Plan_At;
+      Ignored : C_Int;
+      Old     : System.Address;
+      pragma Unreferenced (Old);
+
+      --  Onto Target_Fd, or not run at all: a program that cannot open the
+      --  file it was told to read would read the caller's terminal instead,
+      --  and what it says written there would be lost and said nowhere.
+      procedure Onto (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int; Target_Fd : C_Int) is
+         Opened : constant C_Int := C_Open (Path, Flags, 8#644#);
+      begin
+         if Opened < 0 then
+            Underscore_Exit (127);
+         end if;
+         Ignored := Dup2 (Opened, Target_Fd);
+         Ignored := C_Close (Opened);
+      end Onto;
+   begin
+      --  The caller's handlers are the caller's: caught in the child before
+      --  the exec, a signal would run one in the caller's memory. Ignored
+      --  ones stay ignored across the exec, as they would have.
+      for Signal in C_Int range 1 .. 64 loop
+         declare
+            Room : aliased Action_Room := [others => 0];
+         begin
+            if Signal not in 9 | 19
+              and then Action_Of (Signal, System.Null_Address, Room'Access) = 0
+              and then Room (0) > 1
+            then
+               Old := Set_Handler (Signal, System.Null_Address);
+            end if;
+         end;
+      end loop;
+      --  A caller that takes signals on a thread of its own -- Ada.Interrupts
+      --  does -- blocks them everywhere else, and a child keeps the mask
+      --  across exec: unblocked, so that what it runs can be told to stop.
+      Ignored := Set_Mask (SIG_SETMASK, No_Signals'Access, System.Null_Address);
+      --  signal (SIGPIPE, SIG_DFL): a caller that ignores SIGPIPE, to be
+      --  told of a closed reader by EPIPE, would hand that on across exec,
+      --  and `yes | head` in what it runs would spin on EPIPE instead of
+      --  ending as a pipeline ends.
+      Old := Set_Handler (13, System.Null_Address);
+
+      if Plan.Group = 1 then
+         --  A session of its own, and so a group of its own with no
+         --  terminal: nothing in it reads or stops on the caller's.
+         Ignored := New_Session;
+         --  A group run on the caller's behalf does not outlive it: were
+         --  the caller killed outright, what it started would run on with
+         --  nobody to stop it. Gone already before this was said: gone.
+         Ignored := Set_Death_Signal (PR_SET_PDEATHSIG, 15);
+         if Parent_Id /= Plan.Forked_By then
+            Underscore_Exit (127);
+         end if;
+      end if;
+
+      if Plan.Stdin_Path /= Interfaces.C.Strings.Null_Ptr then
+         Onto (Plan.Stdin_Path, O_Rdonly, 0);
+      end if;
+      if Plan.Stdout_Path /= Interfaces.C.Strings.Null_Ptr then
+         Onto (Plan.Stdout_Path, O_Wronly + O_Creat + O_Trunc, 1);
+      end if;
+      --  One file for both is one open file: two opens of it would each
+      --  write from their own place, over each other.
+      if Plan.Same_Error = 1 then
+         Ignored := Dup2 (1, 2);
+      elsif Plan.Stderr_Path /= Interfaces.C.Strings.Null_Ptr then
+         Onto (Plan.Stderr_Path, O_Wronly + O_Creat + O_Trunc, 2);
+      end if;
+      if Plan.Directory /= Interfaces.C.Strings.Null_Ptr and then Chdir (Plan.Directory) /= 0 then
+         Underscore_Exit (127);
+      end if;
+
+      if Plan.Clean = 1 then
+         Ignored := Execve (Plan.Program, Plan.Argv, Plan.Env);
+      else
+         Ignored := Execvp (Plan.Program, Plan.Argv);
+      end if;
+      Underscore_Exit (127);
+      return 127;
+   end Child_Side;
+
    --  Run a program with its output captured, under a deadline.
    --
    --  fork, then in the child: redirect stdout and stderr to the capture files, change
@@ -86,40 +263,11 @@ package body Hostkit.Native is
    is
       use type Interfaces.C.Strings.chars_ptr;
 
-      subtype C_Int is Interfaces.C.int;
-
       type C_Argv is array (Natural range <>) of aliased Interfaces.C.Strings.chars_ptr
         with Convention => C;
 
-      function Fork return C_Int
-        with Import => True, Convention => C, External_Name => "fork";
-      function C_Open
-        (Path  : Interfaces.C.Strings.chars_ptr;
-         Flags : C_Int;
-         Mode  : Interfaces.C.unsigned)
-         return C_Int
-        with Import => True, Convention => C, External_Name => "open";
-      function Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "dup2";
-      function C_Close (Fd : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "close";
-      function Chdir (Path : Interfaces.C.Strings.chars_ptr) return C_Int
-        with Import => True, Convention => C, External_Name => "chdir";
-      function Execvp
-        (File : Interfaces.C.Strings.chars_ptr;
-         Argv : System.Address)
-         return C_Int
-        with Import => True, Convention => C, External_Name => "execvp";
       function Kill (Pid : C_Int; Signal : C_Int) return C_Int
         with Import => True, Convention => C, External_Name => "kill";
-      function New_Session return C_Int
-        with Import => True, Convention => C, External_Name => "setsid";
-      function Execve
-        (File : Interfaces.C.Strings.chars_ptr;
-         Argv : System.Address;
-         Envp : System.Address)
-         return C_Int
-        with Import => True, Convention => C, External_Name => "execve";
 
       --  waitid (P_PID, child, info, WEXITED | WNOHANG | WNOWAIT): whether
       --  the leader has ended, without reaping it -- its id stays the
@@ -136,42 +284,14 @@ package body Hostkit.Native is
       --  the union, on the 64-bit hosts this is built for.
       Pid_Slot  : constant := 4;
 
-      --  prctl (PR_SET_PDEATHSIG, SIGTERM): the child is told when the thread
-      --  that forked it ends, however it ends -- kill -9 included.
-      function Set_Death_Signal (Option : C_Int; Signal : Interfaces.C.unsigned_long) return C_Int
-        with Import => True, Convention => C_Variadic_1, External_Name => "prctl";
-      function Parent_Id return C_Int
-        with Import => True, Convention => C, External_Name => "getppid";
       function Own_Id return C_Int
         with Import => True, Convention => C, External_Name => "getpid";
-      PR_SET_PDEATHSIG : constant C_Int := 1;
 
       --  sigprocmask (SIG_SETMASK, empty): a caller that takes signals on a
       --  thread of its own -- Ada.Interrupts does -- blocks them everywhere
       --  else, and a child inherits the mask across exec: unblocked, so that
       --  what it runs can be told to stop at all.
-      type Signal_Set is array (1 .. 128) of Interfaces.C.unsigned_char with Convention => C;
-      function Set_Mask (How : C_Int; Set : access constant Signal_Set; Old : System.Address) return C_Int
-        with Import => True, Convention => C, External_Name => "sigprocmask";
-      SIG_SETMASK : constant C_Int := 2;
-      No_Signals  : aliased constant Signal_Set := [others => 0];
-      Sig_Term_Number  : constant := 15;
       Forked_By        : constant C_Int := Own_Id;
-      --  signal (SIGPIPE, SIG_DFL): a caller that ignores SIGPIPE, to be
-      --  told of a closed reader by EPIPE, would hand that on across exec,
-      --  and `yes | head` in what it runs would spin on EPIPE instead of
-      --  ending as a pipeline ends.
-      function Default_Pipe (Signal : C_Int; Handler : System.Address) return System.Address
-        with Import => True, Convention => C, External_Name => "signal";
-      Sigpipe_Number : constant C_Int := 13;
-
-      procedure Underscore_Exit (Status : C_Int)
-        with Import => True, Convention => C, External_Name => "_exit";
-
-      O_Rdonly : constant C_Int := 0;
-      O_Wronly : constant C_Int := 1;
-      O_Creat  : constant C_Int := 64;
-      O_Trunc  : constant C_Int := 512;
       Sigterm  : constant C_Int := 15;
       Sigkill  : constant C_Int := 9;
 
@@ -206,8 +326,6 @@ package body Hostkit.Native is
       Started_At : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       Killed     : Boolean := False;
       Ignored    : C_Int;
-      Pipe_Was   : System.Address;
-      pragma Unreferenced (Pipe_Was);
       Result     : Hostkit.Process.Process_Outcome;
 
       procedure Free_Argv is
@@ -258,44 +376,6 @@ package body Hostkit.Native is
          return 128 + Signal;
       end Exit_Code;
 
-      --  The child's standard input, out of a file. Unlike the capture
-      --  redirections this one must not fail quietly: a program that cannot
-      --  open the file it was told to read would go on to read the caller's
-      --  terminal instead, and a prompt for a password would sit there for
-      --  ever rather than fail.
-      procedure Feed (Path : String) is
-         Path_C  : Interfaces.C.Strings.chars_ptr :=
-           Interfaces.C.Strings.New_String (Path);
-         Opened  : constant C_Int := C_Open (Path_C, O_Rdonly, 0);
-         Ignored : C_Int;
-      begin
-         Interfaces.C.Strings.Free (Path_C);
-
-         if Opened < 0 then
-            Underscore_Exit (127);
-         end if;
-
-         Ignored := Dup2 (Opened, 0);
-         Ignored := C_Close (Opened);
-      end Feed;
-
-      procedure Redirect (Path : String; Target_Fd : C_Int) is
-         Path_C  : Interfaces.C.Strings.chars_ptr :=
-           Interfaces.C.Strings.New_String (Path);
-         Opened  : constant C_Int :=
-           C_Open (Path_C, O_Wronly + O_Creat + O_Trunc, 8#644#);
-         Ignored : C_Int;
-      begin
-         Interfaces.C.Strings.Free (Path_C);
-
-         --  Not to be captured, it is not run: written to the caller's
-         --  terminal instead, what it says would be lost and said nowhere.
-         if Opened < 0 then
-            Underscore_Exit (127);
-         end if;
-         Ignored := Dup2 (Opened, Target_Fd);
-         Ignored := C_Close (Opened);
-      end Redirect;
    begin
       Argv (0) := Interfaces.C.Strings.New_String (Program);
       for Index in 1 .. Count loop
@@ -315,76 +395,40 @@ package body Hostkit.Native is
          end loop;
       end if;
 
-      Child := Fork;
+      --  Started as glibc's posix_spawn starts a child: clone with the
+      --  caller's memory and the caller held until the child has exec'd, on
+      --  a stack of its own, every signal blocked meanwhile. fork copied the
+      --  caller's page tables for every program run -- a third of the kernel
+      --  time of a test suite whose process held 1.7 GB -- and the child only
+      --  ever execs. What the child needs is made before, here: it allocates
+      --  nothing and writes nothing of the caller's.
+      declare
+         Plan : aliased Child_Plan :=
+           (Stdin_Path  => Chars_Or_Null (Stdin_Path),
+            Stdout_Path => Chars_Or_Null (Stdout_Path),
+            Stderr_Path => (if Stderr_Path /= "" and then Stderr_Path /= Stdout_Path
+                            then Chars_Or_Null (Stderr_Path) else Interfaces.C.Strings.Null_Ptr),
+            Directory   => Chars_Or_Null (Working_Directory),
+            Same_Error  => (if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then 1 else 0),
+            Group       => (if Whole_Group then 1 else 0),
+            Clean       => (if Whole_Group and then Clean_Wrapper then 1 else 0),
+            Forked_By   => Forked_By,
+            Program     => (if Whole_Group then Shell_C else Program_C),
+            Argv        => (if Whole_Group then Wrap (0)'Address else Argv (0)'Address),
+            Env         => Bare_Env (0)'Address);
+         Stack : Stack_Access := new Child_Stack;
+         Held  : aliased Signal_Set := [others => 0];
+      begin
+         Ignored := Set_Mask (SIG_SETMASK, All_Signals'Access, Held'Address);
+         Child := Clone (Child_Side'Address, Top_Of (Stack), CLONE_VM + CLONE_VFORK + SIGCHLD, Plan'Address);
+         Ignored := Set_Mask (SIG_SETMASK, Held'Access, System.Null_Address);
+         Free_Plan (Plan);
+         Free_Stack (Stack);
+      end;
 
       if Child < 0 then
          Free_Argv;
          return Result;
-      end if;
-
-      if Child = 0 then
-         --  The child. Nothing here may return: on any failure it must _exit, or two
-         --  copies of the caller would carry on running.
-         Ignored := Set_Mask (SIG_SETMASK, No_Signals'Access, System.Null_Address);
-         Pipe_Was := Default_Pipe (Sigpipe_Number, System.Null_Address);
-
-         if Whole_Group then
-            --  A session of its own, and so a group of its own with no
-            --  terminal: nothing in it reads or stops on the caller's.
-            Ignored := New_Session;
-
-            --  A group run on the caller's behalf does not outlive it: were
-            --  the caller killed outright, what it started would run on with
-            --  nobody to stop it. Gone already before this was said: gone.
-            Ignored := Set_Death_Signal (PR_SET_PDEATHSIG, Sig_Term_Number);
-            if Parent_Id /= Forked_By then
-               Underscore_Exit (127);
-            end if;
-         end if;
-
-         if Stdin_Path /= "" then
-            Feed (Stdin_Path);
-         end if;
-
-         if Stdout_Path /= "" then
-            Redirect (Stdout_Path, 1);
-         end if;
-
-         --  One file for both is one open file: two opens of it would each
-         --  write from their own place, over each other.
-         if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then
-            Ignored := Dup2 (1, 2);
-         elsif Stderr_Path /= "" then
-            Redirect (Stderr_Path, 2);
-         end if;
-
-         if Working_Directory /= "" then
-            declare
-               Dir_C   : Interfaces.C.Strings.chars_ptr :=
-                 Interfaces.C.Strings.New_String (Working_Directory);
-               Changed : constant C_Int := Chdir (Dir_C);
-            begin
-               Interfaces.C.Strings.Free (Dir_C);
-
-               if Changed /= 0 then
-                  Underscore_Exit (127);
-               end if;
-            end;
-         end if;
-
-         if Whole_Group and then Clean_Wrapper then
-            if Execve (Shell_C, Wrap (0)'Address, Bare_Env (0)'Address) /= 0 then
-               Underscore_Exit (127);
-            end if;
-         elsif Whole_Group then
-            if Execvp (Shell_C, Wrap (0)'Address) /= 0 then
-               Underscore_Exit (127);
-            end if;
-         elsif Execvp (Program_C, Argv (0)'Address) /= 0 then
-            Underscore_Exit (127);
-         end if;
-
-         Underscore_Exit (127);
       end if;
 
       --  The parent.
