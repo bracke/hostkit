@@ -24,6 +24,14 @@ package Hostkit.Durability is
    --    Not_Supported.
    function Sync_File (Path : String) return Outcome;
 
+   --  Put an open file's contents on the device, through the descriptor it
+   --  was written by: no reopening, so a file about to be made read-only,
+   --  or one this process may not open again, is synced all the same.
+   --
+   --  @param Descriptor A C runtime file descriptor open for writing.
+   --  @return Synced, Failed, or Not_Supported.
+   function Sync_Descriptor (Descriptor : Integer) return Outcome;
+
    --  Put a directory's entries on the device: the names made, renamed and
    --  removed in it.
    --

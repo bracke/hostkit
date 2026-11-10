@@ -52,6 +52,9 @@ package body Hostkit.Durability is
    function Sync_File (Path : String) return Outcome
    is (Sync (Path, O_Rdonly + O_Cloexec));
 
+   function Sync_Descriptor (Descriptor : Integer) return Outcome is
+     (if Flush (C_Int (Descriptor)) = 0 then Synced else Failed);
+
    function Sync_Directory (Path : String) return Outcome
    is (Sync (Path, O_Rdonly + O_Directory + O_Cloexec));
 

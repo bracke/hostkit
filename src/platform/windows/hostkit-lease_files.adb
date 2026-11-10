@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -114,9 +114,7 @@ package body Hostkit.Lease_Files is
    function Get_File_Size (Handle : System.Address; Value : access C_I64) return C_Int
      with Import, Convention => Stdcall, External_Name => "GetFileSizeEx";
 
-   function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
-      & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
    function To_Handle (Item : Lease) return System.Address is
      (System.Storage_Elements.To_Address
         (System.Storage_Elements.Integer_Address (Item.Handle)));

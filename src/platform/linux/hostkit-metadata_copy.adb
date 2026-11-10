@@ -320,6 +320,21 @@ package body Hostkit.Metadata_Copy is
       Ok := C_Lsetxattr
         (Path, C_Name, Value'Address,
          Interfaces.C.size_t (Value_Text'Length), 0) = 0;
+      --  Best effort, as cp -a: a volume that holds no such attribute (vfat,
+      --  exFAT, an NFS export without xattrs) or that refuses a protected
+      --  security./trusted. one still gets the file. Mode, owner and times
+      --  stay required.
+      if not Ok then
+         declare
+            Error : constant C_Int := Errno;
+            function Starts (Prefix : String) return Boolean is
+              (Name_Text'Length > Prefix'Length
+               and then Name_Text (Name_Text'First .. Name_Text'First + Prefix'Length - 1) = Prefix);
+         begin
+            Ok := Error = E_Not_Supported
+              or else ((Error = 1 or else Error = 13) and then (Starts ("security.") or else Starts ("trusted.")));
+         end;
+      end if;
       Free (C_Name);
       return Ok;
    exception

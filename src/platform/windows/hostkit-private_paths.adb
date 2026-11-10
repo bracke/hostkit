@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with Interfaces;
 with Interfaces.C;
 with System;
@@ -71,9 +71,7 @@ package body Hostkit.Private_Paths is
    Error_Already_Exists : constant C_DWord := 183;
    File_Id_Info_Class : constant C_Int := 18;
 
-   function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
-        & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
    function Create_Directory_W
      (Name : System.Address;

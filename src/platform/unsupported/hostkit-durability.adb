@@ -8,6 +8,12 @@ package body Hostkit.Durability is
       return Not_Supported;
    end Sync_File;
 
+   function Sync_Descriptor (Descriptor : Integer) return Outcome is
+      pragma Unreferenced (Descriptor);
+   begin
+      return Not_Supported;
+   end Sync_Descriptor;
+
    function Sync_Directory (Path : String) return Outcome is
       pragma Unreferenced (Path);
    begin

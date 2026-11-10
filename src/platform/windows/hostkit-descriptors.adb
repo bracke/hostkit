@@ -1,5 +1,5 @@
-with Ada.Strings.UTF_Encoding.Conversions;
 
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 
 with System.Storage_Elements;
@@ -162,8 +162,7 @@ package body Hostkit.Descriptors is
    function Get_Last_Error return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
-   function Wide (Value : String) return Wide_String
-   is (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
    function To_Handle (Item : Descriptor) return System.Address
    is (System.Storage_Elements.To_Address

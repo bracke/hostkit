@@ -1691,4 +1691,13 @@ package body Hostkit.Fs is
       return "/dev/null";
    end Null_Device;
 
+   function Delete_Empty_Directory (Path : String) return Boolean is
+   begin
+      Ada.Directories.Delete_Directory (Path);
+      return True;
+   exception
+      when others =>
+         return False;
+   end Delete_Empty_Directory;
+
 end Hostkit.Fs;

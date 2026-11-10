@@ -15,12 +15,13 @@ package Hostkit.Path_Text is
      (C = '/' or else C = Hostkit.Fs.Separator
       or else (C = '\' and then Hostkit.Fs.Has_Windows_Root (Path)));
 
-   --  Where the share root of a UNC path ends: "\\server\share" in
-   --  "\\server\share\dir", the last index of the share's name, separators
-   --  as Is_Separator_In reads them.
+   --  Where the share root of a UNC path ends: "\\server\share\" in
+   --  "\\server\share\dir" -- the separator closing the share's name when
+   --  there is one, else the name's last character -- separators as
+   --  Is_Separator_In reads them.
    --
    --  @param Path A path.
-   --  @return The share name's last index, or 0 when Path is not a share.
+   --  @return That index, or 0 when Path names no share ("\\server\").
    function Share_Root_Last (Path : String) return Natural;
 
 end Hostkit.Path_Text;

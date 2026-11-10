@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -82,8 +82,7 @@ package body Hostkit.Regular_Files is
    --  UTF-16 for the wide Win32 calls. Wide_Strings.Decode raises for any
    --  code point above U+FFFF (it does not emit surrogates), which made every
    --  path holding an emoji or other non-BMP character unopenable.
-   function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
    function Open_Read
      (Path         : String;

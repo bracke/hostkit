@@ -1,6 +1,6 @@
 with Ada.Unchecked_Conversion;
 
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with System;
 
 package body Hostkit.Watch is
@@ -108,7 +108,7 @@ package body Hostkit.Watch is
       --  UTF-16, as the folder may not have an ASCII name.
       declare
          Wide_Path : aliased constant Wide_String :=
-           Ada.Strings.UTF_Encoding.Conversions.Convert (Path) & Wide_Character'Val (0);
+           Hostkit.Windows_Paths.Native (Path);
       begin
          Handle := Find_First_Change_Notification (Wide_Path'Address, 0, Notify_Mask);
       end;

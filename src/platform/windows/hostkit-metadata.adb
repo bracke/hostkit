@@ -6,6 +6,7 @@ with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Containers.Vectors;
 
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -1148,8 +1149,7 @@ package body Hostkit.Metadata is
       File_Ownership (Path, User_Id, Group_Id, Ownership_Available);
    end File_Mode_And_Ownership;
 
-   function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
    function Open_Entry (Path : String; Access_Mode : C_DWord) return System.Address is
       Wide_Path : aliased Wide_String := Wide (Path);

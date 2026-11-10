@@ -18,6 +18,9 @@ package body Hostkit.Path_Text is
             while Share_Start <= Path'Last and then Sep (Path (Share_Start)) loop
                Share_Start := Share_Start + 1;
             end loop;
+            if Share_Start > Path'Last then
+               return 0;
+            end if;
             for Share_End in Share_Start .. Path'Last loop
                if Sep (Path (Share_End)) then
                   return Share_End;

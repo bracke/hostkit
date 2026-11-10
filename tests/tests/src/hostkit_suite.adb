@@ -29,7 +29,9 @@ with Hostkit.Host;
 with Hostkit.Lease_Files;
 with Hostkit.Linux_Abi;
 with Hostkit.Metadata;
+with Hostkit.Metadata_Copy;
 with Hostkit.Mounts;
+with Hostkit.Path_Text;
 with Hostkit.Resources;
 with Hostkit.Process;
 with Hostkit.Private_Paths;
@@ -38,6 +40,7 @@ with Hostkit.Shell;
 with Hostkit.Trash;
 with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
+with Hostkit.Windows_Paths;
 with Hostkit.Command_Line;
 
 package body Hostkit_Suite is
@@ -260,6 +263,197 @@ package body Hostkit_Suite is
            = DQ & "my prog" & DQ,
          "a program whose path has a space is quoted too");
    end Test_Windows_Command_Line_Quoting;
+
+   procedure Test_Windows_Long_Path_Form
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      package WP renames Hostkit.Windows_Paths;
+
+      --  A name of N characters, so a few of them pass the threshold.
+      function Segment (N : Positive) return String is [1 .. N => 'd'];
+
+      Tail : constant String := Segment (120) & "\" & Segment (130);
+   begin
+      Assert (WP.Long_Path_Form ("C:\short") = "C:\short", "a short path is left as it is");
+      Assert
+        (WP.Long_Path_Form ("C:\" & Tail) = "\\?\C:\" & Tail,
+         "a long drive path gets the \\?\ prefix");
+      Assert
+        (WP.Long_Path_Form ("C:/" & Segment (120) & "/" & Segment (130)) = "\\?\C:\" & Tail,
+         "slashes become backslashes, which the prefixed form no longer translates");
+      Assert
+        (WP.Long_Path_Form ("\\server\share\" & Tail) = "\\?\UNC\server\share\" & Tail,
+         "a long share path gets the \\?\UNC\ prefix");
+      Assert
+        (WP.Long_Path_Form ("\\?\C:\" & Tail) = "\\?\C:\" & Tail,
+         "a path that is already prefixed is not prefixed twice");
+      Assert
+        (WP.Long_Path_Form ("C:\" & Segment (120) & "\..\" & Segment (130))
+           = "C:\" & Segment (120) & "\..\" & Segment (130),
+         "a path with a .. component keeps the normalisation the prefix would turn off");
+      Assert
+        (WP.Long_Path_Form (Tail) = Tail,
+         "a relative path is left for the API to resolve");
+      Assert
+        (WP.Native ("C:\a") = "C:\a" & Wide_Character'Val (0),
+         "the wide form is the UTF-16 text with a terminating NUL");
+   end Test_Windows_Long_Path_Form;
+
+   procedure Test_Delete_Empty_Directory
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Empty  : constant String := Ada.Directories.Compose (Scratch, "hostkit-empty-dir");
+      Full   : constant String := Ada.Directories.Compose (Scratch, "hostkit-full-dir");
+      Inside : constant String := Ada.Directories.Compose (Full, "kept");
+   begin
+      Ada.Directories.Create_Path (Empty);
+      Ada.Directories.Create_Path (Inside);
+      Assert (Hostkit.Fs.Delete_Empty_Directory (Empty), "an empty directory is removed");
+      Assert (not Ada.Directories.Exists (Empty), "and is gone");
+      Assert (not Hostkit.Fs.Delete_Empty_Directory (Full), "a directory with something in it is refused");
+      Assert (Ada.Directories.Exists (Inside), "and what is in it is untouched");
+      Assert (not Hostkit.Fs.Delete_Empty_Directory (Empty), "a missing directory is refused, not raised");
+      Ada.Directories.Delete_Tree (Full);
+   end Test_Delete_Empty_Directory;
+
+   procedure Test_Path_Text
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      package PT renames Hostkit.Path_Text;
+   begin
+      Assert (PT.Is_Separator_In ("C:\a", '\'), "a Windows path's backslash separates, on any host");
+      Assert (PT.Is_Separator_In ("/a/b", '/'), "a slash always separates");
+      Assert
+        (PT.Is_Separator_In ("/a\b", '\') = (Hostkit.Host.Current = Hostkit.Host.Windows),
+         "a POSIX path's backslash is part of a name except on Windows");
+      Assert (PT.Share_Root_Last ("\\server\share\dir") = 15, "a share's root ends with its closing separator");
+      Assert (PT.Share_Root_Last ("\\server\share") = 14, "or with its name when nothing follows");
+      Assert (PT.Share_Root_Last ("//server/share/x") = 15, "slashes spell a share too");
+      Assert (PT.Share_Root_Last ("\\server\") = 0, "a server alone names no share");
+      Assert (PT.Share_Root_Last ("\\server") = 0, "nor does a bare server name");
+      Assert (PT.Share_Root_Last ("\server\share") = 0, "one leading separator is not a share");
+      Assert (PT.Share_Root_Last ("C:\share\x") = 0, "nor is a drive path");
+   end Test_Path_Text;
+
+   procedure Test_Has_Window_Server
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      package Env renames Ada.Environment_Variables;
+      Had_Display : constant Boolean := Env.Exists ("DISPLAY");
+      Display     : constant String := (if Had_Display then Env.Value ("DISPLAY") else "");
+      Had_Wayland : constant Boolean := Env.Exists ("WAYLAND_DISPLAY");
+      Wayland     : constant String := (if Had_Wayland then Env.Value ("WAYLAND_DISPLAY") else "");
+
+      procedure Restore is
+      begin
+         if Had_Display then
+            Env.Set ("DISPLAY", Display);
+         else
+            Env.Clear ("DISPLAY");
+         end if;
+         if Had_Wayland then
+            Env.Set ("WAYLAND_DISPLAY", Wayland);
+         else
+            Env.Clear ("WAYLAND_DISPLAY");
+         end if;
+      end Restore;
+   begin
+      if Hostkit.Host.Current /= Hostkit.Host.Linux then
+         Assert (Hostkit.Host.Has_Window_Server, "macOS and Windows have one for every desktop session");
+         return;
+      end if;
+      Env.Clear ("DISPLAY");
+      Env.Clear ("WAYLAND_DISPLAY");
+      Assert (not Hostkit.Host.Has_Window_Server, "no DISPLAY and no WAYLAND_DISPLAY: no window server");
+      Env.Set ("DISPLAY", "");
+      Assert (not Hostkit.Host.Has_Window_Server, "an empty DISPLAY names none");
+      Env.Set ("DISPLAY", ":0");
+      Assert (Hostkit.Host.Has_Window_Server, "an X display is one");
+      Env.Clear ("DISPLAY");
+      Env.Set ("WAYLAND_DISPLAY", "wayland-0");
+      Assert (Hostkit.Host.Has_Window_Server, "so is a Wayland one");
+      Restore;
+   exception
+      when others =>
+         Restore;
+         raise;
+   end Test_Has_Window_Server;
+
+   procedure Test_Read_Only_File_Syncs_Promptly
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      use type Ada.Calendar.Time;
+      use type Hostkit.Durability.Outcome;
+      Path    : constant String := Ada.Directories.Compose (Scratch, "hostkit-read-only-sync");
+      File    : Ada.Text_IO.File_Type;
+      Started : Ada.Calendar.Time;
+      Result  : Hostkit.Durability.Outcome;
+   begin
+      if Ada.Directories.Exists (Path) then
+         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "a leftover is made writable again");
+         Ada.Directories.Delete_File (Path);
+      end if;
+      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
+      Ada.Text_IO.Put_Line (File, "kept");
+      Ada.Text_IO.Close (File);
+      Assert (Hostkit.Metadata.Set_Permissions (Path, 8#444#), "the file is made read-only");
+      --  On Windows the sync used to retry the refused write-open for 1.1 s
+      --  before it looked at the read-only attribute: per file, in a move.
+      Started := Ada.Calendar.Clock;
+      Result := Hostkit.Durability.Sync_File (Path);
+      Assert (Ada.Calendar.Clock - Started < 0.5, "a read-only file syncs without waiting out retries");
+      Assert (Result /= Hostkit.Durability.Failed, "and it syncs");
+      Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "it can be made writable again");
+      Ada.Directories.Delete_File (Path);
+   end Test_Read_Only_File_Syncs_Promptly;
+
+   procedure Test_Windows_Attributes_Are_Copied
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+      Source : constant String := Ada.Directories.Compose (Scratch, "hostkit-attr-source");
+      Target : constant String := Ada.Directories.Compose (Scratch, "hostkit-attr-target");
+      File   : Ada.Text_IO.File_Type;
+      Done   : Boolean;
+   begin
+      if Hostkit.Host.Current /= Hostkit.Host.Windows then
+         return;
+      end if;
+      for Index in 1 .. 2 loop
+         declare
+            Name : constant String := (if Index = 1 then Source else Target);
+         begin
+            if Ada.Directories.Exists (Name) then
+               Ada.Directories.Delete_File (Name);
+            end if;
+            Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
+            Ada.Text_IO.Close (File);
+         end;
+      end loop;
+      declare
+         use type GNAT.OS_Lib.String_Access;
+         Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
+      begin
+         Assert (Attrib /= null, "attrib.exe is on the path");
+         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("+H " & Source).all, Done);
+         Assert (Done and then Hostkit.Fs.Is_Hidden (Source), "the source is hidden");
+         Assert
+           (Hostkit.Metadata_Copy.Apply (Hostkit.Metadata_Copy.Capture (Source), Target, Preserve_Ownership => False),
+            "its metadata is applied to the copy");
+         Assert (Hostkit.Fs.Is_Hidden (Target), "and the copy is hidden too");
+         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-H " & Source).all, Done);
+         Assert (Done, "the source is shown again");
+         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-H " & Target).all, Done);
+         Assert (Done, "and so is the copy");
+      end;
+      Ada.Directories.Delete_File (Source);
+      Ada.Directories.Delete_File (Target);
+   end Test_Windows_Attributes_Are_Copied;
 
    --  Linux lists its mounts, "/" among them, with escapes decoded; a host
    --  without a table lists none, and a pseudo filesystem's source is no disk.
@@ -3268,6 +3462,24 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Windows_Command_Line_Quoting'Access,
          "process : the Windows CRT argument quoting round-trips");
+      Register_Routine
+        (T, Test_Windows_Long_Path_Form'Access,
+         "process : a long Windows path is given the \\?\ form only when that keeps its meaning");
+      Register_Routine
+        (T, Test_Delete_Empty_Directory'Access,
+         "fs : only an empty directory is deleted, and a refusal is an answer");
+      Register_Routine
+        (T, Test_Path_Text'Access,
+         "fs : path text splits Windows and POSIX paths and finds a share's root on any host");
+      Register_Routine
+        (T, Test_Has_Window_Server'Access,
+         "host : a window server is an X or Wayland display on Linux, always there elsewhere");
+      Register_Routine
+        (T, Test_Read_Only_File_Syncs_Promptly'Access,
+         "durability : a read-only file syncs at once, without waiting out write retries");
+      Register_Routine
+        (T, Test_Windows_Attributes_Are_Copied'Access,
+         "metadata copy : a hidden Windows file's copy is hidden too");
       Register_Routine
         (T, Test_Filesystem_Rules'Access,
          "fs : DOS-ruled filesystems are recognised from the mount table");

@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -33,9 +33,7 @@ package body Hostkit.Metadata_Copy is
    File_Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
    File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
 
-   function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value)
-        & Wide_Character'Val (0));
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
    function Create_File_W
      (Name : System.Address; Access_Mode, Share : C_DWord;

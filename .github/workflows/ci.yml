@@ -33,11 +33,11 @@ jobs:
 
     steps:
       - name: Check out hostkit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Alire
         # v5 defaults to alr 2.1.0, whose index carries gnat_native 15.2.1.
-        uses: alire-project/setup-alire@v6
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           toolchain: ${{ matrix.toolchain }} gprbuild
 
@@ -147,15 +147,26 @@ jobs:
       ALIRE_NONINTERACTIVE: "true"
     steps:
       - name: Check out hostkit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: hostkit
-      - name: Check out sibling crates (transitive pin closure)
-        uses: bracke/project_tools/.github/actions/checkout-ada-siblings@main
-        with:
-          root: hostkit
+      - name: Clone sibling crates at pinned revisions
+        # Pinned, as files' CI pins them, so a run can be repeated: the
+        # siblings' main moves. Bump a pin together with the change that
+        # needs it; the list is hostkit's alire.toml pin closure.
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          owner="${{ github.repository_owner }}"
+          clone_at() {
+            git init "$1"
+            git -C "$1" remote add origin "https://github.com/${owner}/$1.git"
+            git -C "$1" fetch --depth 1 origin "$2"
+            git -C "$1" checkout --detach FETCH_HEAD
+          }
+          clone_at project_tools 5ed5f4dcfa10301345933d45e5f78ac0573d8cff
       - name: Set up Alire
-        uses: alire-project/setup-alire@v6
+        uses: alire-project/setup-alire@fc4c8ce471aa30b3af0d39ce15add1ee9eaf28f2 # v6.0.0
         with:
           toolchain: gnat_native=15.2.1 gprbuild
 

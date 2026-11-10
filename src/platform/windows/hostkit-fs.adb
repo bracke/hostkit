@@ -7,6 +7,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Strings.Wide_Unbounded;
 
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 
 with System;
@@ -64,7 +65,10 @@ package body Hostkit.Fs is
       return Interfaces.C.char
      with Import => True, Convention => Stdcall, External_Name => "CreateSymbolicLinkW";
 
-   function Wide (Value : String) return Wide_String is
+   function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
+
+   --  Text that is not a path to open: a link's target is stored as given.
+   function Wide_Text (Value : String) return Wide_String is
      (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
 
    --  A symbolic link and a junction are both reparse points, and this is how Windows
@@ -160,7 +164,7 @@ package body Hostkit.Fs is
          return Target;
       end Seen_From_Link;
 
-      Wide_Target : aliased Wide_String := Wide (Native (Target));
+      Wide_Target : aliased Wide_String := Wide_Text (Native (Target));
       Wide_Link   : aliased Wide_String := Wide (Link_Path);
 
       Is_Directory : constant Boolean :=
@@ -291,7 +295,7 @@ package body Hostkit.Fs is
         with Import => True, Convention => Stdcall,
              External_Name => "CreateHardLinkW";
 
-      Wide_Target : aliased Wide_String := Wide (Target);
+      Wide_Target : aliased Wide_String := Wide_Text (Target);
       Wide_Link   : aliased Wide_String := Wide (Link_Path);
       Created     : constant Interfaces.C.int :=
         Create_Hard_Link_W
@@ -1568,5 +1572,24 @@ package body Hostkit.Fs is
       --  long way round.
       return "NUL";
    end Null_Device;
+
+   function Delete_Empty_Directory (Path : String) return Boolean is
+      function Remove_Directory (Name : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "RemoveDirectoryW";
+      function Set_File_Attributes (Name : System.Address; Attributes : C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "SetFileAttributesW";
+      Read_Only  : constant C_DWord := 16#0001#;
+      Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+      Ignored    : Interfaces.C.int;
+   begin
+      if Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0 then
+         Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
+      end if;
+      return Remove_Directory (Wide_Path'Address) /= 0;
+   exception
+      when others =>
+         return False;
+   end Delete_Empty_Directory;
 
 end Hostkit.Fs;

@@ -268,6 +268,11 @@ package body Hostkit.Metadata_Copy is
       Ok := C_Setxattr
         (Path, Name, Value'Address, Interfaces.C.size_t (Text'Length),
          0, Xattr_Nofollow) = 0;
+      --  Best effort, as cp -a: a volume that holds no such attribute (vfat,
+      --  exFAT, an NFS export without xattrs) or that refuses a protected
+      --  one (EPERM, EACCES) still gets the file. Mode, owner and times
+      --  stay required.
+      Ok := Ok or else Errno = E_Not_Supported or else Errno = 1 or else Errno = 13;
       Free (Name); return Ok;
    exception
       when others => Free (Name); return False;

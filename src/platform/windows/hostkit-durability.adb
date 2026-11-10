@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 
 package body Hostkit.Durability is
@@ -39,7 +39,7 @@ package body Hostkit.Durability is
    function Sync_File (Path : String) return Outcome is
       --  UTF-16, whole: Wide_Strings.Decode refuses code points past U+FFFF.
       Name   : aliased constant Wide_String :=
-        Ada.Strings.UTF_Encoding.Conversions.Convert (Path) & Wide_Character'Val (0);
+        Hostkit.Windows_Paths.Native (Path);
       FD     : C_Int := open (Name'Address, O_Rdwr + O_Binary);
       Result : Outcome := Failed;
    begin
@@ -91,6 +91,10 @@ package body Hostkit.Durability is
       end if;
       return Result;
    end Sync_File;
+
+   --  _commit is FlushFileBuffers on the descriptor's handle.
+   function Sync_Descriptor (Descriptor : Integer) return Outcome is
+     (if commit (C_Int (Descriptor)) = 0 then Synced else Failed);
 
    --  NTFS journals its directory entries itself; there is nothing to ask.
    function Sync_Directory (Path : String) return Outcome is

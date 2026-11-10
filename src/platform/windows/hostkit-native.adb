@@ -2,6 +2,7 @@ with Hostkit.Windows_Command_Line;
 with Ada.Calendar;
 with Ada.Strings.UTF_Encoding.Conversions;
 
+with Hostkit.Windows_Paths;
 with Interfaces.C;
 
 with System.Storage_Elements;
@@ -288,7 +289,7 @@ package body Hostkit.Native is
         (Hostkit.Windows_Command_Line.Build (Program, Arguments));
 
       function Capture (Path : String) return System.Address is
-         Wide_Path : aliased Wide_String := Wide (Path);
+         Wide_Path : aliased Wide_String := Hostkit.Windows_Paths.Native (Path);
          Security  : aliased Security_Attributes;
       begin
          if Path = "" then
@@ -313,7 +314,7 @@ package body Hostkit.Native is
       --  Windows has no fork, so every redirection has to exist as a handle
       --  before CreateProcessW is called.
       function Feed (Path : String) return System.Address is
-         Wide_Path : aliased Wide_String := Wide (Path);
+         Wide_Path : aliased Wide_String := Hostkit.Windows_Paths.Native (Path);
          Security  : aliased Security_Attributes;
       begin
          if Path = "" then

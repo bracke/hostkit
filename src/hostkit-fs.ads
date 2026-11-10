@@ -258,6 +258,14 @@ package Hostkit.Fs is
    --          or directory is left alone) or the host refused to remove it.
    function Delete_Link (Path : String) return Boolean;
 
+   --  Remove the empty directory at Path, never anything in it. On Windows a
+   --  read-only directory (a customised folder, or one a copy kept the
+   --  attribute of) is refused by RemoveDirectoryW: its attribute is cleared
+   --  first. A directory that is not empty is refused everywhere.
+   --
+   --  @return True when the directory is gone.
+   function Delete_Empty_Directory (Path : String) return Boolean;
+
    type Delete_Tree_Outcome is
      (Tree_Deleted,
       Tree_Delete_Failed,
