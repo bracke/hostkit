@@ -354,6 +354,33 @@ package Hostkit.Process is
       Arguments  : out String_Vectors.Vector)
       return Boolean;
 
+   --  The host's opener as a settings file keeps it: a command named, not
+   --  located -- no machine's absolute paths, nothing looked up -- that
+   --  opens Path_Token with its default application. Windows: cmd /c start
+   --  "" <file>. macOS: open <file>. Elsewhere: xdg-open <file>.
+   --
+   --  @param Path_Token What stands for the file in Arguments.
+   --  @param Program The program to run.
+   --  @param Arguments Its arguments.
+   procedure Portable_Default_Opener
+     (Path_Token : String;
+      Program    : out UString;
+      Arguments  : out String_Vectors.Vector);
+
+   --  Whether Program and Arguments are the Windows opener's shape, cmd /c
+   --  start "" <file>, by name or by cmd.exe's path, as Default_Opener and
+   --  Portable_Default_Opener give it. cmd parses that line again, so a file
+   --  named x&calc would also run calc and %VAR% expands inside quotes: a
+   --  caller opens the file with Open_Native instead. False on other hosts.
+   --
+   --  @param Program The program a command runs.
+   --  @param Arguments Its arguments.
+   --  @return True for the Windows opener's shape on Windows.
+   function Is_Shell_Start
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean;
+
    --  The terminal to open a folder in. TERMINAL first, when it names a
    --  program this host runs (a name there it cannot run is ignored, not
    --  launched); else the first the host has of its usual ones: on Linux the

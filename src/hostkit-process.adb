@@ -455,6 +455,59 @@ package body Hostkit.Process is
          return False;
    end Environment_Value;
 
+   procedure Portable_Default_Opener
+     (Path_Token : String;
+      Program    : out UString;
+      Arguments  : out String_Vectors.Vector) is
+   begin
+      Arguments := String_Vectors.Empty_Vector;
+      case Hostkit.Host.Current is
+         when Hostkit.Host.Windows =>
+            --  start's empty first argument is the window title it would
+            --  otherwise take the quoted path for.
+            Program := To_Unbounded_String ("cmd");
+            Arguments.Append (To_Unbounded_String ("/c"));
+            Arguments.Append (To_Unbounded_String ("start"));
+            Arguments.Append (Null_Unbounded_String);
+         when Hostkit.Host.MacOS =>
+            Program := To_Unbounded_String ("open");
+         when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
+            Program := To_Unbounded_String ("xdg-open");
+      end case;
+      Arguments.Append (To_Unbounded_String (Path_Token));
+   end Portable_Default_Opener;
+
+   function Is_Shell_Start
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean
+   is
+      use type Hostkit.Host.Kind;
+      use type Ada.Containers.Count_Type;
+
+      function Lower (Text : String) return String is
+         Result : String := Text;
+      begin
+         for C of Result loop
+            if C in 'A' .. 'Z' then
+               C := Character'Val (Character'Pos (C) + 32);
+            end if;
+         end loop;
+         return Result;
+      end Lower;
+
+      Name : constant String := Lower (Program);
+   begin
+      return Hostkit.Host.Current = Hostkit.Host.Windows
+        and then Arguments.Length = 4
+        and then (Name in "cmd" | "cmd.exe"
+                  or else (Name'Length > 8 and then Name (Name'Last - 7 .. Name'Last) in "\cmd.exe" | "/cmd.exe"))
+        and then Lower (To_String (Arguments (1))) = "/c"
+        and then Lower (To_String (Arguments (2))) = "start"
+        and then To_String (Arguments (3)) = ""
+        and then To_String (Arguments (4)) /= "";
+   end Is_Shell_Start;
+
    function Default_Opener
      (Mime_Type  : String;
       Path_Token : String;

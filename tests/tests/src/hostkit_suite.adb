@@ -22,6 +22,7 @@ with Hostkit.Descriptors;
 with Hostkit.Directory_Listing;
 with Hostkit.Directory_Write_Access;
 with Hostkit.Durability;
+with Hostkit.Errors;
 with Hostkit.Fs;
 with Hostkit.Environment;
 with Hostkit.Host;
@@ -305,6 +306,63 @@ package body Hostkit_Suite is
                  "no opener names no program");
       end if;
    end Test_Default_Opener;
+
+   --  The per-host tables: errno numbers, where volumes live, which mount
+   --  types are internal or networked, the opener a settings file keeps, and
+   --  Windows root syntax read on any host.
+   procedure Test_Host_Tables (T : in out AUnit.Test_Cases.Test_Case'Class) is
+      pragma Unreferenced (T);
+      Program   : Ada.Strings.Unbounded.Unbounded_String;
+      Arguments : Hostkit.String_Vectors.Vector;
+   begin
+      for Item in Hostkit.Errors.Cause loop
+         Assert (Hostkit.Errors.Code_Of (Item) >= 0, "an errno is never negative");
+      end loop;
+      if Hostkit.Host.Current = Hostkit.Host.Linux then
+         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 36, "ENAMETOOLONG is 36 on Linux");
+         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Quota_Exceeded) = 122, "EDQUOT is 122 on Linux");
+      elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
+         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 63, "ENAMETOOLONG is 63 on macOS");
+      elsif Hostkit.Host.Current = Hostkit.Host.Windows then
+         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Quota_Exceeded) = 0, "Windows has no EDQUOT");
+      end if;
+
+      Assert (Hostkit.Mounts.Is_Pseudo ("proc") and then Hostkit.Mounts.Is_Pseudo ("TMPFS")
+              and then Hostkit.Mounts.Is_Pseudo (""), "proc, tmpfs and no type are internal");
+      Assert (not Hostkit.Mounts.Is_Pseudo ("ext4"), "ext4 holds files");
+      Assert (Hostkit.Mounts.Is_Network ("nfs4") and then Hostkit.Mounts.Is_Network ("CIFS"),
+              "nfs4 and cifs are networked");
+      Assert (not Hostkit.Mounts.Is_Network ("vfat"), "vfat is local");
+      declare
+         Places : constant Hostkit.Mounts.Volume_Place_List := Hostkit.Mounts.Volume_Places;
+      begin
+         case Hostkit.Host.Current is
+            when Hostkit.Host.Linux =>
+               Assert (Places'Length = 3 and then Ada.Strings.Unbounded.To_String (Places (1).Path) = "/mnt",
+                       "Linux mounts volumes under /mnt, /media and /run/media");
+            when Hostkit.Host.MacOS =>
+               Assert (Ada.Strings.Unbounded.To_String (Places (1).Path) = "/Volumes", "macOS under /Volumes");
+            when Hostkit.Host.Windows =>
+               Assert (Places'Length = 26, "Windows has a root per drive letter");
+            when Hostkit.Host.Unsupported =>
+               null;
+         end case;
+      end;
+
+      Hostkit.Process.Portable_Default_Opener ("{path}", Program, Arguments);
+      Assert (Ada.Strings.Unbounded.To_String (Arguments.Last_Element) = "{path}", "the file comes last");
+      Assert (Hostkit.Process.Is_Shell_Start (Ada.Strings.Unbounded.To_String (Program), Arguments)
+              = (Hostkit.Host.Current = Hostkit.Host.Windows),
+              "the portable opener is the shell's start shape exactly on Windows");
+
+      Assert (Hostkit.Fs.Drive_Root_Length ("C:\Users") = 3 and then Hostkit.Fs.Drive_Root_Length ("D:/") = 3,
+              "a drive root is three bytes");
+      Assert (Hostkit.Fs.Drive_Root_Length ("/home") = 0 and then Hostkit.Fs.Drive_Root_Length ("C:") = 0,
+              "a POSIX path or a bare drive letter has no drive root");
+      Assert (Hostkit.Fs.Has_Windows_Root ("\\server\share") and then Hostkit.Fs.Has_Windows_Root ("c:\"),
+              "a share and a drive are Windows roots");
+      Assert (not Hostkit.Fs.Has_Windows_Root ("/c:/x"), "a POSIX path is not");
+   end Test_Host_Tables;
 
    procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is
       pragma Unreferenced (T);
@@ -3169,6 +3227,8 @@ package body Hostkit_Suite is
         (T, Test_Mount_Table'Access, "mounts : the host's mount table, decoded, or none where it keeps none");
       Register_Routine
         (T, Test_Default_Opener'Access, "process : the default opener names the file by the caller's token");
+      Register_Routine
+        (T, Test_Host_Tables'Access, "host : errno, volume places, mount kinds, portable opener, Windows roots");
       Register_Routine
         (T, Test_Writes_Are_Made_Durable'Access,
          "durability : what was written is put on the device, or it is said that it cannot be");

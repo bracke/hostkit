@@ -49,4 +49,38 @@ package Hostkit.Mounts is
    --  @return True when the disk is removable.
    function Removable (Source : String; Known : out Boolean) return Boolean;
 
+   --  Whether a filesystem type is the system's own, not a volume a person
+   --  stores files on: proc, sysfs, cgroup, tmpfs, overlay and the like, or
+   --  no type at all.
+   --
+   --  @param Filesystem_Type A mount's type, as Table lists it.
+   --  @return True for a pseudo or system-internal filesystem.
+   function Is_Pseudo (Filesystem_Type : String) return Boolean;
+
+   --  Whether a filesystem type reaches across the network: NFS, SMB/CIFS,
+   --  SSH, WebDAV, AFP, 9p, a gvfs share.
+   --
+   --  @param Filesystem_Type A mount's type, as Table lists it.
+   --  @return True for a network filesystem.
+   function Is_Network (Filesystem_Type : String) return Boolean;
+
+   --  Where this host puts volumes: a drive's root, a folder whose every
+   --  entry is a mounted volume, or one whose entries are users' such folders.
+   type Volume_Place_Kind is (Drive_Root, Volumes_Folder, User_Volumes_Folder);
+
+   type Volume_Place is record
+      Path : UString;
+      Kind : Volume_Place_Kind := Volumes_Folder;
+   end record;
+
+   type Volume_Place_List is array (Positive range <>) of Volume_Place;
+
+   --  The places this host's conventions put volumes, each host its own:
+   --  /mnt, /media and /run/media on Linux; /Volumes and /System/Volumes on
+   --  macOS; every drive letter's root on Windows. Listed whether or not
+   --  they exist; a caller looks.
+   --
+   --  @return The places, in the order a file manager shows them.
+   function Volume_Places return Volume_Place_List;
+
 end Hostkit.Mounts;

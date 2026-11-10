@@ -445,6 +445,27 @@ package Hostkit.Fs is
    --  @return True when C is a separator.
    function Is_Separator (C : Character) return Boolean is (C = '/' or else C = Separator);
 
+   --  How long Path's drive root is: 3 for "C:\" or "C:/", else 0. Text
+   --  only, on any host: a Windows path read elsewhere still has one.
+   --
+   --  @param Path Path to look at.
+   --  @return 3 when Path starts with a drive letter, a colon and a slash.
+   function Drive_Root_Length (Path : String) return Natural is
+     (if Path'Length >= 3
+        and then Path (Path'First + 1) = ':'
+        and then Path (Path'First + 2) in '/' | '\'
+      then 3 else 0);
+
+   --  Whether Path starts the way a Windows path does: with a drive root
+   --  ("C:\", "C:/") or a share's two backslashes ("\\server"). Text only,
+   --  on any host.
+   --
+   --  @param Path Path to look at.
+   --  @return True for a drive root or a UNC prefix.
+   function Has_Windows_Root (Path : String) return Boolean is
+     (Drive_Root_Length (Path) > 0
+      or else (Path'Length >= 2 and then Path (Path'First) = '\' and then Path (Path'First + 1) = '\'));
+
    --  Whether Child is Parent or lies under it, compared as text: Parent's
    --  last component must end where Child has a separator, so /a/bc is not
    --  under /a/b. A Parent that ends in a separator (a root) holds every
