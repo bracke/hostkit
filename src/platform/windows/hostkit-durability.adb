@@ -44,9 +44,15 @@ package body Hostkit.Durability is
       Result : Outcome := Failed;
    begin
       --  A file just written may be held a moment by someone else (a virus
-      --  scanner) that did not share writing; try again briefly.
+      --  scanner) that did not share writing; try again briefly -- but not a
+      --  read-only one, which no retry opens (that is handled below).
       for Attempt in 1 .. 10 loop
          exit when FD >= 0;
+         declare
+            Attributes : constant C_DWord := Get_File_Attributes_W (Name'Address);
+         begin
+            exit when Attributes /= Invalid_Attributes and then (Attributes and Read_Only) /= 0;
+         end;
          delay Duration (Attempt) * 0.02;
          FD := open (Name'Address, O_Rdwr + O_Binary);
       end loop;
