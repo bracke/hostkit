@@ -537,8 +537,15 @@ package body Hostkit.Fs is
    Fallback_Enosys     : constant := 78;
    Fallback_Eopnotsupp : constant := 102;
 
-   function C_Link (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
-     with Import => True, Convention => C, External_Name => "link";
+   --  link() follows a symbolic link at From on Darwin; linkat with no
+   --  flags links the entry itself, as link() does on Linux, so a moved
+   --  link stays a link.
+   Fallback_At_Fdcwd : constant := -2;
+   function C_Linkat
+     (From_Dir : Interfaces.C.int; From : Interfaces.C.Strings.chars_ptr;
+      To_Dir   : Interfaces.C.int; To   : Interfaces.C.Strings.chars_ptr;
+      Flags    : Interfaces.C.int) return Interfaces.C.int
+     with Import => True, Convention => C, External_Name => "linkat";
    function C_Unlink (Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
      with Import => True, Convention => C, External_Name => "unlink";
    function C_Plain_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
@@ -566,7 +573,7 @@ package body Hostkit.Fs is
    function Without_Native_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return Move_Outcome is
       Error : Integer;
    begin
-      if C_Link (From, To) = 0 then
+      if C_Linkat (Fallback_At_Fdcwd, From, Fallback_At_Fdcwd, To, 0) = 0 then
          if C_Unlink (From) = 0 then
             return Moved;
          end if;
