@@ -147,6 +147,8 @@ package body Hostkit.Metadata_Copy is
       if Result.Available then
          Result.Times := [Value (Accessed), 0, Value (Modified), 0];
          Result.Links := Interfaces.Unsigned_64 (Info.Link_Count);
+         --  Windows has no mode: its file attributes stand in for it.
+         Result.Mode := Interfaces.Unsigned_64 (Info.Attributes);
       end if;
       if Handle /= Invalid_Handle then
          Ignored := Close_Handle (Handle);
@@ -170,7 +172,21 @@ package body Hostkit.Metadata_Copy is
       return Boolean
    is
       pragma Unreferenced (Preserve_Ownership);
+      --  What a user sets and a copy keeps: read-only, hidden, system,
+      --  archive, not indexed. Others (compressed, encrypted, sparse) are
+      --  the volume's to give, not an attribute to write.
+      Kept : constant Interfaces.Unsigned_64 := 16#0001# + 16#0002# + 16#0004# + 16#0020# + 16#2000#;
+      function Set_File_Attributes_W (Path : System.Address; Attributes : C_DWord) return C_Int
+        with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
    begin
-      return Item.Available and then Apply_Times (Path, Item.Times);
+      if not Item.Available or else not Apply_Times (Path, Item.Times) then
+         return False;
+      end if;
+      --  Last: a read-only entry's times could not be set after it.
+      declare
+         Wide_Path : aliased constant Wide_String := Wide (Path);
+      begin
+         return Set_File_Attributes_W (Wide_Path'Address, C_DWord (Item.Mode and Kept)) /= 0;
+      end;
    end Apply;
 end Hostkit.Metadata_Copy;

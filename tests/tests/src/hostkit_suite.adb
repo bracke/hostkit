@@ -355,6 +355,36 @@ package body Hostkit_Suite is
               = (Hostkit.Host.Current = Hostkit.Host.Windows),
               "the portable opener is the shell's start shape exactly on Windows");
 
+      --  The shell-start shape, read the same on every host.
+      declare
+         function Args (A, B, C, D : String := ""; Count : Natural := 4) return Hostkit.String_Vectors.Vector is
+            Result : Hostkit.String_Vectors.Vector;
+            procedure Add (Text : String) is
+            begin
+               if Natural (Result.Length) < Count then
+                  Result.Append (Ada.Strings.Unbounded.To_Unbounded_String (Text));
+               end if;
+            end Add;
+         begin
+            Add (A);
+            Add (B);
+            Add (C);
+            Add (D);
+            return Result;
+         end Args;
+         function Shape (Program : String; Arguments : Hostkit.String_Vectors.Vector) return Boolean
+           renames Hostkit.Process.Has_Shell_Start_Shape;
+      begin
+         Assert (Shape ("cmd", Args ("/c", "start", "", "x&calc")), "cmd /c start, an empty title, a file");
+         Assert (Shape ("CMD.EXE", Args ("/C", "START", "", "f")), "any case");
+         Assert (Shape ("C:\Windows\System32\cmd.exe", Args ("/c", "start", "", "f")), "cmd by its path");
+         Assert (not Shape ("cmd", Args ("/c", "start", "title", "f")), "a title is not the shape");
+         Assert (not Shape ("cmd", Args ("/c", "start", "", "f", Count => 3)), "three arguments are not");
+         Assert (not Shape ("cmd", Args ("/c", "start", "", "")), "an empty file is not");
+         Assert (not Shape ("notcmd.exe", Args ("/c", "start", "", "f")), "another program is not");
+         Assert (not Shape ("cmd", Args ("/k", "start", "", "f")), "/k is not");
+      end;
+
       Assert (Hostkit.Fs.Drive_Root_Length ("C:\Users") = 3 and then Hostkit.Fs.Drive_Root_Length ("D:/") = 3,
               "a drive root is three bytes");
       Assert (Hostkit.Fs.Drive_Root_Length ("/home") = 0 and then Hostkit.Fs.Drive_Root_Length ("C:") = 0,

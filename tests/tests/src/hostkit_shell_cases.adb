@@ -1308,6 +1308,9 @@ package body Hostkit_Shell_Cases is
       Sent : D.Transfer_Outcome;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -1532,6 +1535,9 @@ package body Hostkit_Shell_Cases is
       pragma Unreferenced (Stopped);
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -1735,6 +1741,9 @@ package body Hostkit_Shell_Cases is
       pragma Warnings (Off, Size);
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -1986,6 +1995,9 @@ package body Hostkit_Shell_Cases is
       Last  : Ada.Streams.Stream_Element_Offset;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2143,6 +2155,9 @@ package body Hostkit_Shell_Cases is
       Again  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2176,6 +2191,9 @@ package body Hostkit_Shell_Cases is
       Again  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2274,6 +2292,9 @@ package body Hostkit_Shell_Cases is
       Where       : Natural;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2340,6 +2361,9 @@ package body Hostkit_Shell_Cases is
       Again  : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2385,6 +2409,9 @@ package body Hostkit_Shell_Cases is
       Unsaved : Hostkit.Terminal_Control.Mode;
    begin
       if not Hostkit.Pty.Is_Supported then
+         --  Only a host this build does not know may lack one; on the
+         --  others a missing terminal is a failure, not a pass.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "this host has pseudo-terminals");
          return;
       end if;
 
@@ -2417,7 +2444,10 @@ package body Hostkit_Shell_Cases is
       Taken := Hostkit.Locks.Acquire (Path, Hostkit.Locks.Lock_Exclusive, False, First);
 
       if Taken = Hostkit.Locks.Lock_Unsupported then
-         --  A filesystem that does not carry locks. Reported, not pretended.
+         --  A filesystem that does not carry locks. Reported, not pretended;
+         --  but the test's own folder is a local disk on every host built
+         --  for, so there it is a failure.
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "the local disk carries locks");
          return;
       end if;
 
@@ -2506,6 +2536,7 @@ package body Hostkit_Shell_Cases is
       Taken := Hostkit.Locks.Acquire (Path, Hostkit.Locks.Lock_Shared, False, First);
 
       if Taken = Hostkit.Locks.Lock_Unsupported then
+         Assert (Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Unsupported), "the local disk carries locks");
          return;
       end if;
 

@@ -483,6 +483,15 @@ package body Hostkit.Process is
       return Boolean
    is
       use type Hostkit.Host.Kind;
+   begin
+      return Hostkit.Host.Current = Hostkit.Host.Windows and then Has_Shell_Start_Shape (Program, Arguments);
+   end Is_Shell_Start;
+
+   function Has_Shell_Start_Shape
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean
+   is
       use type Ada.Containers.Count_Type;
 
       function Lower (Text : String) return String is
@@ -498,15 +507,14 @@ package body Hostkit.Process is
 
       Name : constant String := Lower (Program);
    begin
-      return Hostkit.Host.Current = Hostkit.Host.Windows
-        and then Arguments.Length = 4
+      return Arguments.Length = 4
         and then (Name in "cmd" | "cmd.exe"
                   or else (Name'Length > 8 and then Name (Name'Last - 7 .. Name'Last) in "\cmd.exe" | "/cmd.exe"))
         and then Lower (To_String (Arguments (1))) = "/c"
         and then Lower (To_String (Arguments (2))) = "start"
         and then To_String (Arguments (3)) = ""
         and then To_String (Arguments (4)) /= "";
-   end Is_Shell_Start;
+   end Has_Shell_Start_Shape;
 
    function Default_Opener
      (Mime_Type  : String;

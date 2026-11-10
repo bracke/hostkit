@@ -49,6 +49,13 @@ package Hostkit.Host is
    --          give.
    function Native_Locale return String;
 
+   --  Whether this session has a window server to open windows on: an X11
+   --  or Wayland display on Linux (DISPLAY, WAYLAND_DISPLAY), always on
+   --  macOS and Windows, which have one for every desktop session.
+   --
+   --  @return True when a window can be shown.
+   function Has_Window_Server return Boolean;
+
    --  The path of the running executable, resolved.
    --
    --  Ada.Command_Line.Command_Name gives back whatever the caller typed: a

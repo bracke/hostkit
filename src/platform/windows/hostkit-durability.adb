@@ -20,6 +20,16 @@ package body Hostkit.Durability is
    function open (Path : System.Address; Flags : C_Int) return C_Int
      with Import, Convention => C_Variadic_1, External_Name => "_wopen";
 
+   subtype C_DWord is Interfaces.C.unsigned_long;
+   use type C_DWord;
+   Read_Only          : constant C_DWord := 16#0001#;
+   Invalid_Attributes : constant C_DWord := 16#FFFF_FFFF#;
+
+   function Get_File_Attributes_W (Path : System.Address) return C_DWord
+     with Import, Convention => Stdcall, External_Name => "GetFileAttributesW";
+   function Set_File_Attributes_W (Path : System.Address; Attributes : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
+
    function commit (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_commit";
 
@@ -40,7 +50,31 @@ package body Hostkit.Durability is
          delay Duration (Attempt) * 0.02;
          FD := open (Name'Address, O_Rdwr + O_Binary);
       end loop;
+      --  A read-only file cannot be opened for writing, and only a writer
+      --  may flush it: drop the attribute for the flush and put it back.
       if FD < 0 then
+         declare
+            Attributes : constant C_DWord := Get_File_Attributes_W (Name'Address);
+         begin
+            if Attributes /= Invalid_Attributes
+              and then (Attributes and Read_Only) /= 0
+              and then Set_File_Attributes_W (Name'Address, Attributes - Read_Only) /= 0
+            then
+               FD := open (Name'Address, O_Rdwr + O_Binary);
+               if FD >= 0 then
+                  if commit (FD) = 0 then
+                     Result := Synced;
+                  end if;
+                  if close (FD) /= 0 then
+                     Result := Failed;
+                  end if;
+               end if;
+               if Set_File_Attributes_W (Name'Address, Attributes) = 0 then
+                  Result := Failed;
+               end if;
+               return Result;
+            end if;
+         end;
          return Failed;
       end if;
       if commit (FD) = 0 then

@@ -70,4 +70,6 @@ package body Hostkit.Host is
       return False;
    end Usable_Processors;
 
+   function Has_Window_Server return Boolean is (False);
+
 end Hostkit.Host;

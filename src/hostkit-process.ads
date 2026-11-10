@@ -381,6 +381,17 @@ package Hostkit.Process is
       Arguments : String_Vectors.Vector)
       return Boolean;
 
+   --  Is_Shell_Start's shape test alone, on any host: cmd or cmd.exe (by
+   --  name or path, any case), then /c, start, an empty title and a file.
+   --
+   --  @param Program The program a command runs.
+   --  @param Arguments Its arguments.
+   --  @return True for the shape.
+   function Has_Shell_Start_Shape
+     (Program   : String;
+      Arguments : String_Vectors.Vector)
+      return Boolean;
+
    --  The terminal to open a folder in. TERMINAL first, when it names a
    --  program this host runs (a name there it cannot run is ignored, not
    --  launched); else the first the host has of its usual ones: on Linux the

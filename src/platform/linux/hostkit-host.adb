@@ -1,3 +1,4 @@
+with Ada.Environment_Variables;
 with Ada.Directories;
 with Interfaces;
 with Interfaces.C;
@@ -227,5 +228,10 @@ package body Hostkit.Host is
       end if;
       return Any;
    end Usable_Processors;
+
+   function Has_Window_Server return Boolean is
+     ((Ada.Environment_Variables.Exists ("DISPLAY") and then Ada.Environment_Variables.Value ("DISPLAY") /= "")
+      or else (Ada.Environment_Variables.Exists ("WAYLAND_DISPLAY")
+               and then Ada.Environment_Variables.Value ("WAYLAND_DISPLAY") /= ""));
 
 end Hostkit.Host;
