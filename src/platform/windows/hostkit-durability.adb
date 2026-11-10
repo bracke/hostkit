@@ -1,4 +1,5 @@
-with Interfaces.C.Strings;
+with Ada.Strings.UTF_Encoding.Conversions;
+with Interfaces.C;
 
 package body Hostkit.Durability is
 
@@ -12,8 +13,12 @@ package body Hostkit.Durability is
    O_Rdwr   : constant C_Int := 16#0002#;
    O_Binary : constant C_Int := 16#8000#;
 
-   function open (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
-     with Import, Convention => C_Variadic_1, External_Name => "_open";
+   --  The wide open: the narrow _open reads the path in the ANSI code page,
+   --  so any path with a byte past ASCII could not be opened and was never
+   --  synced -- a write to it was never published, a move across drives of
+   --  a tree holding such a name always failed.
+   function open (Path : System.Address; Flags : C_Int) return C_Int
+     with Import, Convention => C_Variadic_1, External_Name => "_wopen";
 
    function commit (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_commit";
@@ -22,8 +27,10 @@ package body Hostkit.Durability is
      with Import, Convention => C, External_Name => "_close";
 
    function Sync_File (Path : String) return Outcome is
-      Name   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      FD     : C_Int := open (Name, O_Rdwr + O_Binary);
+      --  UTF-16, whole: Wide_Strings.Decode refuses code points past U+FFFF.
+      Name   : aliased constant Wide_String :=
+        Ada.Strings.UTF_Encoding.Conversions.Convert (Path) & Wide_Character'Val (0);
+      FD     : C_Int := open (Name'Address, O_Rdwr + O_Binary);
       Result : Outcome := Failed;
    begin
       --  A file just written may be held a moment by someone else (a virus
@@ -31,9 +38,8 @@ package body Hostkit.Durability is
       for Attempt in 1 .. 10 loop
          exit when FD >= 0;
          delay Duration (Attempt) * 0.02;
-         FD := open (Name, O_Rdwr + O_Binary);
+         FD := open (Name'Address, O_Rdwr + O_Binary);
       end loop;
-      Interfaces.C.Strings.Free (Name);
       if FD < 0 then
          return Failed;
       end if;
