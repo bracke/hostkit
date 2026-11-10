@@ -383,6 +383,23 @@ package body Hostkit_Suite is
          raise;
    end Test_Has_Window_Server;
 
+   procedure Test_Removable_Media_Listed_Once
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is
+      pragma Unreferenced (T);
+   begin
+      --  Removable media are Mounts.Volume_Places' (/run/media, per user):
+      --  User_Places naming /run/media/<user> too made callers scan it twice.
+      for Place of Hostkit.Fs.User_Places loop
+         declare
+            Path : constant String := To_String (Place.Path);
+         begin
+            Assert (Path'Length < 10 or else Path (Path'First .. Path'First + 9) /= "/run/media",
+                    "user places leave removable media to the volume places");
+         end;
+      end loop;
+   end Test_Removable_Media_Listed_Once;
+
    procedure Test_Read_Only_File_Syncs_Promptly
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is
@@ -401,14 +418,39 @@ package body Hostkit_Suite is
       Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
       Ada.Text_IO.Put_Line (File, "kept");
       Ada.Text_IO.Close (File);
-      Assert (Hostkit.Metadata.Set_Permissions (Path, 8#444#), "the file is made read-only");
+      --  As a copy is made read-only: the attribute on Windows (a mode there
+      --  is an ACL, which leaves the file unsyncable), the mode elsewhere.
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         declare
+            use type GNAT.OS_Lib.String_Access;
+            Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
+            Done   : Boolean := False;
+         begin
+            if Attrib /= null then
+               GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("+R " & Path).all, Done);
+            end if;
+            Assert (Done, "the file is made read-only");
+         end;
+      else
+         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#444#), "the file is made read-only");
+      end if;
       --  On Windows the sync used to retry the refused write-open for 1.1 s
       --  before it looked at the read-only attribute: per file, in a move.
       Started := Ada.Calendar.Clock;
       Result := Hostkit.Durability.Sync_File (Path);
       Assert (Ada.Calendar.Clock - Started < 0.5, "a read-only file syncs without waiting out retries");
       Assert (Result /= Hostkit.Durability.Failed, "and it syncs");
-      Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "it can be made writable again");
+      if Hostkit.Host.Current = Hostkit.Host.Windows then
+         declare
+            Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
+            Done   : Boolean;
+         begin
+            GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-R " & Path).all, Done);
+            Assert (Done, "it can be made writable again");
+         end;
+      else
+         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "it can be made writable again");
+      end if;
       Ada.Directories.Delete_File (Path);
    end Test_Read_Only_File_Syncs_Promptly;
 
@@ -3474,6 +3516,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Has_Window_Server'Access,
          "host : a window server is an X or Wayland display on Linux, always there elsewhere");
+      Register_Routine
+        (T, Test_Removable_Media_Listed_Once'Access,
+         "fs : removable media are listed by the volume places alone");
       Register_Routine
         (T, Test_Read_Only_File_Syncs_Promptly'Access,
          "durability : a read-only file syncs at once, without waiting out write retries");

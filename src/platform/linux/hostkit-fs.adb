@@ -1446,14 +1446,12 @@ package body Hostkit.Fs is
       Runtime : constant String :=
         (if Ada.Environment_Variables.Exists ("XDG_RUNTIME_DIR")
          then Ada.Environment_Variables.Value ("XDG_RUNTIME_DIR") else "");
-      User    : constant String :=
-        (if Ada.Environment_Variables.Exists ("USER") then Ada.Environment_Variables.Value ("USER") else "");
       function Place (Path : String; Kind : User_Place_Kind) return User_Place_List is
         (if Path = "" then [] else [1 => (Path => To_Unbounded_String (Path), Kind => Kind)]);
    begin
+      --  Removable media (/run/media/<user>) are Mounts.Volume_Places'.
       return Place (Home, Home_Place)
-        & Place ((if Runtime = "" then "" else Runtime & "/gvfs"), Desktop_Mounts_Parent)
-        & Place ((if User = "" then "" else "/run/media/" & User), Removable_Media_Parent);
+        & Place ((if Runtime = "" then "" else Runtime & "/gvfs"), Desktop_Mounts_Parent);
    end User_Places;
 
    function Application_Data_Directories return Path_List is

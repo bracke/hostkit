@@ -30,6 +30,14 @@ package body Hostkit.Durability is
    function Set_File_Attributes_W (Path : System.Address; Attributes : C_DWord) return C_Int
      with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
 
+   function Get_Last_Error return C_DWord
+     with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+   --  What a failed open is worth waiting out: someone else holding the file
+   --  without sharing writes (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION).
+   --  Anything else -- access denied, read-only, not found -- stays so.
+   function Transient (Error : C_DWord) return Boolean is (Error in 32 | 33);
+
    function commit (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_commit";
 
@@ -41,20 +49,17 @@ package body Hostkit.Durability is
       Name   : aliased constant Wide_String :=
         Hostkit.Windows_Paths.Native (Path);
       FD     : C_Int := open (Name'Address, O_Rdwr + O_Binary);
+      Error  : C_DWord := (if FD < 0 then Get_Last_Error else 0);
       Result : Outcome := Failed;
    begin
       --  A file just written may be held a moment by someone else (a virus
-      --  scanner) that did not share writing; try again briefly -- but not a
-      --  read-only one, which no retry opens (that is handled below).
+      --  scanner) that did not share writing; try again briefly -- but only
+      --  then: a read-only file (handled below) or a denied one no retry opens.
       for Attempt in 1 .. 10 loop
-         exit when FD >= 0;
-         declare
-            Attributes : constant C_DWord := Get_File_Attributes_W (Name'Address);
-         begin
-            exit when Attributes /= Invalid_Attributes and then (Attributes and Read_Only) /= 0;
-         end;
+         exit when FD >= 0 or else not Transient (Error);
          delay Duration (Attempt) * 0.02;
          FD := open (Name'Address, O_Rdwr + O_Binary);
+         Error := (if FD < 0 then Get_Last_Error else 0);
       end loop;
       --  A read-only file cannot be opened for writing, and only a writer
       --  may flush it: drop the attribute for the flush and put it back.

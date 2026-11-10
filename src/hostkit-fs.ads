@@ -544,8 +544,6 @@ package Hostkit.Fs is
       --  The Windows home share (HOMESHARE).
       Cloud_Place,
       --  A synchronised cloud folder (OneDrive).
-      Removable_Media_Parent,
-      --  The folder removable media are mounted under (/run/media/<user>).
       Desktop_Mounts_Parent);
       --  The folder the desktop's own mounts appear under (gvfs).
 
