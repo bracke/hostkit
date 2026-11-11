@@ -428,17 +428,6 @@ package body Hostkit.Metadata is
       Bytes : C_DWord) return C_Int
      with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandleEx";
 
-   function Get_Volume_Information_By_Handle
-     (File             : System.Address;
-      Volume_Name      : System.Address;
-      Volume_Name_Size : C_DWord;
-      Serial           : System.Address;
-      Maximum_Name     : System.Address;
-      Flags            : System.Address;
-      File_System_Name : System.Address;
-      File_System_Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
-
    function Close_Handle (Item : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "CloseHandle";
 
@@ -1686,19 +1675,6 @@ package body Hostkit.Metadata is
       return Nonzero and Not_All_Ones;
    end Valid_Identifier;
 
-   function Is_NTFS (File : System.Address) return Boolean is
-      Name : aliased Wide_String (1 .. 16) := [others => Wide_Character'Val (0)];
-   begin
-      return Get_Volume_Information_By_Handle
-        (File, System.Null_Address, 0, System.Null_Address, System.Null_Address,
-         System.Null_Address, Name'Address, C_DWord (Name'Length)) /= 0
-        and then Name (1) in 'N' | 'n'
-        and then Name (2) in 'T' | 't'
-        and then Name (3) in 'F' | 'f'
-        and then Name (4) in 'S' | 's'
-        and then Name (5) = Wide_Character'Val (0);
-   end Is_NTFS;
-
    function Entry_Identity_Of (Path : String) return Entry_Identity is
       File   : System.Address := Open_Entry (Path, 0);
       Legacy : aliased By_Handle_File_Information;
@@ -1727,7 +1703,11 @@ package body Hostkit.Metadata is
       end if;
       Number := Interfaces.Shift_Left (Identity_Field (Legacy.File_Index_High), 32)
         or Identity_Field (Legacy.File_Index_Low);
-      if not Is_NTFS (File) or else Number = 0 or else Number = Identity_Field'Last then
+      --  Off NTFS (FAT, exFAT) the index names the directory entry: stable
+      --  while the entry stays put, as Linux's vfat inode numbers are, and
+      --  enough for the checks a copy makes. Refusing it failed every copy
+      --  onto a USB stick.
+      if Number = 0 or else Number = Identity_Field'Last then
          Close_Entry (File);
          return (others => <>);
       end if;
@@ -1785,10 +1765,8 @@ package body Hostkit.Metadata is
          Number := Interfaces.Shift_Left
            (Identity_Field (Info.File_Index_High), 32)
            or Identity_Field (Info.File_Index_Low);
-         if not Is_NTFS (File)
-           or else Number = 0
-           or else Number = Identity_Field'Last
-         then
+         --  As Entry_Identity_Of: off NTFS the index still names the entry.
+         if Number = 0 or else Number = Identity_Field'Last then
             return (others => <>);
          end if;
          return
