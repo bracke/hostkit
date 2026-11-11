@@ -65,6 +65,12 @@ package Hostkit.Linux_Abi is
    O_Cloexec  : constant C_Int := 16#8_0000#;
    O_Noatime  : constant C_Int := 16#4_0000#;
    O_Path     : constant C_Int := 16#20_0000#;
+   --  The access mode and the creation flags, the same on every machine
+   --  Uses_Alternate_Open_Flags tells apart (alpha, mips, parisc and sparc
+   --  move them, as they move O_NONBLOCK, and are not covered here).
+   O_Wronly   : constant C_Int := 16#1#;
+   O_Creat    : constant C_Int := 16#40#;
+   O_Excl     : constant C_Int := 16#80#;
 
    --  asm-generic/fcntl.h is right for x86, riscv and most targets, but arm,
    --  arm64, powerpc and m68k define their own O_DIRECTORY and O_NOFOLLOW (and

@@ -1,5 +1,9 @@
+with Ada.Calendar;
+with Ada.Directories;
 with Ada.Streams;
+with Ada.Streams.Stream_IO;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with Interfaces;
 
 --  Facts about a path that the host answers differently -- and that GNAT gets wrong on
@@ -35,6 +39,79 @@ package Hostkit.Fs is
    --  @return Its kind, or Missing_Entry when Path names nothing, is empty,
    --    or cannot be asked about.
    function Kind_Of (Path : String) return Entry_Kind;
+
+   --  The size of the ordinary file at Path, as Ada.Directories.Size says it,
+   --  without its limits: GNAT's Windows runtime cannot ask about a path past
+   --  260 characters, where this asks with the \\?\ form.
+   --
+   --  POSIX asks statx (Linux) or stat and lstat (macOS). Windows asks
+   --  GetFileAttributesExW, and for a symbolic link or junction to be
+   --  followed opens what it points at (CreateFileW without
+   --  FILE_FLAG_OPEN_REPARSE_POINT) and asks GetFileInformationByHandle.
+   --
+   --  @param Path The file.
+   --  @param Follow_Links True to answer for what a link points at, as
+   --    Ada.Directories does on POSIX; False to answer for the link itself
+   --    (on POSIX its size is the length of the target text it holds; on
+   --    Windows it is what the host records for the reparse point, 0).
+   --  @return Its size in bytes.
+   --  @exception Ada.Directories.Name_Error Nothing is there (a dangling link
+   --    followed included), or what is there is no ordinary file: a
+   --    directory or a special file, as Ada.Directories.Size refuses them.
+   --  @exception Ada.Directories.Use_Error The host will not say (a folder on
+   --    the way may not be searched, the volume refused).
+   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size;
+
+   --  When the file or directory at Path was last written, as
+   --  Ada.Directories.Modification_Time says it, without its limits -- asked
+   --  as Size_Of asks.
+   --
+   --  The host's own instant, read in UTC: POSIX st_mtime with its
+   --  nanoseconds, Windows' FILETIME (100 ns since 1601) -- each counted from
+   --  its epoch made with Ada.Calendar.Formatting.Time_Of (..., Time_Zone =>
+   --  0), so the answer does not move with the zone the program runs in.
+   --
+   --  @param Path The file or directory.
+   --  @param Follow_Links True to answer for what a link points at, as
+   --    Ada.Directories does on POSIX; False to answer for the link itself.
+   --  @return Its modification time.
+   --  @exception Ada.Directories.Name_Error Nothing is there (a dangling link
+   --    followed included), or what is there is a special file, as
+   --    Ada.Directories.Modification_Time refuses one.
+   --  @exception Ada.Directories.Use_Error The host will not say, or its time
+   --    lies outside Ada.Calendar.Time.
+   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time;
+
+   --  Whether the owner may read the entry at Path, a link followed: what
+   --  GNAT.OS_Lib.Is_Owner_Readable_File answers, without its limits.
+   --
+   --  POSIX reads the owner's read bit (st_mode and S_IRUSR) of a stat, as
+   --  GNAT does -- not access(2), so the answer is the file's, not this
+   --  process's. Windows has no such bit, and asks as GNAT does: the file's
+   --  security descriptor (GetSecurityInfo on a handle CreateFileW opened
+   --  through the \\?\ form) checked against this process's token with
+   --  AccessCheck for FILE_READ_DATA; on a network volume, where a local
+   --  token says nothing about the server's accounts, whether the entry is
+   --  there at all. GNAT's own answers False past 260 characters.
+   --
+   --  @param Path The file or directory.
+   --  @return True when it may be read; False when not, or nothing is there,
+   --    or the host will not say.
+   function Is_Owner_Readable (Path : String) return Boolean;
+
+   --  Whether the owner may write the entry at Path, a link followed: what
+   --  GNAT.OS_Lib.Is_Owner_Writable_File answers, without its limits.
+   --
+   --  POSIX reads the owner's write bit (st_mode and S_IWUSR), as GNAT does.
+   --  Windows asks as Is_Owner_Readable does, for FILE_WRITE_DATA and
+   --  FILE_APPEND_DATA, and, as GNAT does, also answers False for an entry
+   --  carrying FILE_ATTRIBUTE_READONLY (a folder too, though Windows ignores
+   --  the attribute there); on a network volume the attribute alone answers.
+   --
+   --  @param Path The file or directory.
+   --  @return True when it may be written; False when not, or nothing is
+   --    there, or the host will not say.
+   function Is_Owner_Writable (Path : String) return Boolean;
 
    --  Create a symbolic link at Link_Path pointing at Target.
    --
@@ -279,6 +356,120 @@ package Hostkit.Fs is
    --  @return True when the directory is gone.
    function Delete_Empty_Directory (Path : String) return Boolean;
 
+   --  Remove the file at Path -- or, when Path is a link, the link itself and
+   --  never what it points at.
+   --
+   --  GNAT's Ada.Directories.Delete_File and GNAT.OS_Lib.Delete_File refuse a
+   --  path past 260 characters on Windows before Windows is asked, so a file
+   --  deep in a tree could be listed but not removed. POSIX unlinks (unlink
+   --  never follows a link, and refuses a directory). Windows asks
+   --  DeleteFileW through the \\?\ form, a read-only file having its
+   --  attribute cleared first as POSIX needs no write permission on the file
+   --  to remove it; a link to a directory is removed as Delete_Link removes
+   --  one, with RemoveDirectoryW.
+   --
+   --  @param Path The file or link.
+   --  @return True when it is gone. False for a directory, for nothing there,
+   --    and where the host refused.
+   function Delete_File (Path : String) return Boolean;
+
+   --  Make one directory at Path, with the host's default permissions -- the
+   --  creation mask applied to 0777 on POSIX (mkdir), the parent's inherited
+   --  ACL on Windows (CreateDirectoryW through the \\?\ form, where GNAT's
+   --  own Create_Directory refuses past 248 characters).
+   --
+   --  Never replaces anything: an existing entry of any kind, a directory
+   --  included, is a refusal, as is a missing parent.
+   --
+   --  @param Path The directory to make.
+   --  @return True when this call made it.
+   function Create_Directory (Path : String) return Boolean;
+
+   --  Make Path and each of its missing ancestors, as Create_Directory makes
+   --  one. Ancestors are read from the text (Path_Text.Parent), so a relative
+   --  Path or one with "." or ".." components is taken as the host takes it;
+   --  Path_Text.Absolute first is the way to have it read otherwise.
+   --
+   --  @param Path The directory wanted.
+   --  @return True when Path is a directory afterwards, already there or made
+   --    (also by someone else meanwhile). False when a part of it is something
+   --    else, or a part could not be made.
+   function Create_Path (Path : String) return Boolean;
+
+   --  Open the existing file at Path as Ada.Streams.Stream_IO.Open opens it,
+   --  past GNAT's path limit.
+   --
+   --  GNAT's Stream_IO and Text_IO refuse a name past 260 characters on
+   --  Windows with Name_Error "file name too long" (System.File_IO.Open)
+   --  before Windows is asked. Here the host opens the file -- fopen on POSIX,
+   --  _wfopen of the \\?\ form on Windows, both in binary mode -- and the
+   --  stream is handed to Ada.Streams.Stream_IO.C_Streams.Open, which only
+   --  records the name it is given: it neither checks its length nor opens it
+   --  again. It does copy the name into a buffer of GNAT's path limit
+   --  (Interfaces.C_Streams.max_path_len), so a longer path is recorded as ""
+   --  and Ada.Streams.Stream_IO.Name answers "" for it.
+   --
+   --  The modes are GNAT's own: In_File reads, Out_File writes from the start
+   --  without truncating, Append_File writes after the end. The file is not
+   --  shared (Form "shared=no").
+   --
+   --  @param File A closed file; Status_Error when it is open.
+   --  @param Mode How to open it.
+   --  @param Path The file.
+   --  @exception Ada.IO_Exceptions.Name_Error Nothing is there.
+   --  @exception Ada.IO_Exceptions.Use_Error The host refused the open.
+   procedure Open_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode;
+      Path : String);
+
+   --  Create the file at Path, or empty it when it is there, as
+   --  Ada.Streams.Stream_IO.Create does -- past GNAT's path limit, as
+   --  Open_Stream opens one.
+   --
+   --  @param File A closed file; Status_Error when it is open.
+   --  @param Mode How to use it: Out_File writes, the others read as well.
+   --  @param Path The file.
+   --  @exception Ada.IO_Exceptions.Name_Error Its folder is not there.
+   --  @exception Ada.IO_Exceptions.Use_Error The host refused the create.
+   procedure Create_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode := Ada.Streams.Stream_IO.Out_File;
+      Path : String);
+
+   --  Open the existing file at Path as Ada.Text_IO.Open opens it, past
+   --  GNAT's path limit, as Open_Stream opens one: fopen, or _wfopen in text
+   --  mode on Windows, so line ends are translated there as GNAT translates
+   --  them, and the stream handed to Ada.Text_IO.C_Streams.Open.
+   --
+   --  Out_File empties the file, as Ada.Text_IO.Open does. The file's wide
+   --  character encoding is the program's default (no WCEM form is read),
+   --  and Ada.Text_IO.Name answers "" for a path past GNAT's limit.
+   --
+   --  @param File A closed file; Status_Error when it is open.
+   --  @param Mode How to open it.
+   --  @param Path The file.
+   --  @exception Ada.IO_Exceptions.Name_Error Nothing is there.
+   --  @exception Ada.IO_Exceptions.Use_Error The host refused the open.
+   procedure Open_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode;
+      Path : String);
+
+   --  Create the file at Path, or empty it when it is there, as
+   --  Ada.Text_IO.Create does -- past GNAT's path limit, as Open_Text opens
+   --  one.
+   --
+   --  @param File A closed file; Status_Error when it is open.
+   --  @param Mode How to use it: Out_File writes, the others read as well.
+   --  @param Path The file.
+   --  @exception Ada.IO_Exceptions.Name_Error Its folder is not there.
+   --  @exception Ada.IO_Exceptions.Use_Error The host refused the create.
+   procedure Create_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode := Ada.Text_IO.Out_File;
+      Path : String);
+
    type Delete_Tree_Outcome is
      (Tree_Deleted,
       Tree_Delete_Failed,
@@ -513,6 +704,15 @@ package Hostkit.Fs is
    --  @return The rebased path.
    function Rebase (Path : String; From : String; To : String) return String is
      (if Is_Same_Or_Inside (Path, From) then To & Path (Path'First + From'Length .. Path'Last) else Path);
+
+   --  The process's current directory, however long: getcwd on POSIX with a
+   --  buffer grown until it fits, GetCurrentDirectoryW on Windows with the
+   --  length it asks for. Ada.Directories.Current_Directory goes through
+   --  GNAT's path-limited buffer.
+   --
+   --  @return The directory, or "" where the host will not say (it was
+   --    removed, or a part of it may no longer be read).
+   function Current_Directory return String;
 
    --  This user's home directory.
    --

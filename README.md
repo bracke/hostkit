@@ -45,7 +45,7 @@ interface. The question to ask of a new subprogram is:
 | Package | Answers |
 |---|---|
 | `Hostkit.Host` | Which host is this program running on? (from the body the build chose, which no environment can spoof) |
-| `Hostkit.Fs` | Facts about a path the host answers differently — and that GNAT gets wrong on Windows; also where the host keeps the device that reads as nothing |
+| `Hostkit.Fs` | Facts about a path the host answers differently — and that GNAT gets wrong on Windows; making directories, deleting files, opening streams and reading a size, a modification time (in UTC) and the owner's access past GNAT's Windows path limit; also where the host keeps the device that reads as nothing |
 | `Hostkit.Metadata` | No-follow entry identities and revisions, capacity, times, permissions, and ownership, with unavailable facts reported rather than invented |
 | `Hostkit.Metadata_Copy` | Capture and reproduce no-follow timestamps, link counts, ownership, modes, ACLs, and extended attributes |
 | `Hostkit.Private_Paths` | Owner-only directory creation and hardening of directories and already-open files, including inherited ACL removal |
@@ -60,7 +60,7 @@ interface. The question to ask of a new subprogram is:
 | `Hostkit.Terminal_Control` | Terminal modes, window size, the foreground process group, and whether an interrupt reaches a program that is busy |
 | `Hostkit.Locks` | Advisory file locks |
 | `Hostkit.Lease_Files` | No-follow, identity-bound lease files combining process-held locks with durable positioned I/O |
-| `Hostkit.Regular_Files` | Opening a file only when the opened descriptor is a regular file (optionally refusing a final link), and writing holes into a sparse copy |
+| `Hostkit.Regular_Files` | Opening a file only when the opened descriptor is a regular file (optionally refusing a final link), creating one exclusively past GNAT's Windows path limit, and writing holes into a sparse copy |
 | `Hostkit.Directory_Write_Access` | Lending a read-only directory its owner write bit for a rename, changed and restored through one held descriptor |
 
 Three of those answers exist because a shell asked and the honest answer was

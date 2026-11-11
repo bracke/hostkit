@@ -74,6 +74,9 @@ package body Hostkit.Regular_Files is
       Returned   : access C_DWord;
       Overlapped : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "DeviceIoControl";
+   --  The wide open, with the permission argument it takes as a variadic one.
+   function Wide_Open (Name : System.Address; Flags : C_Int; Permission : C_Int) return C_Int
+     with Import, Convention => C_Variadic_2, External_Name => "_wopen";
    function Seek (Descriptor : C_Int; Offset : C_S64; Origin : C_Int) return C_S64
      with Import, Convention => C, External_Name => "_lseeki64";
    function Truncate (Descriptor : C_Int; Length : C_S64) return C_Int
@@ -133,6 +136,37 @@ package body Hostkit.Regular_Files is
          end if;
          return GNAT.OS_Lib.Invalid_FD;
    end Open_Read;
+
+   --  _O_WRONLY, _O_CREAT, _O_EXCL and _O_NOINHERIT, binary; the
+   --  permission is _S_IREAD, with _S_IWRITE when Mode lets the owner write.
+   function Create_New
+     (Path : String;
+      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor
+   is
+      Write_Only : constant C_Int := 16#0001#;
+      No_Inherit : constant C_Int := 16#0080#;
+      Create     : constant C_Int := 16#0100#;
+      Exclusive  : constant C_Int := 16#0400#;
+      Readable   : constant C_Int := 16#0100#;
+      Writable   : constant C_Int := 16#0080#;
+      Owner_Write : constant Natural := 8#200#;
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return GNAT.OS_Lib.Invalid_FD;
+      end if;
+      declare
+         Wide_Path  : aliased constant Wide_String := Wide (Path);
+         Descriptor : constant C_Int := Wide_Open
+           (Wide_Path'Address,
+            Write_Only + Create + Exclusive + No_Inherit + Open_Binary,
+            Readable + (if (Mode / Owner_Write) mod 2 = 1 then Writable else 0));
+      begin
+         return (if Descriptor < 0 then GNAT.OS_Lib.Invalid_FD else GNAT.OS_Lib.File_Descriptor (Descriptor));
+      end;
+   exception
+      when others =>
+         return GNAT.OS_Lib.Invalid_FD;
+   end Create_New;
 
    function Skip_Zeros
      (Descriptor : GNAT.OS_Lib.File_Descriptor;

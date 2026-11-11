@@ -256,6 +256,37 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Size_Of, Modification_Time_Of and the owner's access answer as
+   --  Ada.Directories and GNAT.OS_Lib do, for files, folders and links.
+   procedure Test_Size_And_Modification_Time_Agree_With_Ada_Directories
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The same past Windows' 260-character limit, reached by renaming short
+   --  folders to long names, against what GNAT said while they were short.
+   procedure Test_Size_And_Modification_Time_Past_The_Path_Limit
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A modification time set to a known UTC instant reads back as that
+   --  instant whatever the local zone.
+   procedure Test_Modification_Time_Is_Read_In_UTC
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  Making directories, creating, streaming, listing and deleting files
+   --  in a folder past Windows' 260-character limit, reached by renaming
+   --  short names to long ones; on POSIX it simply works.
+   procedure Test_File_Operations_Past_The_Path_Limit
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A path made absolute and its dots resolved from the text alone, for
+   --  POSIX, drive, share and long forms.
+   procedure Test_Path_Text_Absolute
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Has_Window_Server
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -641,6 +672,21 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Kind_Of_A_Long_Path'Access,
          "fs : an entry's kind is read past the Windows path limit");
+      Register_Routine
+        (T, Test_Size_And_Modification_Time_Agree_With_Ada_Directories'Access,
+         "fs : size, modification time and owner access agree with Ada.Directories and GNAT.OS_Lib");
+      Register_Routine
+        (T, Test_Size_And_Modification_Time_Past_The_Path_Limit'Access,
+         "fs : size, modification time and owner access are read past the Windows path limit");
+      Register_Routine
+        (T, Test_Modification_Time_Is_Read_In_UTC'Access,
+         "fs : a modification time is read in UTC whatever the local zone");
+      Register_Routine
+        (T, Test_File_Operations_Past_The_Path_Limit'Access,
+         "fs : directories, files, streams and listings work past the Windows path limit");
+      Register_Routine
+        (T, Test_Path_Text_Absolute'Access,
+         "fs : path text makes a path absolute and resolves its dots on any host");
       Register_Routine
         (T, Test_Has_Window_Server'Access,
          "host : a window server is an X or Wayland display on Linux, always there elsewhere");

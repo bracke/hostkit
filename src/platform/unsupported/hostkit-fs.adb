@@ -1,7 +1,10 @@
-with Ada.Calendar;
-with Ada.Directories;
+with Ada.IO_Exceptions;
 with Ada.Environment_Variables;
 with Ada.Strings.Fixed;
+
+with GNAT.OS_Lib;
+
+with Interfaces.C_Streams;
 
 package body Hostkit.Fs is
 
@@ -29,6 +32,36 @@ package body Hostkit.Fs is
       when others =>
          return Missing_Entry;
    end Kind_Of;
+
+   --  GNAT's own, with its limits; no link is known here (Is_Link), so
+   --  Follow_Links changes nothing.
+   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
+      pragma Unreferenced (Follow_Links);
+   begin
+      return Ada.Directories.Size (Path);
+   end Size_Of;
+
+   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time is
+      pragma Unreferenced (Follow_Links);
+   begin
+      return Ada.Directories.Modification_Time (Path);
+   end Modification_Time_Of;
+
+   function Is_Owner_Readable (Path : String) return Boolean is
+   begin
+      return GNAT.OS_Lib.Is_Owner_Readable_File (Path);
+   exception
+      when others =>
+         return False;
+   end Is_Owner_Readable;
+
+   function Is_Owner_Writable (Path : String) return Boolean is
+   begin
+      return GNAT.OS_Lib.Is_Owner_Writable_File (Path);
+   exception
+      when others =>
+         return False;
+   end Is_Owner_Writable;
 
    function Is_Link (Path : String) return Boolean is
       pragma Unreferenced (Path);
@@ -401,5 +434,83 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Delete_Empty_Directory;
+
+   --  No host call to make: GNAT's own, with its path limit.
+   function Create_Directory (Path : String) return Boolean is
+   begin
+      if Path = "" or else Kind_Of (Path) /= Missing_Entry then
+         return False;
+      end if;
+      Ada.Directories.Create_Directory (Path);
+      return True;
+   exception
+      when others =>
+         return False;
+   end Create_Directory;
+
+   function Create_Path (Path : String) return Boolean is separate;
+
+   --  GNAT's own, which removes an ordinary or special file and refuses a
+   --  directory.
+   function Delete_File (Path : String) return Boolean is
+   begin
+      if Kind_Of (Path) not in Ordinary_File_Entry | Special_File_Entry then
+         return False;
+      end if;
+      Ada.Directories.Delete_File (Path);
+      return True;
+   exception
+      when others =>
+         return False;
+   end Delete_File;
+
+   function Current_Directory return String is
+   begin
+      return Ada.Directories.Current_Directory;
+   exception
+      when others =>
+         return "";
+   end Current_Directory;
+
+   --  GNAT's own fopen, with its path limit: nothing here knows better.
+   function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is
+      pragma Unreferenced (Text);
+      use type Interfaces.C_Streams.FILEs;
+      C_Path : aliased constant String := Path & ASCII.NUL;
+      C_Mode : aliased constant String := Mode & ASCII.NUL;
+      Stream : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
+      Error  : Integer := 2;
+   begin
+      if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
+         Stream := Interfaces.C_Streams.fopen (C_Path'Address, C_Mode'Address);
+         Error := GNAT.OS_Lib.Errno;
+      end if;
+      if Stream /= Interfaces.C_Streams.NULL_Stream then
+         return Stream;
+      elsif Error = 2 then
+         raise Ada.IO_Exceptions.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+      end if;
+      raise Ada.IO_Exceptions.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+   end C_Stream_For;
+
+   procedure Open_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode := Ada.Streams.Stream_IO.Out_File;
+      Path : String) is separate;
+
+   procedure Open_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode := Ada.Text_IO.Out_File;
+      Path : String) is separate;
 
 end Hostkit.Fs;

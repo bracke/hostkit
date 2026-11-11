@@ -77,7 +77,9 @@ package Hostkit.Metadata is
 
    --  Metadata used to tell whether an entry changed without following it.
    --  Fields that a host does not have are zero; Available says whether the
-   --  complete host-specific revision was obtained.
+   --  complete host-specific revision was obtained. The fields are compared,
+   --  not read as times: on Windows Modified_Seconds holds the raw FILETIME.
+   --  A modification time to read is Hostkit.Fs.Modification_Time_Of.
    type Entry_Revision is record
       Available            : Boolean := False;
       Modified_Seconds     : Identity_Field := 0;

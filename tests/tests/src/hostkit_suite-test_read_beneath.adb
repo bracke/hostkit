@@ -1,3 +1,4 @@
+with Ada.IO_Exceptions;
 separate (Hostkit_Suite)
 procedure Test_Read_Beneath
   (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -82,17 +83,32 @@ begin
 
          task Swapper;
          task body Swapper is
-            Ignored : Boolean;
+            --  A read holding the folder refuses a step for a moment (the
+            --  point of the walk): the step is tried again, so a round is
+            --  always finished and the tree is whole when the task ends.
+            procedure Rename (From, To : String) is
+            begin
+               loop
+                  begin
+                     Ada.Directories.Rename (From, To);
+                     return;
+                  exception
+                     when Ada.IO_Exceptions.Use_Error =>
+                        delay 0.0;
+                  end;
+               end loop;
+            end Rename;
          begin
             for Round in 1 .. Rounds loop
-               Ada.Directories.Rename (Sub, Held);
-               Ignored := Hostkit.Fs.Create_Link (Outside, Sub);
-               Ignored := Hostkit.Fs.Delete_Link (Sub);
-               Ada.Directories.Rename (Held, Sub);
+               Rename (Sub, Held);
+               while not Hostkit.Fs.Create_Link (Outside, Sub) loop
+                  delay 0.0;
+               end loop;
+               while not Hostkit.Fs.Delete_Link (Sub) loop
+                  delay 0.0;
+               end loop;
+               Rename (Held, Sub);
             end loop;
-         exception
-            when others =>
-               null;
          end Swapper;
       begin
          while not Swapper'Terminated loop

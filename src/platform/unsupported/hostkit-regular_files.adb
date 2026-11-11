@@ -10,6 +10,19 @@ package body Hostkit.Regular_Files is
       return GNAT.OS_Lib.Invalid_FD;
    end Open_Read;
 
+   --  No host call to make: GNAT's own, with its path limit and its mode.
+   function Create_New
+     (Path : String;
+      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor
+   is
+      pragma Unreferenced (Mode);
+   begin
+      return GNAT.OS_Lib.Create_New_File (Path, GNAT.OS_Lib.Binary);
+   exception
+      when others =>
+         return GNAT.OS_Lib.Invalid_FD;
+   end Create_New;
+
    function Skip_Zeros
      (Descriptor : GNAT.OS_Lib.File_Descriptor;
       Count      : Integer) return Boolean

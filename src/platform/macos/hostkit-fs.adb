@@ -1,14 +1,15 @@
-with Ada.Calendar;
+with Ada.IO_Exceptions;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.Strings.Fixed;
 with Ada.Environment_Variables;
 with System;
-with Ada.Directories;
 
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
+with Interfaces.C_Streams;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Fs.Instants;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -143,6 +144,83 @@ package body Hostkit.Fs is
       when others =>
          return Missing_Entry;
    end Kind_Of;
+
+   --  stat and lstat, by the names this architecture links them under
+   --  (Hostkit.Darwin_Symbols): neither is variadic, so arm64 passes their
+   --  arguments as declared.
+   function Darwin_Stat (Name : Interfaces.C.Strings.chars_ptr; Buffer : access Stat_Record) return C_Int
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Stat;
+   function Darwin_Lstat (Name : Interfaces.C.Strings.chars_ptr; Buffer : access Stat_Record) return C_Int
+     with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Lstat;
+
+   S_IFREG : constant C_U16 := 8#100000#;
+   S_IFDIR : constant C_U16 := 8#040000#;
+   S_IFLNK : constant C_U16 := 8#120000#;
+
+   --  stat(2), or lstat(2) for a final link not followed, of Path; the
+   --  failures as the spec's Name_Error and Use_Error. ENOENT, ENOTDIR, ELOOP
+   --  and ENAMETOOLONG say nothing is reachable there; anything else (EACCES
+   --  on a folder on the way, EIO) that the host would not say.
+   function Stat_Entry (Path : String; Follow_Links : Boolean) return Stat_Record is
+      E_Noent       : constant := 2;
+      E_Notdir      : constant := 20;
+      E_Loop        : constant := 62;
+      E_Nametoolong : constant := 63;
+      Info          : aliased Stat_Record;
+      C_Path        : Interfaces.C.Strings.chars_ptr;
+      Status        : C_Int;
+      Error         : Integer;
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         raise Ada.Directories.Name_Error with "no entry at """ & Path & """";
+      end if;
+      C_Path := Interfaces.C.Strings.New_String (Path);
+      Status := (if Follow_Links then Darwin_Stat (C_Path, Info'Access) else Darwin_Lstat (C_Path, Info'Access));
+      Error := GNAT.OS_Lib.Errno;
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 then
+         if Error in E_Noent | E_Notdir | E_Nametoolong | E_Loop then
+            raise Ada.Directories.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+         end if;
+         raise Ada.Directories.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+      end if;
+      return Info;
+   end Stat_Entry;
+
+   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
+      Info : constant Stat_Record := Stat_Entry (Path, Follow_Links);
+      Kind : constant C_U16 := Info.Mode and File_Type_Mask;
+   begin
+      if Kind /= S_IFREG and then (Follow_Links or else Kind /= S_IFLNK) then
+         raise Ada.Directories.Name_Error with Path & ": no ordinary file";
+      end if;
+      return Ada.Directories.File_Size (Info.Size);
+   end Size_Of;
+
+   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time is
+      Info : constant Stat_Record := Stat_Entry (Path, Follow_Links);
+      Kind : constant C_U16 := Info.Mode and File_Type_Mask;
+   begin
+      if Kind /= S_IFREG and then Kind /= S_IFDIR and then (Follow_Links or else Kind /= S_IFLNK) then
+         raise Ada.Directories.Name_Error with Path & ": no file or directory";
+      end if;
+      return Hostkit.Fs.Instants.From_Unix
+        (Interfaces.Integer_64 (Info.Modified_Time.Seconds), Interfaces.Integer_64 (Info.Modified_Time.Nanoseconds));
+   end Modification_Time_Of;
+
+   --  The owner's bit of the mode, as GNAT's __gnat_stat_to_attr reads it
+   --  (S_IRUSR, S_IWUSR of a stat that follows a link).
+   function Owner_Bit (Path : String; Bit : C_U16) return Boolean is
+   begin
+      return (Stat_Entry (Path, True).Mode and Bit) /= 0;
+   exception
+      when Ada.Directories.Name_Error | Ada.Directories.Use_Error =>
+         return False;
+   end Owner_Bit;
+
+   function Is_Owner_Readable (Path : String) return Boolean is (Owner_Bit (Path, 8#400#));
+
+   function Is_Owner_Writable (Path : String) return Boolean is (Owner_Bit (Path, 8#200#));
 
    function Is_Link (Path : String) return Boolean is
    begin
@@ -1669,5 +1747,116 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Delete_Empty_Directory;
+
+   --  mkdir: the creation mask is taken from 0777, as for any new directory,
+   --  and an entry already there -- a link to a directory included -- is
+   --  refused.
+   function Create_Directory (Path : String) return Boolean is
+      function C_Mkdir (Path : Interfaces.C.Strings.chars_ptr; Mode : C_U16) return C_Int
+        with Import => True, Convention => C, External_Name => "mkdir";
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return False;
+      end if;
+      declare
+         C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+         Status : constant C_Int := C_Mkdir (C_Path, 8#777#);
+      begin
+         Interfaces.C.Strings.Free (C_Path);
+         return Status = 0;
+      end;
+   exception
+      when others =>
+         return False;
+   end Create_Directory;
+
+   function Create_Path (Path : String) return Boolean is separate;
+
+   --  unlink: the entry itself, a link and never what it points at; a
+   --  directory is refused.
+   function Delete_File (Path : String) return Boolean is
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return False;
+      end if;
+      declare
+         C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+         Status : constant C_Int := C_Unlink (C_Path);
+      begin
+         Interfaces.C.Strings.Free (C_Path);
+         return Status = 0;
+      end;
+   exception
+      when others =>
+         return False;
+   end Delete_File;
+
+   --  getcwd with no buffer allocates one as long as the answer needs.
+   function Current_Directory return String is
+      use type Interfaces.C.Strings.chars_ptr;
+      function C_Getcwd (Buffer : System.Address; Size : Interfaces.C.size_t) return Interfaces.C.Strings.chars_ptr
+        with Import => True, Convention => C, External_Name => "getcwd";
+      procedure C_Free (Item : Interfaces.C.Strings.chars_ptr)
+        with Import => True, Convention => C, External_Name => "free";
+      Buffer : constant Interfaces.C.Strings.chars_ptr := C_Getcwd (System.Null_Address, 0);
+   begin
+      if Buffer = Interfaces.C.Strings.Null_Ptr then
+         return "";
+      end if;
+      declare
+         Result : constant String := Interfaces.C.Strings.Value (Buffer);
+      begin
+         C_Free (Buffer);
+         return Result;
+      end;
+   end Current_Directory;
+
+   --  fopen, which takes Path as it is: no limit but the host's own. POSIX
+   --  translates nothing, so Text changes nothing here.
+   function C_Fopen (Name : System.Address; Mode : System.Address) return Interfaces.C_Streams.FILEs
+     with Import => True, Convention => C, External_Name => "fopen";
+
+   --  The C stream for Path opened in fopen's Mode, for the stream and text
+   --  subunits: Name_Error when nothing is there, Use_Error for any other
+   --  refusal.
+   function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is
+      pragma Unreferenced (Text);
+      use type System.Address;
+      C_Path : aliased constant String := Path & ASCII.NUL;
+      C_Mode : aliased constant String := Mode & ASCII.NUL;
+      Stream : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
+      Error  : Integer := 2;
+   begin
+      if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
+         Stream := C_Fopen (C_Path'Address, C_Mode'Address);
+         Error := GNAT.OS_Lib.Errno;
+      end if;
+      if Stream /= Interfaces.C_Streams.NULL_Stream then
+         return Stream;
+      elsif Error = 2 then
+         raise Ada.IO_Exceptions.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+      end if;
+      raise Ada.IO_Exceptions.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+   end C_Stream_For;
+
+   procedure Open_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode := Ada.Streams.Stream_IO.Out_File;
+      Path : String) is separate;
+
+   procedure Open_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode := Ada.Text_IO.Out_File;
+      Path : String) is separate;
 
 end Hostkit.Fs;

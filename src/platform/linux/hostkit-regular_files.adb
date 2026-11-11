@@ -20,6 +20,10 @@ package body Hostkit.Regular_Files is
 
    function C_Open (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int) return C_Int
      with Import, Convention => C, External_Name => "open";
+   --  open with its third argument, the mode, which is passed as a variadic
+   --  one (and is, on some machines, passed differently from a fixed one).
+   function C_Open_Mode (Path : Interfaces.C.Strings.chars_ptr; Flags : C_Int; Mode : C_U32) return C_Int
+     with Import, Convention => C_Variadic_2, External_Name => "open";
    function C_Statx
      (Descriptor : C_Int;
       Path       : Interfaces.C.Strings.chars_ptr;
@@ -85,6 +89,29 @@ package body Hostkit.Regular_Files is
          end if;
          return GNAT.OS_Lib.Invalid_FD;
    end Open_Read;
+
+   --  O_EXCL refuses whatever is at Path and follows no link there.
+   function Create_New
+     (Path : String;
+      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor
+   is
+      Name   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
+      Result : C_Int;
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return GNAT.OS_Lib.Invalid_FD;
+      end if;
+      Name := Interfaces.C.Strings.New_String (Path);
+      Result := C_Open_Mode (Name, O_Wronly + O_Creat + O_Excl + O_Cloexec, C_U32 (Mode mod 8#10000#));
+      Interfaces.C.Strings.Free (Name);
+      return (if Result < 0 then GNAT.OS_Lib.Invalid_FD else GNAT.OS_Lib.File_Descriptor (Result));
+   exception
+      when others =>
+         if Name /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (Name);
+         end if;
+         return GNAT.OS_Lib.Invalid_FD;
+   end Create_New;
 
    function Skip_Zeros
      (Descriptor : GNAT.OS_Lib.File_Descriptor;

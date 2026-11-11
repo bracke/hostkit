@@ -48,6 +48,9 @@ package Hostkit.Darwin_Abi is
    O_Evtonly   : constant C_Int := 16#8000#;
    O_Directory : constant C_Int := 16#10_0000#;
    O_Cloexec   : constant C_Int := 16#100_0000#;
+   O_Wronly    : constant C_Int := 16#1#;
+   O_Creat     : constant C_Int := 16#200#;
+   O_Excl      : constant C_Int := 16#800#;
 
    File_Type_Mask : constant C_U16 := 8#170000#;
    Regular_File   : constant C_U16 := 8#100000#;

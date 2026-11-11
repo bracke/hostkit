@@ -427,6 +427,38 @@ begin
    --  Reading a link's own target, which Windows has no readlink for.
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "readlink");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeviceIoControl");
+   --  Long-path file operations: each host opens, creates, lists and asks
+   --  the working directory through its own call, not the GNAT runtime.
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_wopen");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "CreateDirectoryW");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetCurrentDirectoryW");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "_wfopen");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeleteFileW");
+   Require_Binding ("src/platform/windows/hostkit-directory_listing.adb", "FindFirstFileW");
+   Require_Binding ("src/platform/windows/hostkit-directory_listing.adb", "FindNextFileW");
+   Require_Binding ("src/platform/linux/hostkit-fs.adb", "mkdir");
+   Require_Binding ("src/platform/linux/hostkit-fs.adb", "getcwd");
+   Require_Binding ("src/platform/linux/hostkit-fs.adb", "fopen");
+   Require_Binding ("src/platform/macos/hostkit-fs.adb", "mkdir");
+   Require_Binding ("src/platform/macos/hostkit-fs.adb", "getcwd");
+   Require_Binding ("src/platform/macos/hostkit-fs.adb", "fopen");
+   --  Size, modification time and the owner's access at any depth, which
+   --  GNAT's Windows runtime refuses past 260 characters.
+   Require_Binding ("src/platform/linux/hostkit-fs.adb", "statx");
+   Require_Text
+     ("src/platform/macos/hostkit-fs.adb",
+      "External_Name => Hostkit.Darwin_Symbols.Stat;",
+      "src/platform/macos/hostkit-fs.adb must bind Darwin_Symbols.Stat");
+   Require_Text
+     ("src/platform/macos/hostkit-fs.adb",
+      "External_Name => Hostkit.Darwin_Symbols.Lstat;",
+      "src/platform/macos/hostkit-fs.adb must bind Darwin_Symbols.Lstat");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileAttributesExW");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileInformationByHandle");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetSecurityInfo");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "DuplicateToken");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "AccessCheck");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetVolumePathNameW");
 
    Check_Generated_Artifacts;
 

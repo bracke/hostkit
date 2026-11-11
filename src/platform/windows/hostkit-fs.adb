@@ -1,21 +1,23 @@
 with Hostkit.Environment;
-with Ada.Calendar;
 with Ada.Characters.Handling;
 with Ada.Containers.Indefinite_Vectors;
-with Ada.Directories;
+with Ada.IO_Exceptions;
 with Ada.Strings.Fixed;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Strings.Wide_Unbounded;
 
+with GNAT.OS_Lib;
+
+with Hostkit.Fs.Instants;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
+with Interfaces.C_Streams;
 
 with System;
 with System.Storage_Elements;
 
 package body Hostkit.Fs is
 
-   use type Ada.Directories.File_Kind;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
 
@@ -139,6 +141,341 @@ package body Hostkit.Fs is
          return False;
    end Is_Link;
 
+   --  CreateFileW's arguments for asking an entry about itself: no data
+   --  access, every kind of sharing, and a folder opened as well as a file.
+   File_Read_Attributes_Access : constant C_DWord := 16#0000_0080#;
+   Read_Control_Access         : constant C_DWord := 16#0002_0000#;
+   Share_Everything            : constant C_DWord := 7;
+   Open_Existing_Only          : constant C_DWord := 3;
+   Backup_Semantics_Flag       : constant C_DWord := 16#0200_0000#;
+   Invalid_Handle_Value        : constant System.Address :=
+     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);
+
+   --  WIN32_FILE_ATTRIBUTE_DATA: FILETIMEs are two DWORDs, low first.
+   type Attribute_Data is record
+      Attributes                : C_DWord := 0;
+      Creation_Low, Creation_High : C_DWord := 0;
+      Access_Low, Access_High   : C_DWord := 0;
+      Write_Low, Write_High     : C_DWord := 0;
+      Size_High, Size_Low       : C_DWord := 0;
+   end record with Convention => C;
+
+   --  BY_HANDLE_FILE_INFORMATION.
+   type Handle_Information is record
+      Attributes                : C_DWord := 0;
+      Creation_Low, Creation_High : C_DWord := 0;
+      Access_Low, Access_High   : C_DWord := 0;
+      Write_Low, Write_High     : C_DWord := 0;
+      Volume                    : C_DWord := 0;
+      Size_High, Size_Low       : C_DWord := 0;
+      Links                     : C_DWord := 0;
+      Index_High, Index_Low     : C_DWord := 0;
+   end record with Convention => C;
+
+   function Get_File_Attributes_Ex
+     (Name  : System.Address;
+      Level : Interfaces.C.int;
+      Data  : access Attribute_Data)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesExW";
+
+   function Open_Entry
+     (Name        : System.Address;
+      Access_Mode : C_DWord;
+      Share       : C_DWord;
+      Security    : System.Address;
+      Disposition : C_DWord;
+      Flags       : C_DWord;
+      Template    : System.Address)
+      return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
+
+   function Close_Entry (Handle : System.Address) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
+
+   function Get_Handle_Information
+     (Handle : System.Address;
+      Info   : access Handle_Information)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
+
+   function Last_Error return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
+
+   function Joined (High : C_DWord; Low : C_DWord) return Interfaces.Unsigned_64 is
+     (Interfaces."or" (Interfaces.Shift_Left (Interfaces.Unsigned_64 (High), 32), Interfaces.Unsigned_64 (Low)));
+
+   --  What Size_Of and Modification_Time_Of read of an entry.
+   type Entry_Facts is record
+      Attributes : C_DWord := 0;
+      Written    : Interfaces.Unsigned_64 := 0;
+      Size       : Interfaces.Unsigned_64 := 0;
+   end record;
+
+   --  A failed ask as the spec's exceptions: a missing file, folder, drive
+   --  or share, a name Windows cannot read and a link it cannot resolve are
+   --  nothing there (Name_Error); anything else -- access denied, a sharing
+   --  violation, a device not ready -- is the host not saying (Use_Error).
+   procedure Refuse (Path : String; Error : C_DWord) with No_Return;
+
+   procedure Refuse (Path : String; Error : C_DWord) is
+      Error_File_Not_Found     : constant := 2;
+      Error_Path_Not_Found     : constant := 3;
+      Error_Invalid_Drive      : constant := 15;
+      Error_Bad_Netpath        : constant := 53;
+      Error_Bad_Net_Name       : constant := 67;
+      Error_Invalid_Name       : constant := 123;
+      Error_Bad_Pathname       : constant := 161;
+      Error_Cant_Resolve_Name  : constant := 1921;
+   begin
+      if Error in Error_File_Not_Found | Error_Path_Not_Found | Error_Invalid_Drive | Error_Bad_Netpath
+        | Error_Bad_Net_Name | Error_Invalid_Name | Error_Bad_Pathname | Error_Cant_Resolve_Name
+      then
+         raise Ada.Directories.Name_Error with Path & ": Windows error" & C_DWord'Image (Error);
+      end if;
+      raise Ada.Directories.Use_Error with Path & ": Windows error" & C_DWord'Image (Error);
+   end Refuse;
+
+   --  GetFileAttributesExW of the long form, which reads the entry itself;
+   --  a symbolic link or junction to be followed is opened as what it points
+   --  at (no FILE_FLAG_OPEN_REPARSE_POINT) and asked through the handle.
+   --  Other reparse points (cloud placeholders, deduplicated files) are
+   --  ordinary entries to the user, as Is_Link says, and read as they are.
+   function Facts_Of (Path : String; Follow_Links : Boolean) return Entry_Facts is
+      Native_Path : aliased constant Wide_String := Wide (Path);
+      Data        : aliased Attribute_Data;
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         raise Ada.Directories.Name_Error with "no entry at """ & Path & """";
+      elsif Get_File_Attributes_Ex (Native_Path'Address, 0, Data'Access) = 0 then
+         Refuse (Path, Last_Error);
+      elsif Follow_Links
+        and then (Data.Attributes and File_Attribute_Reparse_Point) /= 0
+        and then Is_Link (Path)
+      then
+         declare
+            use type System.Address;
+            Handle  : constant System.Address :=
+              Open_Entry
+                (Native_Path'Address, File_Read_Attributes_Access, Share_Everything, System.Null_Address,
+                 Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
+            Info    : aliased Handle_Information;
+            Asked   : Boolean;
+            Error   : C_DWord;
+            Ignored : Interfaces.C.int;
+         begin
+            if Handle = Invalid_Handle_Value then
+               Refuse (Path, Last_Error);
+            end if;
+            Asked := Get_Handle_Information (Handle, Info'Access) /= 0;
+            Error := Last_Error;
+            Ignored := Close_Entry (Handle);
+            if not Asked then
+               Refuse (Path, Error);
+            end if;
+            return
+              (Attributes => Info.Attributes,
+               Written    => Joined (Info.Write_High, Info.Write_Low),
+               Size       => Joined (Info.Size_High, Info.Size_Low));
+         end;
+      end if;
+      return
+        (Attributes => Data.Attributes,
+         Written    => Joined (Data.Write_High, Data.Write_Low),
+         Size       => Joined (Data.Size_High, Data.Size_Low));
+   end Facts_Of;
+
+   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
+      Facts : constant Entry_Facts := Facts_Of (Path, Follow_Links);
+   begin
+      if (Facts.Attributes and File_Attribute_Directory) /= 0 then
+         raise Ada.Directories.Name_Error with Path & ": no ordinary file";
+      end if;
+      return Ada.Directories.File_Size (Facts.Size);
+   end Size_Of;
+
+   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time is
+     (Hostkit.Fs.Instants.From_Filetime (Facts_Of (Path, Follow_Links).Written));
+
+   --  Whether the volume holding Path is a network one, where GNAT does not
+   --  read the ACL (__gnat_can_use_acl): this process's token says nothing
+   --  about the server's accounts.
+   function On_Network_Volume (Path : String) return Boolean is
+      use type Interfaces.C.unsigned;
+      function Get_Volume_Path_Name
+        (Name : System.Address; Root : System.Address; Length : C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "GetVolumePathNameW";
+      function Get_Drive_Type (Root : System.Address) return Interfaces.C.unsigned
+        with Import => True, Convention => Stdcall, External_Name => "GetDriveTypeW";
+      Drive_Remote : constant Interfaces.C.unsigned := 4;
+      Native_Path  : aliased constant Wide_String := Wide (Path);
+      Root         : aliased Wide_String (1 .. 32_768) := [others => Wide_Character'Val (0)];
+   begin
+      return Get_Volume_Path_Name (Native_Path'Address, Root'Address, Root'Length) /= 0
+        and then Get_Drive_Type (Root'Address) = Drive_Remote;
+   end On_Network_Volume;
+
+   --  GNAT's __gnat_check_OWNER_ACL: the entry's owner, group and DACL
+   --  checked against this process's own token for Wanted. GNAT reads the
+   --  descriptor with GetFileSecurity, which has its path limit; here it is
+   --  read through a handle opened on the long form, a link followed as
+   --  GetFileSecurity follows one. An impersonation copy of the process
+   --  token, as AccessCheck needs one, made with DuplicateToken rather than
+   --  GNAT's ImpersonateSelf, which changes the calling thread meanwhile.
+   function Token_Granted (Path : String; Wanted : C_DWord) return Boolean is
+      use type System.Address;
+
+      --  GENERIC_MAPPING, filled with the file object's own mapping.
+      type Generic_Mapping is record
+         Read, Write, Execute, All_Access : C_DWord;
+      end record with Convention => C;
+      File_Mapping : aliased constant Generic_Mapping :=
+        (Read => 16#0012_0089#, Write => 16#0012_0116#, Execute => 16#0012_00A0#, All_Access => 16#001F_01FF#);
+
+      --  PRIVILEGE_SET with room for more than the one entry its C type
+      --  declares, so a check that used privileges is not refused for want
+      --  of room.
+      type Privilege_Buffer is array (1 .. 64) of Interfaces.Unsigned_32 with Convention => C;
+
+      function Get_Security_Info
+        (Handle      : System.Address;
+         Object_Type : Interfaces.C.int;
+         Wanted_Info : C_DWord;
+         Owner       : System.Address;
+         Group       : System.Address;
+         Dacl        : System.Address;
+         Sacl        : System.Address;
+         Descriptor  : access System.Address)
+         return C_DWord
+        with Import => True, Convention => Stdcall, External_Name => "GetSecurityInfo";
+      function Get_Current_Process return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "GetCurrentProcess";
+      function Open_Process_Token
+        (Process : System.Address; Desired : C_DWord; Token : access System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "OpenProcessToken";
+      function Duplicate_Token
+        (Existing : System.Address; Level : Interfaces.C.int; Duplicate : access System.Address)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "DuplicateToken";
+      function Access_Check
+        (Descriptor        : System.Address;
+         Token             : System.Address;
+         Desired           : C_DWord;
+         Mapping           : access constant Generic_Mapping;
+         Privileges        : System.Address;
+         Privileges_Length : access C_DWord;
+         Granted           : access C_DWord;
+         Status            : access Interfaces.C.int)
+         return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "AccessCheck";
+      function Local_Free (Item : System.Address) return System.Address
+        with Import => True, Convention => Stdcall, External_Name => "LocalFree";
+
+      Se_File_Object         : constant Interfaces.C.int := 1;
+      Owner_Group_Dacl       : constant C_DWord := 16#1# + 16#2# + 16#4#;
+      Token_Duplicate        : constant C_DWord := 16#2#;
+      Token_Query            : constant C_DWord := 16#8#;
+      Security_Impersonation : constant Interfaces.C.int := 2;
+
+      Native_Path   : aliased constant Wide_String := Wide (Path);
+      Descriptor    : aliased System.Address := System.Null_Address;
+      Process_Token : aliased System.Address := System.Null_Address;
+      Token         : aliased System.Address := System.Null_Address;
+      Privileges    : aliased Privilege_Buffer := [others => 0];
+      Length        : aliased C_DWord := Privilege_Buffer'Size / 8;
+      Granted       : aliased C_DWord := 0;
+      Status        : aliased Interfaces.C.int := 0;
+      Answer        : Boolean := False;
+
+      procedure Let_Go is
+         Ignored_Close : Interfaces.C.int;
+         Ignored_Free  : System.Address;
+      begin
+         if Token /= System.Null_Address then
+            Ignored_Close := Close_Entry (Token);
+         end if;
+         if Process_Token /= System.Null_Address then
+            Ignored_Close := Close_Entry (Process_Token);
+         end if;
+         if Descriptor /= System.Null_Address then
+            Ignored_Free := Local_Free (Descriptor);
+         end if;
+      end Let_Go;
+   begin
+      declare
+         Handle  : constant System.Address :=
+           Open_Entry
+             (Native_Path'Address, Read_Control_Access, Share_Everything, System.Null_Address,
+              Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
+         Read    : C_DWord;
+         Ignored : Interfaces.C.int;
+      begin
+         if Handle = Invalid_Handle_Value then
+            return False;
+         end if;
+         Read := Get_Security_Info
+           (Handle, Se_File_Object, Owner_Group_Dacl, System.Null_Address, System.Null_Address,
+            System.Null_Address, System.Null_Address, Descriptor'Access);
+         Ignored := Close_Entry (Handle);
+         if Read /= 0 then
+            Descriptor := System.Null_Address;
+            return False;
+         end if;
+      end;
+      if Open_Process_Token (Get_Current_Process, Token_Duplicate + Token_Query, Process_Token'Access) /= 0
+        and then Duplicate_Token (Process_Token, Security_Impersonation, Token'Access) /= 0
+        and then Access_Check
+          (Descriptor, Token, Wanted, File_Mapping'Access, Privileges'Address, Length'Access, Granted'Access,
+           Status'Access) /= 0
+      then
+         Answer := Status /= 0;
+      end if;
+      Let_Go;
+      return Answer;
+   exception
+      when others =>
+         Let_Go;
+         return False;
+   end Token_Granted;
+
+   function Is_Owner_Readable (Path : String) return Boolean is
+      File_Read_Data : constant C_DWord := 16#1#;
+   begin
+      if Path = "" then
+         return False;
+      elsif On_Network_Volume (Path) then
+         declare
+            Native_Path : aliased constant Wide_String := Wide (Path);
+         begin
+            return Get_File_Attributes (Native_Path'Address) /= Invalid_File_Attributes;
+         end;
+      end if;
+      return Token_Granted (Path, File_Read_Data);
+   exception
+      when others =>
+         return False;
+   end Is_Owner_Readable;
+
+   function Is_Owner_Writable (Path : String) return Boolean is
+      File_Attribute_Readonly : constant C_DWord := 16#1#;
+      File_Write_Data         : constant C_DWord := 16#2#;
+      File_Append_Data        : constant C_DWord := 16#4#;
+      Native_Path             : aliased constant Wide_String := Wide (Path);
+      Attributes              : C_DWord;
+   begin
+      if Path = "" then
+         return False;
+      end if;
+      Attributes := Get_File_Attributes (Native_Path'Address);
+      if Attributes = Invalid_File_Attributes or else (Attributes and File_Attribute_Readonly) /= 0 then
+         return False;
+      end if;
+      return On_Network_Volume (Path) or else Token_Granted (Path, File_Write_Data + File_Append_Data);
+   exception
+      when others =>
+         return False;
+   end Is_Owner_Writable;
+
    function Create_Link
      (Target    : String;
       Link_Path : String)
@@ -183,9 +520,9 @@ package body Hostkit.Fs is
       Wide_Target : aliased Wide_String := Wide_Text (Native (Target));
       Wide_Link   : aliased Wide_String := Wide (Link_Path);
 
-      Is_Directory : constant Boolean :=
-        (Ada.Directories.Exists (Seen_From_Link)
-         and then Ada.Directories.Kind (Seen_From_Link) = Ada.Directories.Directory);
+      --  Asked through the long form: GNAT's Kind refuses a target past
+      --  260 characters, and the link was then made as a file link.
+      Is_Directory : constant Boolean := Kind_Of (Seen_From_Link) = Directory_Entry;
 
       --  Windows will not make a link without either Developer Mode or the privilege,
       --  and refusing is a normal answer here rather than a fault.
@@ -1110,6 +1447,10 @@ package body Hostkit.Fs is
       Invalid_Handle       : constant System.Address := System.Storage_Elements.To_Address (-1);
       Generic_Read         : constant C_DWord := 16#8000_0000#;
       File_Read_Attributes : constant C_DWord := 16#80#;
+      --  A data right: a handle holding only attribute rights takes no part
+      --  in the sharing check, so the folder it held could still be renamed
+      --  away and a link put in its place while the walk went on below it.
+      File_List_Directory  : constant C_DWord := 16#01#;
       --  Read and write, never delete: a directory held so cannot be
       --  renamed or replaced while the walk goes on below it.
       Share_No_Delete      : constant C_DWord := 3;
@@ -1188,11 +1529,13 @@ package body Hostkit.Fs is
       end if;
 
       --  Root, links and all, held and named as it resolves: every part
-      --  below is named from there.
+      --  below is named from there. Root in the long form, without the
+      --  terminator Open adds itself.
       declare
+         Native_Root : constant Wide_String := Wide (if Root = "" then "." else Root);
          Root_Handle : constant System.Address :=
-           Open (Ada.Strings.UTF_Encoding.Conversions.Convert (if Root = "" then "." else Root),
-                 File_Read_Attributes, Backup_Semantics);
+           Open (Native_Root (Native_Root'First .. Native_Root'Last - 1), File_Read_Attributes + File_List_Directory,
+                 Backup_Semantics);
       begin
          if Root_Handle = Invalid_Handle then
             Outcome := Read_Missing;
@@ -1229,7 +1572,7 @@ package body Hostkit.Fs is
                   --  what it points at, and refused below.
                   Handle := Open
                     (Ada.Strings.Wide_Unbounded.To_Wide_String (Current),
-                     File_Read_Attributes + (if Last then Generic_Read else 0),
+                     File_Read_Attributes + (if Last then Generic_Read else File_List_Directory),
                      Backup_Semantics + Open_Reparse_Point);
                   if Handle = Invalid_Handle then
                      Outcome :=
@@ -1317,21 +1660,14 @@ package body Hostkit.Fs is
       Length : constant C_DWord :=
         Get_Module_File_Name
           (System.Null_Address, Buffer'Address, C_DWord (Buffer'Length));
-      Result : Ada.Strings.Unbounded.Unbounded_String;
    begin
       if Length = 0 or else Length >= C_DWord (Buffer'Length) then
          return "";
       end if;
 
-      for Index in 1 .. Natural (Length) loop
-         exit when Buffer (Index) = Wide_Character'Val (0);
-         if Wide_Character'Pos (Buffer (Index)) <= Character'Pos (Character'Last) then
-            Ada.Strings.Unbounded.Append
-              (Result, Character'Val (Wide_Character'Pos (Buffer (Index))));
-         end if;
-      end loop;
-
-      return Ada.Strings.Unbounded.To_String (Result);
+      --  UTF-8, as every path here is: the name was cut to Latin-1 before,
+      --  dropping any other character and leaving the rest unencoded.
+      return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Length)));
    exception
       when others =>
          return "";
@@ -1471,16 +1807,11 @@ package body Hostkit.Fs is
    begin
       for Attempt in 1 .. 1000 loop
          declare
-            Candidate : constant String :=
-              Ada.Directories.Compose
-                (Containing_Directory => Base,
-                 Name => Safe_Prefix & "-" & Time_Image & "-" & Image (Attempt));
+            Candidate : constant String := Join (Base, Safe_Prefix & "-" & Time_Image & "-" & Image (Attempt));
          begin
-            Ada.Directories.Create_Directory (Candidate);
-            return Candidate;
-         exception
-            when Ada.Directories.Name_Error | Ada.Directories.Use_Error =>
-               null;
+            if Create_Directory (Candidate) then
+               return Candidate;
+            end if;
          end;
       end loop;
       return "";
@@ -1609,5 +1940,147 @@ package body Hostkit.Fs is
       when others =>
          return False;
    end Delete_Empty_Directory;
+
+   --  DeleteFileW through the long form. A link is removed as Delete_Link
+   --  removes one -- RemoveDirectoryW for a link to a directory, which
+   --  DeleteFileW refuses -- and a read-only file has the attribute cleared
+   --  first, put back if the delete is refused anyway.
+   function Delete_File (Path : String) return Boolean is
+      function Delete_File_W (Name : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
+      function Set_File_Attributes (Name : System.Address; Attributes : C_DWord) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "SetFileAttributesW";
+      Read_Only : constant C_DWord := 16#0001#;
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return False;
+      end if;
+      declare
+         Wide_Path  : aliased Wide_String := Wide (Path);
+         Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+         Ignored    : Interfaces.C.int;
+      begin
+         if Attributes = Invalid_File_Attributes then
+            return False;
+         elsif (Attributes and File_Attribute_Reparse_Point) /= 0 then
+            return Delete_Link (Path);
+         elsif (Attributes and File_Attribute_Directory) /= 0 then
+            return False;
+         elsif (Attributes and Read_Only) /= 0 then
+            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
+            if Delete_File_W (Wide_Path'Address) /= 0 then
+               return True;
+            end if;
+            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
+            return False;
+         end if;
+         return Delete_File_W (Wide_Path'Address) /= 0;
+      end;
+   exception
+      when others =>
+         return False;
+   end Delete_File;
+
+   --  CreateDirectoryW through the long form, with the ACL the parent hands
+   --  down; an existing entry is ERROR_ALREADY_EXISTS.
+   function Create_Directory (Path : String) return Boolean is
+      function Create_Directory_W (Name : System.Address; Security : System.Address) return Interfaces.C.int
+        with Import => True, Convention => Stdcall, External_Name => "CreateDirectoryW";
+   begin
+      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
+         return False;
+      end if;
+      declare
+         Wide_Path : aliased constant Wide_String := Wide (Path);
+      begin
+         return Create_Directory_W (Wide_Path'Address, System.Null_Address) /= 0;
+      end;
+   exception
+      when others =>
+         return False;
+   end Create_Directory;
+
+   function Create_Path (Path : String) return Boolean is separate;
+
+   --  GetCurrentDirectoryW, asked first how long the answer is: called with
+   --  too small a buffer it returns the length it needs, terminator included.
+   function Current_Directory return String is
+      function Get_Current_Directory (Length : C_DWord; Buffer : System.Address) return C_DWord
+        with Import => True, Convention => Stdcall, External_Name => "GetCurrentDirectoryW";
+      Needed : C_DWord := Get_Current_Directory (0, System.Null_Address);
+      Tries  : Natural := 0;
+   begin
+      --  It can change between the two calls; ask again when it grew.
+      while Needed > 0 and then Tries < 4 loop
+         Tries := Tries + 1;
+         declare
+            Buffer  : aliased Wide_String (1 .. Natural (Needed)) := [others => Wide_Character'Val (0)];
+            Written : constant C_DWord := Get_Current_Directory (Needed, Buffer'Address);
+         begin
+            if Written = 0 then
+               return "";
+            elsif Written < Needed then
+               return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Written)));
+            end if;
+            Needed := Written;
+         end;
+      end loop;
+      return "";
+   exception
+      when others =>
+         return "";
+   end Current_Directory;
+
+   --  _wfopen of the long form: the C runtime's own stream, which GNAT's
+   --  reads and writes as one of its own. Text picks the translated mode,
+   --  't', as GNAT's Text_IO opens one here, else 'b'.
+   function Wide_Fopen (Name : System.Address; Mode : System.Address) return Interfaces.C_Streams.FILEs
+     with Import => True, Convention => C, External_Name => "_wfopen";
+
+   --  The C stream for Path opened in fopen's Mode, for the stream and text
+   --  subunits: Name_Error when nothing is there, Use_Error for any other
+   --  refusal.
+   function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is
+      use type System.Address;
+      Wide_Mode : aliased constant Wide_String :=
+        Ada.Strings.UTF_Encoding.Conversions.Convert (Mode & (if Text then "t" else "b")) & Wide_Character'Val (0);
+      Stream    : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
+      Error     : Integer := 2;
+   begin
+      if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
+         declare
+            Wide_Path : aliased constant Wide_String := Wide (Path);
+         begin
+            Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
+            Error := GNAT.OS_Lib.Errno;
+         end;
+      end if;
+      if Stream /= Interfaces.C_Streams.NULL_Stream then
+         return Stream;
+      elsif Error = 2 then
+         raise Ada.IO_Exceptions.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+      end if;
+      raise Ada.IO_Exceptions.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
+   end C_Stream_For;
+
+   procedure Open_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Stream
+     (File : in out Ada.Streams.Stream_IO.File_Type;
+      Mode : Ada.Streams.Stream_IO.File_Mode := Ada.Streams.Stream_IO.Out_File;
+      Path : String) is separate;
+
+   procedure Open_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode;
+      Path : String) is separate;
+
+   procedure Create_Text
+     (File : in out Ada.Text_IO.File_Type;
+      Mode : Ada.Text_IO.File_Mode := Ada.Text_IO.Out_File;
+      Path : String) is separate;
 
 end Hostkit.Fs;

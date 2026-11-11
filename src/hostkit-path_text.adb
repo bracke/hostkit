@@ -1,4 +1,5 @@
 with Ada.Characters.Handling;
+with Ada.Strings.Unbounded;
 
 package body Hostkit.Path_Text is
 
@@ -162,5 +163,127 @@ package body Hostkit.Path_Text is
       end loop;
       return From_One (Path, Path'First, Last);
    end Parent;
+
+   --  Whether Path is in the \\?\ or \\.\ form, which Windows reads as written.
+   function Is_Long_Or_Device (Path : String) return Boolean is
+     (Path'Length >= 4 and then Path (Path'First .. Path'First + 3) in "\\?\" | "\\.\");
+
+   --  The separator Path's components are joined with: the one its root
+   --  ends in, else the first it has, else '\' for a Windows path and the
+   --  host's own elsewhere.
+   function Style_Of (Path : String) return Character is
+      Root : constant Natural := Root_Length (Path);
+   begin
+      if Root > 0 and then Is_Separator_In (Path, Path (Path'First + Root - 1)) then
+         return Path (Path'First + Root - 1);
+      end if;
+      for C of Path loop
+         if Is_Separator_In (Path, C) then
+            return C;
+         end if;
+      end loop;
+      return (if Hostkit.Fs.Has_Windows_Root (Path) then '\' else Hostkit.Fs.Separator);
+   end Style_Of;
+
+   --  Relative appended to Base with one separator in Base's style.
+   function Joined (Base : String; Relative : String) return String is
+     (if Base = "" then Relative
+      elsif Is_Separator_In (Base, Base (Base'Last)) then Base & Relative
+      else Base & Style_Of (Base) & Relative);
+
+   --  Path with its "." and ".." components resolved and its empty ones
+   --  dropped, the root kept as written.
+   function Resolved (Path : String) return String is
+      use Ada.Strings.Unbounded;
+      type Bounds is record
+         First : Positive;
+         Last  : Natural;
+      end record;
+      Root_Last : constant Natural := Path'First + Root_Length (Path) - 1;
+      Sep       : constant Character := Style_Of (Path);
+      Kept      : array (1 .. Path'Length) of Bounds := [others => (First => 1, Last => 0)];
+      Count     : Natural := 0;
+      Start     : Positive := Root_Last + 1;
+      Result    : Unbounded_String;
+   begin
+      if Is_Long_Or_Device (Path) then
+         return From_One (Path, Path'First, Path'Last);
+      end if;
+      for Index in Root_Last + 1 .. Path'Last + 1 loop
+         if Index > Path'Last or else Is_Separator_In (Path, Path (Index)) then
+            declare
+               Part : constant String := Path (Start .. Index - 1);
+            begin
+               if Part = ".." and then Count > 0 and then Path (Kept (Count).First .. Kept (Count).Last) /= ".." then
+                  Count := Count - 1;
+               elsif Part = "" or else Part = "." or else (Part = ".." and then Root_Last >= Path'First) then
+                  --  Nothing, or the root's own "..", which is the root.
+                  null;
+               else
+                  Count := Count + 1;
+                  Kept (Count) := (First => Start, Last => Index - 1);
+               end if;
+            end;
+            Start := Index + 1;
+         end if;
+      end loop;
+      Result := To_Unbounded_String (Path (Path'First .. Root_Last));
+      for Item of Kept (1 .. Count) loop
+         if Length (Result) > 0 and then not Is_Separator_In (Path, Element (Result, Length (Result))) then
+            Append (Result, Sep);
+         end if;
+         Append (Result, Path (Item.First .. Item.Last));
+      end loop;
+      if Length (Result) = 0 then
+         return (if Path = "" then "" else ".");
+      end if;
+      return To_String (Result);
+   end Resolved;
+
+   function Absolute (Path : String; Base : String) return String is
+      Windows_Base : constant Boolean := Hostkit.Fs.Has_Windows_Root (Base);
+   begin
+      if Path = "" then
+         return Resolved (Base);
+      elsif Is_Long_Or_Device (Path) then
+         return From_One (Path, Path'First, Path'Last);
+      end if;
+      declare
+         First : constant Positive := Path'First;
+         Root  : constant Natural := Root_Length (Path);
+         --  "C:dir": a drive with no separator after it.
+         Drive_Relative : constant Boolean :=
+           Root = 0
+           and then (Windows_Base or else Hostkit.Fs.Separator = '\')
+           and then Path'Length > 2
+           and then Path (First) in 'A' .. 'Z' | 'a' .. 'z'
+           and then Path (First + 1) = ':';
+      begin
+         --  "\dir" on Base's drive or share -- a backslash being a separator
+         --  in a Windows path wherever it is read -- is Base's root, less the
+         --  separator that may close it, and Path.
+         if Windows_Base and then Root <= 1 and then Path (First) in '/' | '\' then
+            declare
+               Base_Root : constant String := Base (Base'First .. Base'First + Root_Length (Base) - 1);
+               Last      : constant Natural :=
+                 (if Is_Separator_In (Base, Base_Root (Base_Root'Last)) then Base_Root'Last - 1 else Base_Root'Last);
+            begin
+               return Resolved (Base_Root (Base_Root'First .. Last) & Path);
+            end;
+         elsif Root > 0 then
+            return Resolved (Path);
+         elsif Drive_Relative then
+            if Windows_Base
+              and then Base (Base'First + 1) = ':'
+              and then Ada.Characters.Handling.To_Upper (Base (Base'First))
+                       = Ada.Characters.Handling.To_Upper (Path (First))
+            then
+               return Resolved (Joined (Base, Path (First + 2 .. Path'Last)));
+            end if;
+            return Resolved (Path (First .. First + 1) & '\' & Path (First + 2 .. Path'Last));
+         end if;
+         return Resolved (Joined (Base, Path));
+      end;
+   end Absolute;
 
 end Hostkit.Path_Text;

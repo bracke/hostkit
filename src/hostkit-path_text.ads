@@ -58,4 +58,32 @@ package Hostkit.Path_Text is
    --  @return The parent, indexed from 1, or "" when there is none.
    function Parent (Path : String) return String;
 
+   --  Path made absolute against Base, from the text alone: a relative Path
+   --  is read from Base, then "." components are dropped and ".." takes the
+   --  component before it away (at the root it is dropped, as the root's
+   --  ".." is the root). Empty components go too, and a trailing separator.
+   --  The root is kept as written, and the components are rejoined with the
+   --  separator the root ends in, else the first the text has, else '\' for
+   --  a Windows path and the host's elsewhere.
+   --
+   --  Windows paths read the Windows way on any host: "\dir" is on Base's
+   --  drive or share, and "C:dir" in Base when Base is on C: and at C:'s root
+   --  otherwise -- the text does not say where that drive's current folder
+   --  is. A path in the \\?\ or \\.\ form is returned as it is, as Windows
+   --  takes "." and ".." there as names.
+   --
+   --  No link is followed and nothing is asked of a disk: "link/.." is the
+   --  folder holding "link", where the host would read the folder holding
+   --  its target. GNAT's Normalize_Pathname resolves links by default and
+   --  refuses a path past its limit on Windows; a caller that wants the
+   --  target asks Fs.Real_Path.
+   --
+   --  @param Path A path, absolute or relative.
+   --  @param Base The folder a relative Path is read from; Fs.Current_Directory
+   --    for the process's own. When it is "" too, a relative Path stays
+   --    relative, its leading ".." components kept.
+   --  @return The path, indexed from 1; "" for an empty Path and Base, "." for
+   --    a relative path that comes to nothing.
+   function Absolute (Path : String; Base : String) return String;
+
 end Hostkit.Path_Text;

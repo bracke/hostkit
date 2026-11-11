@@ -17,6 +17,54 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **File operations past Windows' 260-character path limit**, with one
+  contract on every host. GNAT's Windows runtime refuses a longer path in
+  `Ada.Directories`, `GNAT.OS_Lib` and `Stream_IO`/`Text_IO` (`Name_Error`
+  "file name too long") before Windows is asked; these ask Windows through
+  the `\\?\` form and POSIX directly:
+  - `Fs.Create_Directory` (mkdir with the creation mask; `CreateDirectoryW`)
+    and `Fs.Create_Path` (each missing ancestor, read from the text), neither
+    replacing anything;
+  - `Fs.Delete_File`: a file, or a link itself (unlink; `DeleteFileW`, a
+    read-only file's attribute cleared first, a directory link removed as
+    `Delete_Link` removes one);
+  - `Regular_Files.Create_New (Path, Mode)`: `O_CREAT|O_EXCL|O_WRONLY` as
+    `GNAT.OS_Lib.Create_New_File`, but close-on-exec, with the caller's mode,
+    and `_wopen` of the long form on Windows -- a C runtime descriptor for
+    `GNAT.OS_Lib.Write`, `Skip_Zeros`/`Finish_Sparse` and
+    `Durability.Sync_Descriptor`;
+  - `Fs.Open_Stream`/`Fs.Create_Stream` and `Fs.Open_Text`/`Fs.Create_Text`:
+    the host opens the file (fopen; `_wfopen` of the long form) and GNAT's
+    `Stream_IO.C_Streams`/`Text_IO.C_Streams` wrap it, which record the name
+    without checking it -- `Name` answers "" past GNAT's limit;
+  - `Fs.Current_Directory`, of any length (getcwd allocating;
+    `GetCurrentDirectoryW` asked for its length);
+  - `Fs.Size_Of` and `Fs.Modification_Time_Of (Path, Follow_Links)`: what
+    `Ada.Directories.Size` and `Modification_Time` answer, `Name_Error` when
+    nothing (or no file, or for a time no file or folder) is there and
+    `Use_Error` when the host will not say -- statx; stat/lstat by the
+    `Darwin_Symbols` names; `GetFileAttributesExW`, a link to be followed
+    opened as its target and asked with `GetFileInformationByHandle`. The time
+    is the host's UTC instant (st_mtime with nanoseconds, FILETIME) counted
+    from an epoch made with `Time_Zone => 0`, never local time. Consumers
+    no longer need to know that `Metadata.Entry_Revision.Modified_Seconds`
+    holds a raw FILETIME on Windows;
+  - `Fs.Is_Owner_Readable`/`Fs.Is_Owner_Writable`: what
+    `GNAT.OS_Lib.Is_Owner_Readable_File`/`Is_Owner_Writable_File` answer --
+    the owner's mode bit of a stat on POSIX, as GNAT reads it (not
+    access(2)); on Windows, as GNAT does, the file's security descriptor
+    (`GetSecurityInfo` on a handle of the long form) checked with
+    `AccessCheck` against an impersonation copy of this process's token
+    (`DuplicateToken`), writing refused for a read-only entry, and on a
+    network volume (`GetVolumePathNameW`, `GetDriveTypeW`) the attributes
+    alone. GNAT's own answer False past 260 characters.
+- `Path_Text.Absolute (Path, Base)`: a path made absolute against a base and
+  its "." and ".." resolved from the text alone -- separators kept, no link
+  followed, Windows root-relative (`\dir`) and drive-relative (`C:dir`) paths
+  read the Windows way on any host, the `\\?\` form left as Windows reads it.
+  `GNAT.OS_Lib.Normalize_Pathname` follows links by default and refuses a
+  long path on Windows.
+
 - `Path_Text.Root_Length`, `Path_Text.Leaf` and `Path_Text.Parent`: a path's
   root, last component and parent read from its text alone, with Windows and
   POSIX semantics on every host -- drives, `\\server\share`, the `\\?\` and
@@ -106,6 +154,18 @@ recently enough to matter to somebody pinning it; the history before that is in
   nothing else readable in `/proc/<parent>/environ`. Ignored on other hosts.
 
 ### Fixed
+
+- **On Windows, `Directory_Listing.List` lists a folder past 260
+  characters**, with `FindFirstFileW` over the long form rather than GNAT's
+  `Ada.Directories` search, and now reports each entry's kind from the
+  directory: a symbolic link or junction as a link, anything else a folder
+  or a file (every entry was `Unknown`).
+- On Windows, `Fs.Create_Link` asks whether a long target is a folder through
+  the long form (it made a file link to a folder past 260 characters),
+  `Fs.Read_Beneath` opens a long root, `Fs.Own_Executable` answers in UTF-8
+  (characters past Latin-1 were dropped and the rest left unencoded), and
+  `Metadata.Same_File`, `Metadata.Device_Id` and the mode reading of a long
+  path no longer go through GNAT's `Ada.Directories`.
 
 - `Process.Run_Captured` on Linux starts its child as glibc's posix_spawn does -- clone with the
   caller's memory, the caller held until the exec, on a stack of its own, every signal blocked

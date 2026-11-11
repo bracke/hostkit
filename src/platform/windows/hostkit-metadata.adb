@@ -1,11 +1,12 @@
 with Ada.Calendar.Formatting;
 with Ada.Characters.Handling;
-with Ada.Directories;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Containers.Vectors;
 
+with Hostkit.Fs;
+with Hostkit.Path_Text;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
@@ -14,8 +15,9 @@ with System.Storage_Elements;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
+   use type Hostkit.Fs.Entry_Kind;
+
    use Ada.Strings.Unbounded;
-   use type Ada.Directories.File_Kind;
    use type Ada.Calendar.Time;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned;
@@ -880,8 +882,7 @@ package body Hostkit.Metadata is
       --  run. A directory keeps them: its execute bit means it can be entered,
       --  as the DACL grants.
       if not Runs_On_Windows (Path)
-        and then not (Ada.Directories.Exists (Path)
-                      and then Ada.Directories.Kind (Path) = Ada.Directories.Directory)
+        and then Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Directory_Entry
       then
          declare
             Owner_Bits : constant Natural := (Mode / 64) mod 8;
@@ -1617,9 +1618,12 @@ package body Hostkit.Metadata is
 
    function Same_File (Left : String; Right : String) return Boolean is
       --  Windows filesystems are case-insensitive, so two paths that normalise
-      --  to the same absolute string ignoring case name the same file.
+      --  to the same absolute string ignoring case name the same file. Made
+      --  absolute as text: GNAT's Full_Name refuses a path past 260
+      --  characters.
       function Normalized (Path : String) return String is
-        (Ada.Characters.Handling.To_Lower (Ada.Directories.Full_Name (Path)));
+        (Ada.Characters.Handling.To_Lower
+           (Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory)));
 
       --  The volume and file index of what Path names, through any link, as
       --  stat's device and inode are elsewhere: they tell two hard links to
@@ -1651,8 +1655,8 @@ package body Hostkit.Metadata is
            and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
       end if;
 
-      return Ada.Directories.Exists (Left)
-        and then Ada.Directories.Exists (Right)
+      return Hostkit.Fs.Kind_Of (Left) /= Hostkit.Fs.Missing_Entry
+        and then Hostkit.Fs.Kind_Of (Right) /= Hostkit.Fs.Missing_Entry
         and then Normalized (Left) = Normalized (Right);
    exception
       when others =>
@@ -1664,11 +1668,21 @@ package body Hostkit.Metadata is
       Available : out Boolean)
       return Long_Long_Integer
    is
-      Full : constant String := Ada.Characters.Handling.To_Lower (Ada.Directories.Full_Name (Path));
+      --  Absolute as text, GNAT's Full_Name refusing a path past 260
+      --  characters, and in the form a caller writes rather than the long
+      --  one, so a path given either way hashes alike.
+      Absolute : constant String := Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory);
+      Plain    : constant String :=
+        (if Absolute'Length >= 8 and then Absolute (Absolute'First .. Absolute'First + 7) = "\\?\UNC\"
+         then "\\" & Absolute (Absolute'First + 8 .. Absolute'Last)
+         elsif Absolute'Length >= 4 and then Absolute (Absolute'First .. Absolute'First + 3) = "\\?\"
+         then Absolute (Absolute'First + 4 .. Absolute'Last)
+         else Absolute);
+      Full     : constant String := Ada.Characters.Handling.To_Lower (Plain);
       Last : Natural := Full'First - 1;
       Hash : C_U64 := 14_695_981_039_346_656;
    begin
-      Available := Ada.Directories.Exists (Path);
+      Available := Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Missing_Entry;
       if not Available then
          return 0;
       end if;

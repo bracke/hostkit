@@ -24,6 +24,28 @@ package Hostkit.Regular_Files is
       Follow_Links : Boolean;
       Supported    : out Boolean) return GNAT.OS_Lib.File_Descriptor;
 
+   --  Create a file at Path and open it for writing, refusing anything
+   --  already there -- as GNAT.OS_Lib.Create_New_File does (O_CREAT, O_EXCL,
+   --  O_WRONLY, binary), but past GNAT's path limit, which on Windows refuses
+   --  a path past 260 characters before Windows is asked.
+   --
+   --  With O_EXCL nothing at Path is followed: a link there, dangling or not,
+   --  is a refusal like any other entry. The descriptor is not inherited by a
+   --  program this one starts (O_CLOEXEC, _O_NOINHERIT), where GNAT's is.
+   --  POSIX opens with Mode less the creation mask; Windows opens the \\?\
+   --  form with _wopen, and has only the owner's write bit of Mode to read: a
+   --  file without it is made read-only. The descriptor is the C runtime's on
+   --  every host, for GNAT.OS_Lib.Write and Close, Skip_Zeros and
+   --  Finish_Sparse, and Hostkit.Durability.Sync_Descriptor.
+   --
+   --  @param Path File to create.
+   --  @param Mode Permission bits for the new file.
+   --  @return Open descriptor, or Invalid_FD when something is there or the
+   --    host refused.
+   function Create_New
+     (Path : String;
+      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor;
+
    --  Advance a sparse output without physically writing Count zero bytes.
    --  @param Descriptor Open output descriptor.
    --  @param Count Number of zero bytes represented by the hole.
