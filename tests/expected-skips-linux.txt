@@ -1,0 +1,6 @@
+-- Tests that skip on the Linux CI runner (see HOSTKIT_TEST_EXPECTED_SKIPS in
+-- .github/workflows/ci.yml), each as "Test: reason", exactly as the test's Skip
+-- call gives them: a skip not listed here fails the run -- a listed test that
+-- skips for another reason too -- and so does a listed test that did not skip.
+Test_Windows_Attributes_Are_Copied: needs Windows file attributes
+Test_A_Held_File_Is_Synced_Once_Let_Go: only Windows refuses an open for a holder's share mode

@@ -15,6 +15,7 @@ with GNAT.OS_Lib;
 
 with Hostkit;
 with Hostkit_Shell_Cases;
+with Hostkit_Test_Skips;
 with Hostkit.Filesystem_Rules;
 with Ada.Streams;
 
@@ -48,6 +49,10 @@ package body Hostkit_Suite is
    use Ada.Strings.Unbounded;
    use type Hostkit.Host.Kind;
    use type Hostkit.Metadata.Account_Id;
+
+   --  A test with nothing to check on this host says so, and is counted:
+   --  see Hostkit_Test_Skips.
+   procedure Skip (Test : String; Reason : String) renames Hostkit_Test_Skips.Skip;
 
    --  The suite's own directory: noop and failing are built beside it.
    function Companion (Name : String) return String is
@@ -175,2997 +180,6 @@ package body Hostkit_Suite is
          return False;
    end File_Contains;
 
-   procedure Test_Quoting (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-   begin
-      --  The shell is asked once and everything follows from it, so that the quoting
-      --  can never disagree with the shell it is quoting for -- which is exactly the
-      --  bug this replaced: cmd, handed arguments in sh's single quotes.
-      if Hostkit.Shell.Is_Command_Shell then
-         declare
-            --  One double-quote character. Spelling the expectation out of these reads,
-            --  and a literal thicket of doubled quotes does not -- which is exactly how
-            --  this assertion came to be wrong.
-            DQ : constant String := """";
-         begin
-            Assert (Hostkit.Shell.Command_Option = "/C", "cmd is introduced with /C");
-            Assert
-              (Hostkit.Shell.Quote ("a b") = DQ & "a b" & DQ,
-               "cmd groups with double quotes");
-            Assert
-              (Hostkit.Shell.Quote ("say " & DQ & "hi" & DQ)
-                 = DQ & "say " & DQ & DQ & "hi" & DQ & DQ & DQ,
-               "an embedded double quote is doubled for cmd");
-         end;
-      else
-         Assert (Hostkit.Shell.Command_Option = "-c", "sh is introduced with -c");
-         Assert (Hostkit.Shell.Quote ("a b") = "'a b'", "sh groups with single quotes");
-         Assert
-           (Hostkit.Shell.Quote ("it's") = "'it'\''s'",
-            "an embedded single quote is spliced for sh");
-      end if;
-   end Test_Quoting;
-
-   procedure Test_Windows_Command_Line_Quoting
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      package WCL renames Hostkit.Windows_Command_Line;
-
-      --  Spelt from these rather than as a literal thicket of doubled quotes and
-      --  backslashes, for the same reason the shell test above does: the thicket
-      --  is where a wrong expectation hides. DQ is one double quote, BS is one
-      --  backslash.
-      DQ : constant String := """";
-      BS : constant String := "\";
-
-      Args : Hostkit.String_Vectors.Vector;
-   begin
-      --  The CRT quoting is pure text, so it is checked on every host, not only
-      --  on the Windows one that hands the result to CreateProcessW.
-      Assert
-        (WCL.Quote_Argument ("simple") = "simple",
-         "an argument with nothing special is left alone");
-      Assert
-        (WCL.Quote_Argument ("a" & BS & "b") = "a" & BS & "b",
-         "a backslash that is not next to a quote or a space needs no quoting");
-      Assert
-        (WCL.Quote_Argument ("a b") = DQ & "a b" & DQ,
-         "an argument with a space is wrapped in quotes");
-      Assert
-        (WCL.Quote_Argument ("") = DQ & DQ,
-         "an empty argument is an explicit pair of quotes, not nothing");
-
-      --  The headline bug: a directory path with a space and a trailing backslash.
-      --  Naively wrapped it is "C:\Program Files\", whose trailing backslash
-      --  escapes the closing quote; the run before the quote must be doubled.
-      Assert
-        (WCL.Quote_Argument ("C:" & BS & "Program Files" & BS)
-           = DQ & "C:" & BS & "Program Files" & BS & BS & DQ,
-         "backslashes running up to the closing quote are doubled");
-
-      Assert
-        (WCL.Quote_Argument ("say " & DQ & "hi" & DQ)
-           = DQ & "say " & BS & DQ & "hi" & BS & DQ & DQ,
-         "an embedded quote is escaped with a backslash");
-      Assert
-        (WCL.Quote_Argument ("a" & BS & DQ)
-           = DQ & "a" & BS & BS & BS & DQ & DQ,
-         "backslashes before an embedded quote are doubled, then the quote escaped");
-
-      Args.Append (To_Unbounded_String ("a b"));
-      Args.Append (To_Unbounded_String ("plain"));
-      Assert
-        (WCL.Build ("prog", Args) = "prog " & DQ & "a b" & DQ & " plain",
-         "the command line is the program and its arguments quoted and space-joined");
-      Assert
-        (WCL.Build ("my prog", Hostkit.String_Vectors.Empty_Vector)
-           = DQ & "my prog" & DQ,
-         "a program whose path has a space is quoted too");
-   end Test_Windows_Command_Line_Quoting;
-
-   procedure Test_Windows_Long_Path_Form
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      package WP renames Hostkit.Windows_Paths;
-
-      --  A name of N characters, so a few of them pass the threshold.
-      function Segment (N : Positive) return String is [1 .. N => 'd'];
-
-      Tail : constant String := Segment (120) & "\" & Segment (130);
-   begin
-      Assert (WP.Long_Path_Form ("C:\short") = "C:\short", "a short path is left as it is");
-      Assert
-        (WP.Long_Path_Form ("C:\" & Tail) = "\\?\C:\" & Tail,
-         "a long drive path gets the \\?\ prefix");
-      Assert
-        (WP.Long_Path_Form ("C:/" & Segment (120) & "/" & Segment (130)) = "\\?\C:\" & Tail,
-         "slashes become backslashes, which the prefixed form no longer translates");
-      Assert
-        (WP.Long_Path_Form ("\\server\share\" & Tail) = "\\?\UNC\server\share\" & Tail,
-         "a long share path gets the \\?\UNC\ prefix");
-      Assert
-        (WP.Long_Path_Form ("\\?\C:\" & Tail) = "\\?\C:\" & Tail,
-         "a path that is already prefixed is not prefixed twice");
-      Assert
-        (WP.Long_Path_Form ("C:\" & Segment (120) & "\..\" & Segment (130))
-           = "C:\" & Segment (120) & "\..\" & Segment (130),
-         "a path with a .. component keeps the normalisation the prefix would turn off");
-      Assert
-        (WP.Long_Path_Form (Tail) = Tail,
-         "a relative path is left for the API to resolve");
-      Assert
-        (WP.Native ("C:\a") = "C:\a" & Wide_Character'Val (0),
-         "the wide form is the UTF-16 text with a terminating NUL");
-   end Test_Windows_Long_Path_Form;
-
-   procedure Test_Delete_Empty_Directory
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Empty  : constant String := Ada.Directories.Compose (Scratch, "hostkit-empty-dir");
-      Full   : constant String := Ada.Directories.Compose (Scratch, "hostkit-full-dir");
-      Inside : constant String := Ada.Directories.Compose (Full, "kept");
-   begin
-      Ada.Directories.Create_Path (Empty);
-      Ada.Directories.Create_Path (Inside);
-      Assert (Hostkit.Fs.Delete_Empty_Directory (Empty), "an empty directory is removed");
-      Assert (not Ada.Directories.Exists (Empty), "and is gone");
-      Assert (not Hostkit.Fs.Delete_Empty_Directory (Full), "a directory with something in it is refused");
-      Assert (Ada.Directories.Exists (Inside), "and what is in it is untouched");
-      Assert (not Hostkit.Fs.Delete_Empty_Directory (Empty), "a missing directory is refused, not raised");
-      Ada.Directories.Delete_Tree (Full);
-   end Test_Delete_Empty_Directory;
-
-   procedure Test_Path_Text
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      package PT renames Hostkit.Path_Text;
-   begin
-      Assert (PT.Is_Separator_In ("C:\a", '\'), "a Windows path's backslash separates, on any host");
-      Assert (PT.Is_Separator_In ("/a/b", '/'), "a slash always separates");
-      Assert
-        (PT.Is_Separator_In ("/a\b", '\') = (Hostkit.Host.Current = Hostkit.Host.Windows),
-         "a POSIX path's backslash is part of a name except on Windows");
-      Assert (PT.Share_Root_Last ("\\server\share\dir") = 15, "a share's root ends with its closing separator");
-      Assert (PT.Share_Root_Last ("\\server\share") = 14, "or with its name when nothing follows");
-      Assert (PT.Share_Root_Last ("//server/share/x") = 15, "slashes spell a share too");
-      Assert (PT.Share_Root_Last ("\\server\") = 0, "a server alone names no share");
-      Assert (PT.Share_Root_Last ("\\server") = 0, "nor does a bare server name");
-      Assert (PT.Share_Root_Last ("\server\share") = 0, "one leading separator is not a share");
-      Assert (PT.Share_Root_Last ("C:\share\x") = 0, "nor is a drive path");
-   end Test_Path_Text;
-
-   procedure Test_Has_Window_Server
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      package Env renames Ada.Environment_Variables;
-      Had_Display : constant Boolean := Env.Exists ("DISPLAY");
-      Display     : constant String := (if Had_Display then Env.Value ("DISPLAY") else "");
-      Had_Wayland : constant Boolean := Env.Exists ("WAYLAND_DISPLAY");
-      Wayland     : constant String := (if Had_Wayland then Env.Value ("WAYLAND_DISPLAY") else "");
-
-      procedure Restore is
-      begin
-         if Had_Display then
-            Env.Set ("DISPLAY", Display);
-         else
-            Env.Clear ("DISPLAY");
-         end if;
-         if Had_Wayland then
-            Env.Set ("WAYLAND_DISPLAY", Wayland);
-         else
-            Env.Clear ("WAYLAND_DISPLAY");
-         end if;
-      end Restore;
-   begin
-      if Hostkit.Host.Current /= Hostkit.Host.Linux then
-         Assert (Hostkit.Host.Has_Window_Server, "macOS and Windows have one for every desktop session");
-         return;
-      end if;
-      Env.Clear ("DISPLAY");
-      Env.Clear ("WAYLAND_DISPLAY");
-      Assert (not Hostkit.Host.Has_Window_Server, "no DISPLAY and no WAYLAND_DISPLAY: no window server");
-      Env.Set ("DISPLAY", "");
-      Assert (not Hostkit.Host.Has_Window_Server, "an empty DISPLAY names none");
-      Env.Set ("DISPLAY", ":0");
-      Assert (Hostkit.Host.Has_Window_Server, "an X display is one");
-      Env.Clear ("DISPLAY");
-      Env.Set ("WAYLAND_DISPLAY", "wayland-0");
-      Assert (Hostkit.Host.Has_Window_Server, "so is a Wayland one");
-      Restore;
-   exception
-      when others =>
-         Restore;
-         raise;
-   end Test_Has_Window_Server;
-
-   procedure Test_Removable_Media_Listed_Once
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-   begin
-      --  Removable media are Mounts.Volume_Places' (/run/media, per user):
-      --  User_Places naming /run/media/<user> too made callers scan it twice.
-      for Place of Hostkit.Fs.User_Places loop
-         declare
-            Path : constant String := To_String (Place.Path);
-         begin
-            Assert (Path'Length < 10 or else Path (Path'First .. Path'First + 9) /= "/run/media",
-                    "user places leave removable media to the volume places");
-         end;
-      end loop;
-   end Test_Removable_Media_Listed_Once;
-
-   procedure Test_Read_Only_File_Syncs_Promptly
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Ada.Calendar.Time;
-      use type Hostkit.Durability.Outcome;
-      Path    : constant String := Ada.Directories.Compose (Scratch, "hostkit-read-only-sync");
-      File    : Ada.Text_IO.File_Type;
-      Started : Ada.Calendar.Time;
-      Result  : Hostkit.Durability.Outcome;
-   begin
-      if Ada.Directories.Exists (Path) then
-         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "a leftover is made writable again");
-         Ada.Directories.Delete_File (Path);
-      end if;
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-      Ada.Text_IO.Put_Line (File, "kept");
-      Ada.Text_IO.Close (File);
-      --  As a copy is made read-only: the attribute on Windows (a mode there
-      --  is an ACL, which leaves the file unsyncable), the mode elsewhere.
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         declare
-            use type GNAT.OS_Lib.String_Access;
-            Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
-            Done   : Boolean := False;
-         begin
-            if Attrib /= null then
-               GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("+R " & Path).all, Done);
-            end if;
-            Assert (Done, "the file is made read-only");
-         end;
-      else
-         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#444#), "the file is made read-only");
-      end if;
-      --  On Windows the sync used to retry the refused write-open for 1.1 s
-      --  before it looked at the read-only attribute: per file, in a move.
-      Started := Ada.Calendar.Clock;
-      Result := Hostkit.Durability.Sync_File (Path);
-      Assert (Ada.Calendar.Clock - Started < 0.5, "a read-only file syncs without waiting out retries");
-      Assert (Result /= Hostkit.Durability.Failed, "and it syncs");
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         declare
-            Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
-            Done   : Boolean;
-         begin
-            GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-R " & Path).all, Done);
-            Assert (Done, "it can be made writable again");
-         end;
-      else
-         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#644#), "it can be made writable again");
-      end if;
-      Ada.Directories.Delete_File (Path);
-   end Test_Read_Only_File_Syncs_Promptly;
-
-   procedure Test_Windows_Attributes_Are_Copied
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Source : constant String := Ada.Directories.Compose (Scratch, "hostkit-attr-source");
-      Target : constant String := Ada.Directories.Compose (Scratch, "hostkit-attr-target");
-      File   : Ada.Text_IO.File_Type;
-      Done   : Boolean;
-   begin
-      if Hostkit.Host.Current /= Hostkit.Host.Windows then
-         return;
-      end if;
-      for Index in 1 .. 2 loop
-         declare
-            Name : constant String := (if Index = 1 then Source else Target);
-         begin
-            if Ada.Directories.Exists (Name) then
-               Ada.Directories.Delete_File (Name);
-            end if;
-            Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Name);
-            Ada.Text_IO.Close (File);
-         end;
-      end loop;
-      declare
-         use type GNAT.OS_Lib.String_Access;
-         Attrib : constant GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path ("attrib.exe");
-      begin
-         Assert (Attrib /= null, "attrib.exe is on the path");
-         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("+H " & Source).all, Done);
-         Assert (Done and then Hostkit.Fs.Is_Hidden (Source), "the source is hidden");
-         Assert
-           (Hostkit.Metadata_Copy.Apply (Hostkit.Metadata_Copy.Capture (Source), Target, Preserve_Ownership => False),
-            "its metadata is applied to the copy");
-         Assert (Hostkit.Fs.Is_Hidden (Target), "and the copy is hidden too");
-         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-H " & Source).all, Done);
-         Assert (Done, "the source is shown again");
-         GNAT.OS_Lib.Spawn (Attrib.all, GNAT.OS_Lib.Argument_String_To_List ("-H " & Target).all, Done);
-         Assert (Done, "and so is the copy");
-      end;
-      Ada.Directories.Delete_File (Source);
-      Ada.Directories.Delete_File (Target);
-   end Test_Windows_Attributes_Are_Copied;
-
-   --  Linux lists its mounts, "/" among them, with escapes decoded; a host
-   --  without a table lists none, and a pseudo filesystem's source is no disk.
-   procedure Test_Mount_Table (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Table : constant Hostkit.Mounts.Mount_Vectors.Vector := Hostkit.Mounts.Table;
-      Found : Boolean;
-      Known : Boolean;
-      Root  : Hostkit.Mounts.Mount;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Linux then
-         Root := Hostkit.Mounts.Find (Table, "/", Found);
-         Assert (Found, "the root filesystem is in the table");
-         Assert (Ada.Strings.Unbounded.Length (Root.Filesystem_Type) > 0, "with its type");
-         for Item of Table loop
-            Assert (Ada.Strings.Fixed.Index (Ada.Strings.Unbounded.To_String (Item.Mount_Point), "\040") = 0,
-                    "mount points are decoded");
-         end loop;
-      else
-         Assert (Table.Is_Empty, "a host without a mount table lists none");
-      end if;
-      Assert (not Hostkit.Mounts.Removable ("proc", Known) and then not Known,
-              "a pseudo filesystem's source is no disk, and that is not known to be fixed");
-   end Test_Mount_Table;
-
-   --  The host's default opener names the file by the caller's token, last;
-   --  Windows always has one (cmd /c start).
-   procedure Test_Default_Opener (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Program   : Ada.Strings.Unbounded.Unbounded_String;
-      Arguments : Hostkit.String_Vectors.Vector;
-      Found     : constant Boolean := Hostkit.Process.Default_Opener ("text/plain", "<FILE>", Program, Arguments);
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert (Found, "Windows always has a default opener");
-      end if;
-      if Found then
-         Assert (Ada.Strings.Unbounded.Length (Program) > 0, "it names a program");
-         Assert (not Arguments.Is_Empty
-                 and then Ada.Strings.Unbounded.To_String (Arguments.Last_Element) = "<FILE>",
-                 "and the file, by the caller's token, last");
-      else
-         Assert (Ada.Strings.Unbounded.Length (Program) = 0 and then Arguments.Is_Empty,
-                 "no opener names no program");
-      end if;
-   end Test_Default_Opener;
-
-   --  The per-host tables: errno numbers, where volumes live, which mount
-   --  types are internal or networked, the opener a settings file keeps, and
-   --  Windows root syntax read on any host.
-   procedure Test_Host_Tables (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Program   : Ada.Strings.Unbounded.Unbounded_String;
-      Arguments : Hostkit.String_Vectors.Vector;
-   begin
-      for Item in Hostkit.Errors.Cause loop
-         Assert (Hostkit.Errors.Code_Of (Item) >= 0, "an errno is never negative");
-      end loop;
-      if Hostkit.Host.Current = Hostkit.Host.Linux then
-         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 36, "ENAMETOOLONG is 36 on Linux");
-         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Quota_Exceeded) = 122, "EDQUOT is 122 on Linux");
-      elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
-         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 63, "ENAMETOOLONG is 63 on macOS");
-      elsif Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Quota_Exceeded) = 0, "Windows has no EDQUOT");
-      end if;
-
-      Assert (Hostkit.Mounts.Is_Pseudo ("proc") and then Hostkit.Mounts.Is_Pseudo ("TMPFS")
-              and then Hostkit.Mounts.Is_Pseudo (""), "proc, tmpfs and no type are internal");
-      Assert (not Hostkit.Mounts.Is_Pseudo ("ext4"), "ext4 holds files");
-      Assert (Hostkit.Mounts.Is_Network ("nfs4") and then Hostkit.Mounts.Is_Network ("CIFS"),
-              "nfs4 and cifs are networked");
-      Assert (not Hostkit.Mounts.Is_Network ("vfat"), "vfat is local");
-      declare
-         Places : constant Hostkit.Mounts.Volume_Place_List := Hostkit.Mounts.Volume_Places;
-      begin
-         case Hostkit.Host.Current is
-            when Hostkit.Host.Linux =>
-               Assert (Places'Length = 3 and then Ada.Strings.Unbounded.To_String (Places (1).Path) = "/mnt",
-                       "Linux mounts volumes under /mnt, /media and /run/media");
-            when Hostkit.Host.MacOS =>
-               Assert (Ada.Strings.Unbounded.To_String (Places (1).Path) = "/Volumes", "macOS under /Volumes");
-            when Hostkit.Host.Windows =>
-               Assert (Places'Length = 26, "Windows has a root per drive letter");
-            when Hostkit.Host.Unsupported =>
-               null;
-         end case;
-      end;
-
-      Hostkit.Process.Portable_Default_Opener ("{path}", Program, Arguments);
-      Assert (Ada.Strings.Unbounded.To_String (Arguments.Last_Element) = "{path}", "the file comes last");
-      Assert (Hostkit.Process.Is_Shell_Start (Ada.Strings.Unbounded.To_String (Program), Arguments)
-              = (Hostkit.Host.Current = Hostkit.Host.Windows),
-              "the portable opener is the shell's start shape exactly on Windows");
-
-      --  The shell-start shape, read the same on every host.
-      declare
-         function Args (A, B, C, D : String := ""; Count : Natural := 4) return Hostkit.String_Vectors.Vector is
-            Result : Hostkit.String_Vectors.Vector;
-            procedure Add (Text : String) is
-            begin
-               if Natural (Result.Length) < Count then
-                  Result.Append (Ada.Strings.Unbounded.To_Unbounded_String (Text));
-               end if;
-            end Add;
-         begin
-            Add (A);
-            Add (B);
-            Add (C);
-            Add (D);
-            return Result;
-         end Args;
-         function Shape (Program : String; Arguments : Hostkit.String_Vectors.Vector) return Boolean
-           renames Hostkit.Process.Has_Shell_Start_Shape;
-      begin
-         Assert (Shape ("cmd", Args ("/c", "start", "", "x&calc")), "cmd /c start, an empty title, a file");
-         Assert (Shape ("CMD.EXE", Args ("/C", "START", "", "f")), "any case");
-         Assert (Shape ("C:\Windows\System32\cmd.exe", Args ("/c", "start", "", "f")), "cmd by its path");
-         Assert (not Shape ("cmd", Args ("/c", "start", "title", "f")), "a title is not the shape");
-         Assert (not Shape ("cmd", Args ("/c", "start", "", "f", Count => 3)), "three arguments are not");
-         Assert (not Shape ("cmd", Args ("/c", "start", "", "")), "an empty file is not");
-         Assert (not Shape ("notcmd.exe", Args ("/c", "start", "", "f")), "another program is not");
-         Assert (not Shape ("cmd", Args ("/k", "start", "", "f")), "/k is not");
-      end;
-
-      Assert (Hostkit.Fs.Drive_Root_Length ("C:\Users") = 3 and then Hostkit.Fs.Drive_Root_Length ("D:/") = 3,
-              "a drive root is three bytes");
-      Assert (Hostkit.Fs.Drive_Root_Length ("/home") = 0 and then Hostkit.Fs.Drive_Root_Length ("C:") = 0,
-              "a POSIX path or a bare drive letter has no drive root");
-      Assert (Hostkit.Fs.Has_Windows_Root ("\\server\share") and then Hostkit.Fs.Has_Windows_Root ("c:\"),
-              "a share and a drive are Windows roots");
-      Assert (not Hostkit.Fs.Has_Windows_Root ("/c:/x"), "a POSIX path is not");
-   end Test_Host_Tables;
-
-   procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      package FR renames Hostkit.Filesystem_Rules;
-
-      LF     : constant Character := Character'Val (10);
-      --  A miniature /proc/self/mountinfo: an ext4 root, a FAT stick under
-      --  /media/usb, and an ext4 disk under /media/usb-backup whose mount point
-      --  merely starts with the same text.
-      Sample : constant String :=
-        "30 1 8:2 / / rw,relatime - ext4 /dev/sda2 rw" & LF
-        & "48 30 8:17 / /media/usb rw,nosuid - vfat /dev/sdb1 rw,fmask=0022" & LF
-        & "49 30 8:33 / /media/usb-backup rw - ext4 /dev/sdc1 rw";
-   begin
-      --  The type classification is pure and matched case-insensitively.
-      Assert (FR.Dos_By_Type_Name ("vfat"), "vfat is a DOS-ruled filesystem");
-      Assert (FR.Dos_By_Type_Name ("exfat") and then FR.Dos_By_Type_Name ("ntfs"),
-              "exfat and ntfs are DOS-ruled");
-      Assert (FR.Dos_By_Type_Name ("FAT32") and then FR.Dos_By_Type_Name ("NTFS"),
-              "the classifier is case-insensitive");
-      Assert (not FR.Dos_By_Type_Name ("ext4"), "ext4 is not DOS-ruled");
-      Assert (not FR.Dos_By_Type_Name ("apfs") and then not FR.Dos_By_Type_Name ("btrfs"),
-              "apfs and btrfs are not DOS-ruled");
-      Assert (not FR.Dos_By_Type_Name (""), "an unknown filesystem is not DOS-ruled");
-
-      --  The deepest covering mount wins, and a sibling that merely shares a
-      --  prefix (/media/usb-backup vs /media/usb) does not match.
-      Assert
-        (FR.Filesystem_Type_For_Mount (Sample, "/home/user/doc.txt") = "ext4",
-         "a path under the root mount reports the root filesystem");
-      Assert
-        (FR.Filesystem_Type_For_Mount (Sample, "/media/usb/photo.png") = "vfat",
-         "a path under a deeper mount reports that mount's filesystem");
-      Assert
-        (FR.Filesystem_Type_For_Mount (Sample, "/media/usb-backup/x") = "ext4",
-         "a sibling mount sharing a name prefix is not matched");
-      Assert
-        (FR.Dos_By_Type_Name (FR.Filesystem_Type_For_Mount (Sample, "/media/usb/x")),
-         "a file destined for the FAT stick is judged DOS-ruled");
-
-      --  The host query answers, and agrees with the host: a POSIX scratch
-      --  directory is not DOS-ruled, while every Windows volume is.
-      if Hostkit.Shell.Is_Command_Shell then
-         Assert (Hostkit.Fs.Uses_Dos_Filename_Rules (Scratch),
-                 "Windows treats its volumes as DOS-ruled");
-      else
-         Assert (not Hostkit.Fs.Uses_Dos_Filename_Rules (Scratch),
-                 "a POSIX scratch directory is not DOS-ruled");
-      end if;
-      Assert
-        (not Hostkit.Fs.Uses_Dos_Filename_Rules ("") or else Hostkit.Shell.Is_Command_Shell,
-         "an unresolvable path answers without raising");
-   end Test_Filesystem_Rules;
-
-   procedure Test_Run_Reports_Exit_Status (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Empty  : Hostkit.String_Vectors.Vector;
-      Status : Integer := -1;
-      Ran    : Boolean;
-   begin
-      Ran := Hostkit.Process.Run (Companion ("noop"), Empty, Status);
-      Assert (Ran, "a program that succeeds is reported as having run");
-      Assert (Status = 0, "and its exit status is zero; was " & Status'Image);
-
-      Ran := Hostkit.Process.Run (Companion ("failing"), Empty, Status);
-      Assert (not Ran, "a program that fails is not reported as successful");
-      Assert (Status = 7, "and its own exit status is reported; was " & Status'Image);
-   end Test_Run_Reports_Exit_Status;
-
-   procedure Test_Launch_Does_Not_Wait (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Empty : Hostkit.String_Vectors.Vector;
-      Arguments : Hostkit.String_Vectors.Vector;
-   begin
-      --  A detached launch says only that it began. It has no exit status to give, and
-      --  reporting one -- as the backgrounding shell's zero used to be reported -- says
-      --  nothing whatever about the program.
-      Assert (Hostkit.Process.Launch (Companion ("noop"), Empty), "a launch that starts says so");
-      Arguments.Append (To_Unbounded_String ("one argument"));
-      Arguments.Append (To_Unbounded_String ("quoted ""argument"""));
-      Assert
-        (Hostkit.Process.Launch (Companion ("noop"), Arguments),
-         "a detached argument vector starts without shell reinterpretation");
-      Assert
-        (not Hostkit.Process.Launch ("", Empty),
-         "a launch with no program to run does not claim to have started");
-   end Test_Launch_Does_Not_Wait;
-
-   procedure Test_Is_Runnable (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-   begin
-      Assert (not Hostkit.Process.Is_Runnable (""), "nothing is not a program");
-      Assert
-        (not Hostkit.Process.Is_Runnable ("hostkit-no-such-program-anywhere"),
-         "a name not on the search path is not runnable");
-      --  A folder is not a program, whatever GNAT's own check says on Windows.
-      Assert (not Hostkit.Process.Is_Runnable (Ada.Directories.Current_Directory), "a directory is not runnable");
-      Assert
-        (Hostkit.Process.Is_Runnable (Ada.Command_Line.Command_Name)
-         or else not Ada.Directories.Exists (Ada.Command_Line.Command_Name),
-         "the running test program, named by its path, is runnable");
-      --  And a bare name found on the search path: the host's own shell.
-      Assert
-        (Hostkit.Process.Is_Runnable (if Hostkit.Host.Current = Hostkit.Host.Windows then "cmd" else "sh"),
-         "the host's shell, named bare, is found and runnable");
-   end Test_Is_Runnable;
-
-   procedure Test_Terminal (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Saved : constant String := Hostkit.Environment.Value ("TERMINAL", Default => "");
-      Had   : constant Boolean := Ada.Environment_Variables.Exists ("TERMINAL");
-      Self  : constant String := Ada.Directories.Full_Name (Ada.Command_Line.Command_Name);
-   begin
-      --  TERMINAL wins when it names something runnable, and is passed over
-      --  when it does not.
-      Hostkit.Environment.Set ("TERMINAL", Self);
-      Assert (Hostkit.Process.Default_Terminal = Self, "TERMINAL naming a runnable program is the terminal");
-      Hostkit.Environment.Set ("TERMINAL", "hostkit-no-such-terminal-anywhere");
-      Assert
-        (Hostkit.Process.Default_Terminal /= "hostkit-no-such-terminal-anywhere",
-         "TERMINAL naming nothing runnable is ignored");
-      if Had then
-         Hostkit.Environment.Set ("TERMINAL", Saved);
-      else
-         Hostkit.Environment.Clear ("TERMINAL");
-      end if;
-
-      --  A terminal that starts where it is started is started in the folder.
-      declare
-         Folder  : constant String := Ada.Directories.Compose (Scratch, "a folder");
-         Command : constant String := Hostkit.Process.Terminal_Command ("xterm", Folder);
-      begin
-         Assert
-           (Ada.Strings.Fixed.Index (Command, Hostkit.Shell.Quote (Folder)) > 0
-            and then Ada.Strings.Fixed.Tail (Command, Hostkit.Shell.Quote ("xterm")'Length)
-              = Hostkit.Shell.Quote ("xterm"),
-            "the command changes into the folder, then starts the terminal: " & Command);
-      end;
-      --  The ones that must be told the folder are told it.
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert
-           (Ada.Strings.Fixed.Index (Hostkit.Process.Terminal_Command ("wt", "C:\x"), "-d") > 0,
-            "Windows Terminal is given the folder with -d");
-      elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
-         Assert
-           (Ada.Strings.Fixed.Index (Hostkit.Process.Terminal_Command ("open", "/x"), "Terminal") > 0,
-            "on macOS open -a Terminal is handed the folder");
-      end if;
-   end Test_Terminal;
-
-   procedure Test_Folds_Name_Case (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Path : constant String := Ada.Directories.Compose (Scratch, "CaseProbe");
-      File : Ada.Text_IO.File_Type;
-   begin
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-      Ada.Text_IO.Close (File);
-      declare
-         Found_Folded : constant Boolean := Ada.Directories.Exists (Ada.Directories.Compose (Scratch, "caseprobe"));
-      begin
-         Ada.Directories.Delete_File (Path);
-         Assert
-           (Hostkit.Fs.Folds_Name_Case (Scratch) = Found_Folded,
-            "Folds_Name_Case says what the volume does: a name in other case "
-            & (if Found_Folded then "finds" else "does not find") & " the file");
-      end;
-   end Test_Folds_Name_Case;
-
-   procedure Test_Current_User_Account (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Account : Hostkit.Metadata.Account_Id;
-      Id      : Natural;
-      Known   : constant Boolean := Hostkit.Process.Current_User_Account (Account);
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert (not Known, "Windows has no numeric user id to give");
-         return;
-      end if;
-      Assert (Known, "a POSIX host gives the process's user id");
-      Assert
-        (not Hostkit.Process.Current_User_Id (Id) or else Hostkit.Metadata.Account_Id (Id) = Account,
-         "the narrow and the full user id agree");
-      --  A file this process makes is owned by it.
-      declare
-         Path      : constant String := Ada.Directories.Compose (Scratch, "hostkit-owned-by-me");
-         File      : Ada.Text_IO.File_Type;
-         Owner     : Hostkit.Metadata.Account_Id;
-         Group     : Hostkit.Metadata.Account_Id;
-         Available : Boolean;
-      begin
-         Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-         Ada.Text_IO.Close (File);
-         Hostkit.Metadata.File_Ownership (Path, Owner, Group, Available);
-         Ada.Directories.Delete_File (Path);
-         Assert (Available and then Owner = Account, "a new file's owner is the current user account");
-      end;
-   end Test_Current_User_Account;
-
-   procedure Test_Path_Containment (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Sep : constant Character := Hostkit.Fs.Separator;
-      function P (Parts : String) return String is
-        ([for C of Parts => (if C = '|' then Sep else C)]);
-   begin
-      Assert (Hostkit.Fs.Is_Separator ('/'), "a slash separates everywhere");
-      Assert
-        (Hostkit.Fs.Is_Separator ('\') = (Hostkit.Host.Current = Hostkit.Host.Windows),
-         "a backslash separates on Windows only");
-      Assert (Hostkit.Fs.Is_Same_Or_Inside (P ("|a|b"), P ("|a|b")), "a path is the same as itself");
-      Assert (Hostkit.Fs.Is_Same_Or_Inside (P ("|a|b|c"), P ("|a|b")), "a child is inside");
-      Assert (not Hostkit.Fs.Is_Same_Or_Inside (P ("|a|bc"), P ("|a|b")), "a sibling sharing a prefix is not");
-      Assert (Hostkit.Fs.Is_Same_Or_Inside (P ("|a"), P ("|")), "everything is inside the root");
-      Assert (not Hostkit.Fs.Is_Same_Or_Inside ("", P ("|a")), "an empty path is inside nothing");
-      Assert (Hostkit.Fs.Rebase (P ("|a|b|c"), P ("|a|b"), P ("|x")) = P ("|x|c"), "a child follows its tree");
-      Assert (Hostkit.Fs.Rebase (P ("|a|b"), P ("|a|b"), P ("|x")) = P ("|x"), "the tree itself moves");
-      Assert (Hostkit.Fs.Rebase (P ("|a|bc"), P ("|a|b"), P ("|x")) = P ("|a|bc"), "a sibling stays");
-   end Test_Path_Containment;
-
-   procedure Test_Environment_Value (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Name  : constant String := "HOSTKIT_TEST_ENVIRONMENT_VALUE";
-      Value : Hostkit.UString;
-   begin
-      if Ada.Environment_Variables.Exists (Name) then
-         Ada.Environment_Variables.Clear (Name);
-      end if;
-
-      Assert
-        (not Hostkit.Process.Environment_Value (Name, Value),
-         "a missing environment variable is reported as absent");
-      Assert
-        (To_String (Value) = "",
-         "a missing environment variable leaves no stale value");
-
-      --  A present empty variable, where the host has such a thing. Windows
-      --  does not: setting one to "" removes it, and absent is the only
-      --  answer left. Asserted per host rather than skipped, because what the
-      --  host does is the thing worth pinning.
-      Ada.Environment_Variables.Set (Name, "");
-
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert
-           (not Hostkit.Process.Environment_Value (Name, Value),
-            "setting a variable to nothing left it present on a host that "
-            & "removes it");
-      else
-         Assert
-           (Hostkit.Process.Environment_Value (Name, Value),
-            "a present empty environment variable is still present");
-         Assert
-           (To_String (Value) = "",
-            "a present empty environment variable returns an empty value");
-      end if;
-
-      Ada.Environment_Variables.Set (Name, "hostkit-value");
-      Assert
-        (Hostkit.Process.Environment_Value (Name, Value),
-         "a present environment variable is reported as present");
-      Assert
-        (To_String (Value) = "hostkit-value",
-         "the environment value is returned without consumer-side probing");
-
-      Ada.Environment_Variables.Clear (Name);
-
-      --  A value this process inherited with a non-ASCII letter in it, as a
-      --  user profile path has one (C:\Users\Jürgen): it must come back as
-      --  UTF-8, which every path call here takes, and not in a code page.
-      --  CI sets the variable on every runner; a local run without it has
-      --  nothing to compare.
-      if Hostkit.Process.Environment_Value ("HOSTKIT_TEST_NON_ASCII", Value) then
-         Assert
-           (To_String (Value) = "J" & Character'Val (16#C3#) & Character'Val (16#BC#) & "rgen",
-            "an inherited non-ASCII value comes back as UTF-8, got"
-            & Natural'Image (Length (Value)) & " bytes");
-      end if;
-
-      --  And one this process sets itself: Set takes UTF-8 and Value gives
-      --  the same bytes back (Windows' C runtime would pass them on in the
-      --  ANSI code page), and Clear removes it.
-      declare
-         Jurgen : constant String := "J" & Character'Val (16#C3#) & Character'Val (16#BC#) & "rgen";
-         Found  : Boolean;
-      begin
-         Hostkit.Environment.Set (Name, Jurgen);
-         Assert
-           (Hostkit.Environment.Value (Name, Found) = Jurgen and then Found,
-            "a non-ASCII value set here is read back as the same UTF-8");
-         Assert
-           (Hostkit.Process.Environment_Value (Name, Value) and then To_String (Value) = Jurgen,
-            "the process view of the environment reads it back the same");
-         Hostkit.Environment.Clear (Name);
-         Assert
-           (Hostkit.Environment.Value (Name, Found) = "" and then not Found,
-            "a cleared variable is gone");
-         --  The C runtime's own copy follows, which Ada.Environment_Variables
-         --  (and every getenv) reads.
-         Hostkit.Environment.Set (Name, "hostkit-runtime-copy");
-         Assert
-           (Ada.Environment_Variables.Exists (Name)
-            and then Ada.Environment_Variables.Value (Name) = "hostkit-runtime-copy",
-            "a value set here is seen by Ada.Environment_Variables too");
-         Hostkit.Environment.Clear (Name);
-         Assert (not Ada.Environment_Variables.Exists (Name), "and so is its clearing");
-      end;
-   end Test_Environment_Value;
-
-   procedure Test_Shell_Quoting_Holds (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Arguments : Hostkit.String_Vectors.Vector;
-      Status    : Integer := -1;
-      Ran       : Boolean;
-
-      --  An argument that tries to be a second command. If the quoting holds it stays
-      --  one argument to Noop, which ignores it and exits zero; if it leaks, the shell
-      --  runs "exit 9" and the status says so.
-      Separator : constant String := (if Hostkit.Shell.Is_Command_Shell then "&" else ";");
-   begin
-      Arguments.Append (To_Unbounded_String ("literal" & Separator & " exit 9"));
-
-      Ran :=
-        Hostkit.Process.Run_Shell_Command
-          (Hostkit.Shell.Command_Line (Companion ("noop"), Arguments),
-           Wait        => True,
-           Exit_Status => Status);
-
-      Assert (Ran, "the quoted command runs to completion when awaited");
-      Assert
-        (Status = 0,
-         "the separator stays inside one argument rather than running as a command; exit was "
-         & Status'Image);
-   end Test_Shell_Quoting_Holds;
-
-   procedure Test_Captured_Run (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Out_Path : constant String := Ada.Directories.Compose (Scratch, "captured-out.txt");
-      Err_Path : constant String := Ada.Directories.Compose (Scratch, "captured-err.txt");
-
-      Empty   : Hostkit.String_Vectors.Vector;
-      Outcome : Hostkit.Process.Process_Outcome;
-   begin
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program     => Companion ("sleeper"),
-           Arguments   => Empty,
-           Stdout_Path => Out_Path,
-           Stderr_Path => Err_Path);
-
-      Assert (Outcome.Started, "the program started");
-      Assert (not Outcome.Timed_Out, "and finished on its own");
-      Assert (Outcome.Exit_Status = 0, "with its own exit status; was " & Outcome.Exit_Status'Image);
-
-      --  The point of capturing is that the output is somewhere afterwards.
-      Assert (File_Contains (Out_Path, "out-line"), "standard output was captured");
-      Assert (File_Contains (Err_Path, "err-line"), "standard error was captured, separately");
-
-      --  Both into one file: both there, neither written over the other.
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program     => Companion ("sleeper"),
-           Arguments   => Empty,
-           Stdout_Path => Out_Path,
-           Stderr_Path => Out_Path);
-      Assert (Outcome.Started and then Outcome.Exit_Status = 0, "the program ran again");
-      Assert (File_Contains (Out_Path, "out-line") and then File_Contains (Out_Path, "err-line"),
-              "one file for both streams lost what one of them wrote");
-   end Test_Captured_Run;
-
-   procedure Test_Captured_Input (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      In_Path  : constant String := Ada.Directories.Compose (Scratch, "captured-in.txt");
-      Out_Path : constant String := Ada.Directories.Compose (Scratch, "captured-in-out.txt");
-      Missing  : constant String := Ada.Directories.Compose (Scratch, "captured-in-absent.txt");
-
-      Empty   : Hostkit.String_Vectors.Vector;
-      Outcome : Hostkit.Process.Process_Outcome;
-      File    : Ada.Text_IO.File_Type;
-   begin
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, In_Path);
-      Ada.Text_IO.Put_Line (File, "secret-from-a-file");
-      Ada.Text_IO.Close (File);
-
-      if Ada.Directories.Exists (Missing) then
-         Ada.Directories.Delete_File (Missing);
-      end if;
-
-      --  A program that asks for a secret on standard input cannot be run at
-      --  all without this: there is no terminal to answer it from.
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program     => Companion ("echoer"),
-           Arguments   => Empty,
-           Stdin_Path  => In_Path,
-           Stdout_Path => Out_Path,
-           --  A deadline, because the way this fails is by not failing: a
-           --  program left reading the caller's own input waits for ever, and
-           --  a suite that hangs says less than one that stops and reports.
-           Timeout_Ms  => 20_000);
-
-      Assert (Outcome.Started, "the program started with a file on its input");
-      Assert
-        (not Outcome.Timed_Out,
-         "and finished rather than waiting on input that never came");
-      Assert
-        (Outcome.Exit_Status = 0,
-         "and found something to read; exit was " & Outcome.Exit_Status'Image);
-      Assert
-        (File_Contains (Out_Path, "read:secret-from-a-file"),
-         "and read what the file said, rather than the caller's own input");
-
-      --  Told to read a file that is not there, the launch has to fail. Falling
-      --  back to the caller's input would leave a password prompt waiting on a
-      --  terminal that may not exist.
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program    => Companion ("echoer"),
-           Arguments  => Empty,
-           Stdin_Path => Missing);
-
-      Assert
-        (not Outcome.Started,
-         "an input file that is not there fails the launch rather than falling back");
-   end Test_Captured_Input;
-
-   procedure Test_Timeout_Kills (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Arguments : Hostkit.String_Vectors.Vector;
-      Outcome   : Hostkit.Process.Process_Outcome;
-   begin
-      --  A program that will not stop. Without a deadline the caller waits for ever, which
-      --  is the whole reason Run_Captured takes one.
-      Arguments.Append (To_Unbounded_String ("--hang"));
-
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program    => Companion ("sleeper"),
-           Arguments  => Arguments,
-           Timeout_Ms => 300);
-
-      Assert (Outcome.Started, "the program started");
-      Assert (Outcome.Timed_Out, "and the deadline ended it, rather than the program");
-   end Test_Timeout_Kills;
-
-   --  Stopped as a group, a program takes what it started with it: a shell
-   --  killed on a deadline leaves no child of its own running.
-   procedure Test_Group_Stops_Whole (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      use type Hostkit.Process.Presence;
-
-      Pid_Path  : constant String := Ada.Directories.Compose (Scratch, "group-child.pid");
-      Arguments : Hostkit.String_Vectors.Vector;
-      Outcome   : Hostkit.Process.Process_Outcome;
-      File      : Ada.Text_IO.File_Type;
-      Child     : Integer := 0;
-      Gone      : Boolean := False;
-   begin
-      --  Where there is no POSIX shell there is no group to stop.
-      if not Ada.Directories.Exists ("/bin/sh") then
-         return;
-      end if;
-      Arguments.Append (To_Unbounded_String ("-c"));
-      Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; wait"));
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program     => "/bin/sh",
-           Arguments   => Arguments,
-           Stdin_Path  => "/dev/null",
-           Timeout_Ms  => 500,
-           Whole_Group => True);
-      Assert (Outcome.Started and then Outcome.Timed_Out, "the shell was not stopped on its deadline");
-
-      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_Path);
-      Child := Integer'Value (Ada.Text_IO.Get_Line (File));
-      Ada.Text_IO.Close (File);
-      for Try in 1 .. 100 loop
-         Gone := Hostkit.Process.Presence_Of (Child) = Hostkit.Process.Absent;
-         exit when Gone;
-         delay 0.01;
-      end loop;
-      Assert (Gone, "what the shell started outlived it");
-   end Test_Group_Stops_Whole;
-
-   --  A group whose leader ends well takes what it left running with it:
-   --  a program sent to the background does not run on after it.
-   procedure Test_Group_Ends_With_Leader (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      use type Hostkit.Process.Presence;
-
-      Pid_Path  : constant String := Ada.Directories.Compose (Scratch, "group-left.pid");
-      Arguments : Hostkit.String_Vectors.Vector;
-      Outcome   : Hostkit.Process.Process_Outcome;
-      File      : Ada.Text_IO.File_Type;
-      Child     : Integer := 0;
-      Gone      : Boolean := False;
-   begin
-      if Hostkit.Host.Current /= Hostkit.Host.Linux then
-         return;
-      end if;
-      Arguments.Append (To_Unbounded_String ("-c"));
-      Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; exit 0"));
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program     => "/bin/sh",
-           Arguments   => Arguments,
-           Stdin_Path  => "/dev/null",
-           Timeout_Ms  => 10_000,
-           Whole_Group => True);
-      Assert (Outcome.Started and then not Outcome.Timed_Out and then Outcome.Exit_Status = 0,
-              "the shell did not end on its own");
-      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_Path);
-      Child := Integer'Value (Ada.Text_IO.Get_Line (File));
-      Ada.Text_IO.Close (File);
-      for Try in 1 .. 100 loop
-         Gone := Hostkit.Process.Presence_Of (Child) = Hostkit.Process.Absent;
-         exit when Gone;
-         delay 0.01;
-      end loop;
-      Assert (Gone, "what the shell left running outlived it");
-   end Test_Group_Ends_With_Leader;
-
-   --  A clean wrapper holds no environment of the caller's: what the
-   --  program can read of its parent says nothing it was not given.
-   procedure Test_Clean_Wrapper (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Out_Path  : constant String := Ada.Directories.Compose (Scratch, "wrapper-env.txt");
-      Arguments : Hostkit.String_Vectors.Vector;
-      Outcome   : Hostkit.Process.Process_Outcome;
-      File      : Ada.Text_IO.File_Type;
-      Seen      : Unbounded_String;
-   begin
-      if Hostkit.Host.Current /= Hostkit.Host.Linux then
-         return;
-      end if;
-      Ada.Environment_Variables.Set ("HOSTKIT_WRAPPER_SECRET", "not-for-children");
-      Arguments.Append (To_Unbounded_String ("-c"));
-      Arguments.Append (To_Unbounded_String ("tr '\000' '\n' < /proc/$PPID/environ"));
-      Outcome :=
-        Hostkit.Process.Run_Captured
-          (Program       => "/bin/sh",
-           Arguments     => Arguments,
-           Stdin_Path    => "/dev/null",
-           Stdout_Path   => Out_Path,
-           Timeout_Ms    => 10_000,
-           Whole_Group   => True,
-           Clean_Wrapper => True);
-      Ada.Environment_Variables.Clear ("HOSTKIT_WRAPPER_SECRET");
-      Assert (Outcome.Started and then Outcome.Exit_Status = 0, "the program did not run");
-      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Out_Path);
-      while not Ada.Text_IO.End_Of_File (File) loop
-         Append (Seen, Ada.Text_IO.Get_Line (File) & ASCII.LF);
-      end loop;
-      Ada.Text_IO.Close (File);
-      Assert (Ada.Strings.Fixed.Index (To_String (Seen), "HOSTKIT_WRAPPER_SECRET") = 0
-              and then Ada.Strings.Fixed.Index (To_String (Seen), "PATH=") > 0,
-              "the wrapper held the caller's environment: " & To_String (Seen));
-   end Test_Clean_Wrapper;
-
-   procedure Test_Accessible_By_Others (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      procedure Write (Path : String) is
-         File : Ada.Text_IO.File_Type;
-      begin
-         Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-         Ada.Text_IO.Put_Line (File, "key");
-         Ada.Text_IO.Close (File);
-      end Write;
-
-      Secure : constant String := Ada.Directories.Compose (Scratch, "hk-key-0600");
-      Open   : constant String := Ada.Directories.Compose (Scratch, "hk-key-0644");
-
-      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
-        return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "chmod";
-
-      procedure Chmod (Path : String; Mode : Interfaces.C.int) is
-         C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-         Ignored : constant Interfaces.C.int := C_Chmod (C_Path, Mode);
-      begin
-         pragma Unreferenced (Ignored);
-         Interfaces.C.Strings.Free (C_Path);
-      end Chmod;
-   begin
-      --  Only meaningful where mode bits mean something; on Windows this always answers False,
-      --  and setting a POSIX mode there is a no-op, so there is nothing to assert.
-      if not Hostkit.Shell.Is_Command_Shell then
-         Write (Secure);
-         Write (Open);
-         Chmod (Secure, 8#600#);
-         Chmod (Open, 8#644#);
-
-         Assert
-           (not Hostkit.Fs.Accessible_By_Others (Secure),
-            "a 0600 file is not accessible by others");
-         Assert
-           (Hostkit.Fs.Accessible_By_Others (Open),
-            "a 0644 file is accessible by others");
-      end if;
-
-      Assert
-        (not Hostkit.Fs.Accessible_By_Others (Ada.Directories.Current_Directory),
-         "a directory is not judged by this -- regular files only");
-   end Test_Accessible_By_Others;
-
-   procedure Test_Directory_Accessible_By_Others
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Private_Dir : constant String := Ada.Directories.Compose (Scratch, "hk-dir-0700");
-      Open_Dir    : constant String := Ada.Directories.Compose (Scratch, "hk-dir-0755");
-      A_File      : constant String := Ada.Directories.Compose (Scratch, "hk-dir-file");
-
-      File : Ada.Text_IO.File_Type;
-   begin
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, A_File);
-      Ada.Text_IO.Close (File);
-
-      --  Only meaningful where mode bits mean something; on Windows this always answers
-      --  False, and setting a POSIX mode there is a no-op, so there is nothing to assert.
-      if not Hostkit.Shell.Is_Command_Shell then
-         Ada.Directories.Create_Path (Private_Dir);
-         Ada.Directories.Create_Path (Open_Dir);
-         Chmod (Private_Dir, 8#700#);
-         Chmod (Open_Dir, 8#755#);
-
-         Assert
-           (not Hostkit.Fs.Directory_Accessible_By_Others (Private_Dir),
-            "a 0700 directory is not accessible by others");
-         Assert
-           (Hostkit.Fs.Directory_Accessible_By_Others (Open_Dir),
-            "a 0755 directory is accessible by others");
-      end if;
-
-      Assert
-        (not Hostkit.Fs.Directory_Accessible_By_Others (A_File),
-         "a regular file is not judged by this -- directories only");
-   end Test_Directory_Accessible_By_Others;
-
-   procedure Test_Create_Temporary_Directory
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      use type Ada.Directories.File_Kind;
-
-      pragma Unreferenced (T);
-
-      Directory : constant String := Hostkit.Fs.Create_Temporary_Directory ("hk-temp");
-   begin
-      begin
-         Assert (Directory /= "", "a temporary directory path is returned");
-         Assert (Ada.Directories.Exists (Directory), "the temporary directory exists");
-         Assert
-           (Ada.Directories.Kind (Directory) = Ada.Directories.Directory,
-            "the temporary path is a directory");
-      exception
-         when others =>
-            Delete_Tree_If_Present (Directory);
-            raise;
-      end;
-
-      Delete_Tree_If_Present (Directory);
-   end Test_Create_Temporary_Directory;
-
-   --  A dot is not the only way to hide an entry: Windows and macOS keep a
-   --  hidden flag of their own, set here with the host's own tool.
-   procedure Test_Is_Hidden
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Root  : constant String := Hostkit.Fs.Create_Temporary_Directory ("hk-hidden");
-      Plain : constant String := Ada.Directories.Compose (Root, "plain.txt");
-      Dot   : constant String := Ada.Directories.Compose (Root, ".dotted");
-
-      --  Run Program with Arguments; False when it is not on PATH or fails.
-      function Run (Program : String; Arguments : GNAT.OS_Lib.Argument_List) return Boolean is
-         use type GNAT.OS_Lib.String_Access;
-         Found   : GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path (Program);
-         Success : Boolean := False;
-      begin
-         if Found /= null then
-            GNAT.OS_Lib.Spawn (Found.all, Arguments, Success);
-            GNAT.OS_Lib.Free (Found);
-         end if;
-         return Success;
-      end Run;
-   begin
-      begin
-         Write_File (Plain, "x");
-         Write_File (Dot, "x");
-         Assert (not Hostkit.Fs.Is_Hidden (Plain), "an ordinary file is not hidden");
-         Assert (not Hostkit.Fs.Is_Hidden (Dot), "a leading dot is the caller's rule, not a host flag");
-         case Hostkit.Host.Current is
-            when Hostkit.Host.MacOS =>
-               declare
-                  Flag : aliased String := "hidden";
-                  Name : aliased String := Plain;
-               begin
-                  if Run ("chflags", [Flag'Unchecked_Access, Name'Unchecked_Access]) then
-                     Assert (Hostkit.Fs.Is_Hidden (Plain), "UF_HIDDEN marks the entry hidden");
-                  end if;
-               end;
-            when Hostkit.Host.Windows =>
-               declare
-                  Flag : aliased String := "+h";
-                  Name : aliased String := Plain;
-               begin
-                  if Run ("attrib", [Flag'Unchecked_Access, Name'Unchecked_Access]) then
-                     Assert (Hostkit.Fs.Is_Hidden (Plain), "FILE_ATTRIBUTE_HIDDEN marks the entry hidden");
-                  end if;
-               end;
-            when others =>
-               null;
-         end case;
-      exception
-         when others =>
-            Delete_Tree_If_Present (Root);
-            raise;
-      end;
-      Delete_Tree_If_Present (Root);
-   end Test_Is_Hidden;
-
-   procedure Test_Move_No_Replace_Outcome
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      use type Hostkit.Fs.Move_Outcome;
-
-      pragma Unreferenced (T);
-
-      Root   : constant String := Hostkit.Fs.Create_Temporary_Directory ("hk-move");
-      Source : constant String := Ada.Directories.Compose (Root, "source.txt");
-      Target : constant String := Ada.Directories.Compose (Root, "target.txt");
-      Taken  : constant String := Ada.Directories.Compose (Root, "taken.txt");
-      Absent : constant String := Ada.Directories.Compose (Root, "absent.txt");
-   begin
-      begin
-         Write_File (Source, "payload");
-         Write_File (Taken, "keep");
-         Assert
-           (Hostkit.Fs.Move_No_Replace_Outcome (Absent, Target) = Hostkit.Fs.Move_Refused,
-            "a missing source is refused, not offered to a copy fallback");
-         Assert
-           (Hostkit.Fs.Move_No_Replace_Outcome (Source, Taken) = Hostkit.Fs.Move_Refused,
-            "an occupied target is refused, not offered to a copy fallback");
-         Assert (Ada.Directories.Exists (Source), "a refused move leaves the source");
-         Assert
-           (Hostkit.Fs.Move_No_Replace_Outcome (Source, Target) = Hostkit.Fs.Moved,
-            "a free target on the same filesystem is moved");
-         Assert
-           (Ada.Directories.Exists (Target) and then not Ada.Directories.Exists (Source),
-            "the moved entry is at the target only");
-      exception
-         when others =>
-            Delete_Tree_If_Present (Root);
-            raise;
-      end;
-
-      Delete_Tree_If_Present (Root);
-   end Test_Move_No_Replace_Outcome;
-
-   --  The fallback a filesystem without a native no-replace rename gets (NFS,
-   --  SMB, FUSE). Exercised directly: the local filesystem has the native one.
-   procedure Test_Move_Without_Native_No_Replace
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      use type Hostkit.Fs.Move_Outcome;
-
-      pragma Unreferenced (T);
-
-      Root     : constant String := Hostkit.Fs.Create_Temporary_Directory ("hk-move-fallback");
-      Source   : constant String := Ada.Directories.Compose (Root, "source.txt");
-      Target   : constant String := Ada.Directories.Compose (Root, "target.txt");
-      Taken    : constant String := Ada.Directories.Compose (Root, "taken.txt");
-      Dangling : constant String := Ada.Directories.Compose (Root, "dangling");
-      Folder   : constant String := Ada.Directories.Compose (Root, "folder");
-      Moved_To : constant String := Ada.Directories.Compose (Root, "moved");
-      Empty    : constant String := Ada.Directories.Compose (Root, "empty");
-
-      function Move (From, To : String) return Hostkit.Fs.Move_Outcome is
-        (Hostkit.Fs.Move_Without_Native_No_Replace (From, To));
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         Assert (Move (Source, Target) = Hostkit.Fs.Move_Unsupported, "Windows has no POSIX fallback");
-         Delete_Tree_If_Present (Root);
-         return;
-      end if;
-      begin
-         Write_File (Source, "payload");
-         Write_File (Taken, "keep");
-         Ada.Directories.Create_Directory (Folder);
-         Write_File (Ada.Directories.Compose (Folder, "inner.txt"), "inner");
-         Ada.Directories.Create_Directory (Empty);
-         Assert (Hostkit.Fs.Create_Link ("nowhere", Dangling), "create a dangling link");
-
-         Assert (Move (Ada.Directories.Compose (Root, "absent"), Target) = Hostkit.Fs.Move_Refused,
-                 "a missing source is refused");
-         Assert (Move (Source, Taken) = Hostkit.Fs.Move_Refused, "an occupied target is refused");
-         Assert (Move (Source, Dangling) = Hostkit.Fs.Move_Refused, "a dangling link at the target is refused");
-         Assert (Hostkit.Fs.Is_Link (Dangling), "the refused move leaves the dangling link");
-         Assert (Move (Folder, Empty) = Hostkit.Fs.Move_Refused, "a folder never replaces an empty folder");
-         Assert (Ada.Directories.Exists (Source) and then Ada.Directories.Exists (Folder),
-                 "refused moves leave their sources");
-
-         Assert (Move (Source, Target) = Hostkit.Fs.Moved, "a file moves to a free name");
-         Assert (Ada.Directories.Exists (Target) and then not Ada.Directories.Exists (Source),
-                 "the moved file is at the target only");
-         Assert (Move (Folder, Moved_To) = Hostkit.Fs.Moved, "a folder moves to a free name");
-         Assert (Ada.Directories.Exists (Ada.Directories.Compose (Moved_To, "inner.txt"))
-                 and then not Ada.Directories.Exists (Folder),
-                 "the moved folder keeps its contents at the target only");
-         Assert (Hostkit.Fs.Delete_Link (Dangling), "remove the dangling link");
-      exception
-         when others =>
-            if Hostkit.Fs.Delete_Link (Dangling) then
-               null;
-            end if;
-            Delete_Tree_If_Present (Root);
-            raise;
-      end;
-
-      Delete_Tree_If_Present (Root);
-   end Test_Move_Without_Native_No_Replace;
-
-   procedure Test_Make_Private (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      A_File  : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-file");
-      A_Dir   : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-dir");
-      Missing : constant String := Ada.Directories.Compose (Scratch, "hk-make-private-gone");
-
-      File : Ada.Text_IO.File_Type;
-   begin
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, A_File);
-      Ada.Text_IO.Close (File);
-      Ada.Directories.Create_Path (A_Dir);
-      Chmod (A_File, 8#644#);
-      Chmod (A_Dir, 8#755#);
-
-      if Hostkit.Shell.Is_Command_Shell then
-         Assert
-           (not Hostkit.Fs.Make_Private (A_File),
-            "a host with no mode bits says it did not make the path private");
-      else
-         Assert (Hostkit.Fs.Make_Private (A_File), "a file is made private");
-         Assert
-           (not Hostkit.Fs.Accessible_By_Others (A_File),
-            "a file made private is no longer accessible by others");
-
-         Assert (Hostkit.Fs.Make_Private (A_Dir), "a directory is made private");
-         Assert
-           (not Hostkit.Fs.Directory_Accessible_By_Others (A_Dir),
-            "a directory made private is no longer accessible by others");
-         Assert
-           (Ada.Directories.Exists (A_Dir),
-            "a directory made private can still be entered by its owner");
-      end if;
-
-      Assert
-        (not Hostkit.Fs.Make_Private (Missing),
-         "a path that is not there is not reported as made private");
-   end Test_Make_Private;
-
-   procedure Test_Private_Paths (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      use type GNAT.OS_Lib.File_Descriptor;
-      use type Hostkit.Private_Paths.Create_Outcome;
-
-      Directory : constant String :=
-        Ada.Directories.Compose (Scratch, "hk-private-paths-dir");
-      File_Path : constant String :=
-        Ada.Directories.Compose (Scratch, "hk-private-paths-file");
-      Descriptor : GNAT.OS_Lib.File_Descriptor := GNAT.OS_Lib.Invalid_FD;
-      Available : Boolean;
-      Mode : Natural;
-   begin
-      Delete_Tree_If_Present (Directory);
-      if Ada.Directories.Exists (File_Path) then
-         Ada.Directories.Delete_File (File_Path);
-      end if;
-
-      Assert
-        (Hostkit.Private_Paths.Create_Directory (Directory)
-           = Hostkit.Private_Paths.Created,
-         "an owner-only directory is created");
-      Assert
-        (Hostkit.Private_Paths.Create_Directory (Directory)
-           = Hostkit.Private_Paths.Already_Exists,
-         "a directory creation collision is reported separately");
-      Assert
-        (Hostkit.Private_Paths.Ensure_Directory (Directory),
-         "an existing owned directory can be hardened");
-
-      Descriptor := GNAT.OS_Lib.Create_New_File (File_Path, GNAT.OS_Lib.Binary);
-      Assert (Descriptor /= GNAT.OS_Lib.Invalid_FD, "the file fixture is open");
-      Assert
-        (Hostkit.Private_Paths.Restrict_Open_File (Integer (Descriptor)),
-         "an open regular file is restricted to its owner");
-      GNAT.OS_Lib.Close (Descriptor);
-      Descriptor := GNAT.OS_Lib.Invalid_FD;
-
-      if Hostkit.Metadata.Permissions_Supported
-        and then Hostkit.Metadata.Mode_Bits_Are_Native
-      then
-         Mode := Hostkit.Metadata.File_Permission_Bits (File_Path, Available);
-         Assert (Available and then Mode = 8#600#, "the file mode is owner-only");
-         Mode := Hostkit.Metadata.File_Permission_Bits (Directory, Available);
-         Assert
-           (Available and then Mode = 8#700#,
-            "the directory mode is owner-only and traversable");
-      end if;
-
-      Ada.Directories.Delete_File (File_Path);
-      Delete_Tree_If_Present (Directory);
-   exception
-      when others =>
-         if Descriptor /= GNAT.OS_Lib.Invalid_FD then
-            GNAT.OS_Lib.Close (Descriptor);
-         end if;
-         if Ada.Directories.Exists (File_Path) then
-            Ada.Directories.Delete_File (File_Path);
-         end if;
-         Delete_Tree_If_Present (Directory);
-         raise;
-   end Test_Private_Paths;
-
-   procedure Test_Delete_Tree_No_Follow
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Fs.Delete_Tree_Outcome;
-      Root : constant String := Ada.Directories.Compose (Scratch, "hk-delete-tree");
-      Child : constant String := Ada.Directories.Compose (Root, "child");
-      Outside : constant String := Ada.Directories.Compose (Scratch, "hk-delete-outside");
-      Outside_File : constant String := Ada.Directories.Compose (Outside, "kept.txt");
-      Link : constant String := Ada.Directories.Compose (Root, "outside-link");
-   begin
-      Delete_Tree_If_Present (Root);
-      Delete_Tree_If_Present (Outside);
-      Ada.Directories.Create_Path (Child);
-      Ada.Directories.Create_Path (Outside);
-      Write_File (Ada.Directories.Compose (Child, "payload.txt"), "payload");
-      --  Read-only, as git leaves its objects: Windows refuses a plain
-      --  delete of one, and the tree must still go.
-      Write_File (Ada.Directories.Compose (Child, "read-only.txt"), "kept read-only");
-      GNAT.OS_Lib.Set_Read_Only (Ada.Directories.Compose (Child, "read-only.txt"));
-      Write_File (Outside_File, "keep");
-      declare
-         Linked : constant Boolean := Hostkit.Fs.Create_Link (Outside, Link);
-      begin
-         Assert
-           (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Deleted,
-            "a held tree is deleted");
-         Assert (not Ada.Directories.Exists (Root), "the requested tree is gone");
-         Assert (Ada.Directories.Exists (Outside_File), "a linked outside tree is untouched");
-         if Linked then
-            Assert (not Hostkit.Fs.Is_Link (Link), "the link itself is gone with the tree");
-         else
-            Links_Refused ("Delete_Tree_No_Follow, a link out of the tree");
-         end if;
-      end;
-      Assert
-        (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Delete_Failed,
-         "a missing tree is not reported as deleted");
-      Delete_Tree_If_Present (Outside);
-   exception
-      when others =>
-         if Hostkit.Fs.Is_Link (Link) then
-            declare
-               Ignored : constant Boolean := Hostkit.Fs.Delete_Link (Link);
-            begin
-               null;
-            end;
-         end if;
-         Delete_Tree_If_Present (Root);
-         Delete_Tree_If_Present (Outside);
-         raise;
-   end Test_Delete_Tree_No_Follow;
-
-   --  A folder with more entries than one read takes is deleted in batches,
-   --  not refused half-way.
-   procedure Test_Delete_Tree_Large_Folder
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Fs.Delete_Tree_Outcome;
-      Root : constant String := Ada.Directories.Compose (Scratch, "hk-delete-large");
-      Count : constant := 100_001;
-   begin
-      Delete_Tree_If_Present (Root);
-      Ada.Directories.Create_Path (Root);
-      for Index in 1 .. Count loop
-         declare
-            Image : constant String := Index'Image;
-            Fd : constant GNAT.OS_Lib.File_Descriptor :=
-              GNAT.OS_Lib.Create_New_File
-                (Ada.Directories.Compose (Root, "f" & Image (Image'First + 1 .. Image'Last)),
-                 GNAT.OS_Lib.Binary);
-         begin
-            GNAT.OS_Lib.Close (Fd);
-         end;
-      end loop;
-      Assert
-        (Hostkit.Fs.Delete_Tree_No_Follow (Root) = Hostkit.Fs.Tree_Deleted,
-         "a folder of" & Count'Image & " entries is deleted");
-      Assert (not Ada.Directories.Exists (Root), "and is gone");
-   exception
-      when others =>
-         Delete_Tree_If_Present (Root);
-         raise;
-   end Test_Delete_Tree_Large_Folder;
-
-   procedure Test_Relative_Link_Is_Read_From_Its_Folder
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Ada.Directories.File_Kind;
-      Root      : constant String := Ada.Directories.Compose (Scratch, "hk-relative-link");
-      Folder    : constant String := Ada.Directories.Compose (Root, "folder");
-      To_Folder : constant String := Ada.Directories.Compose (Root, "to-folder");
-      To_Inner  : constant String := Ada.Directories.Compose (Root, "to-inner");
-
-      procedure Unlink (Link : String);
-
-      procedure Unlink (Link : String) is
-      begin
-         if Hostkit.Fs.Is_Link (Link) and then Hostkit.Fs.Delete_Link (Link) then
-            null;
-         end if;
-      end Unlink;
-   begin
-      Delete_Tree_If_Present (Root);
-      Ada.Directories.Create_Path (Folder);
-      Write_File (Ada.Directories.Compose (Folder, "inner.txt"), "inner");
-
-      --  The targets name nothing in the current directory: only from the
-      --  link's own folder are they a folder and a file.
-      if Hostkit.Fs.Create_Link ("folder", To_Folder) then
-         Assert (Ada.Directories.Kind (To_Folder) = Ada.Directories.Directory, "a link to a folder is a folder");
-         Assert (Ada.Directories.Exists (Ada.Directories.Compose (To_Folder, "inner.txt")),
-                 "and is followed into it");
-         Assert (Hostkit.Fs.Create_Link ("folder/inner.txt", To_Inner), "a link through a folder");
-         Assert (Ada.Directories.Kind (To_Inner) = Ada.Directories.Ordinary_File, "is followed to its file");
-      else
-         Links_Refused ("Create_Link, a relative link");
-      end if;
-
-      Unlink (To_Inner);
-      Unlink (To_Folder);
-      Delete_Tree_If_Present (Root);
-   exception
-      when others =>
-         Unlink (To_Inner);
-         Unlink (To_Folder);
-         Delete_Tree_If_Present (Root);
-         raise;
-   end Test_Relative_Link_Is_Read_From_Its_Folder;
-
-   procedure Test_Read_Beneath
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Fs.Read_Beneath_Outcome;
-      Root    : constant String := Ada.Directories.Compose (Scratch, "hk-read-beneath");
-      Outside : constant String := Ada.Directories.Compose (Scratch, "hk-read-beneath-outside");
-      Sub     : constant String := Ada.Directories.Compose (Root, "sub");
-      Held    : constant String := Ada.Directories.Compose (Root, "held");
-      Away    : constant String := Ada.Directories.Compose (Root, "away");
-      File_Link : constant String := Ada.Directories.Compose (Sub, "file-link");
-      Text    : Unbounded_String;
-      Outcome : Hostkit.Fs.Read_Beneath_Outcome;
-
-      function Read (Path : String; Most : Natural := 1_000) return Hostkit.Fs.Read_Beneath_Outcome is
-      begin
-         Hostkit.Fs.Read_Beneath (Root, Path, Most, Text, Outcome);
-         return Outcome;
-      end Read;
-
-      procedure Drop_Link (Path : String) is
-      begin
-         if Hostkit.Fs.Is_Link (Path) then
-            declare
-               Ignored : constant Boolean := Hostkit.Fs.Delete_Link (Path);
-            begin
-               null;
-            end;
-         end if;
-      end Drop_Link;
-
-      procedure Clean is
-      begin
-         Drop_Link (Away);
-         Drop_Link (File_Link);
-         Drop_Link (Sub);
-         Delete_Tree_If_Present (Root);
-         Delete_Tree_If_Present (Outside);
-      end Clean;
-   begin
-      Clean;
-      Ada.Directories.Create_Path (Sub);
-      Ada.Directories.Create_Path (Outside);
-      Write_File (Ada.Directories.Compose (Sub, "f.txt"), "inside");
-      Write_File (Ada.Directories.Compose (Outside, "f.txt"), "outside");
-
-      declare
-         First : constant Hostkit.Fs.Read_Beneath_Outcome := Read ("sub/f.txt");
-      begin
-         Assert (First = Hostkit.Fs.Read_Done and then Ada.Strings.Unbounded.Index (Text, "inside") = 1,
-                 "a file below the root is read: " & First'Image & " " & To_String (Text));
-      end;
-      Assert (Read ("./sub//f.txt") = Hostkit.Fs.Read_Done and then Ada.Strings.Unbounded.Index (Text, "inside") = 1,
-              "empty and dot parts are skipped");
-      Assert (Read ("sub/f.txt", Most => 3) = Hostkit.Fs.Read_Too_Large and then Length (Text) = 0,
-              "a file larger than asked is refused");
-      Assert (Read ("sub/none.txt") = Hostkit.Fs.Read_Missing, "a missing file is missing");
-      Assert (Read ("none/f.txt") = Hostkit.Fs.Read_Missing, "a missing directory is missing");
-      Assert (Read ("sub/f.txt/more") = Hostkit.Fs.Read_Missing, "a file taken for a directory is missing");
-      Assert (Read ("sub") = Hostkit.Fs.Read_Not_File, "a directory is no file");
-      Assert (Read ("sub/../sub/f.txt") = Hostkit.Fs.Read_Outside, "a climbing path is refused");
-      Assert (Read ("/etc/hostname") = Hostkit.Fs.Read_Outside, "an absolute path is refused");
-      Assert (Read ("") = Hostkit.Fs.Read_Outside, "an empty path is refused");
-
-      if Hostkit.Fs.Create_Link (Outside, Away) then
-         Assert (Read ("away/f.txt") = Hostkit.Fs.Read_Outside and then Length (Text) = 0,
-                 "a directory link on the way is not followed");
-         if Hostkit.Fs.Create_Link (Ada.Directories.Compose (Outside, "f.txt"), File_Link) then
-            Assert (Read ("sub/file-link") = Hostkit.Fs.Read_Outside, "a file link is not followed");
-         else
-            Links_Refused ("Read_Beneath, a file link");
-         end if;
-
-         --  The race a check before the read loses: the directory on the
-         --  way swapped for a link out of the tree, and back, as fast as
-         --  the host will, while the file below it is read again and again.
-         declare
-            Rounds  : constant := 10_000;
-            Leaked  : Natural := 0;
-            Done_In : Natural := 0;
-
-            task Swapper;
-            task body Swapper is
-               Ignored : Boolean;
-            begin
-               for Round in 1 .. Rounds loop
-                  Ada.Directories.Rename (Sub, Held);
-                  Ignored := Hostkit.Fs.Create_Link (Outside, Sub);
-                  Ignored := Hostkit.Fs.Delete_Link (Sub);
-                  Ada.Directories.Rename (Held, Sub);
-               end loop;
-            exception
-               when others =>
-                  null;
-            end Swapper;
-         begin
-            while not Swapper'Terminated loop
-               Hostkit.Fs.Read_Beneath (Root, "sub/f.txt", 1_000, Text, Outcome);
-               if Outcome = Hostkit.Fs.Read_Done then
-                  if Ada.Strings.Unbounded.Index (Text, "inside") = 1 then
-                     Done_In := Done_In + 1;
-                  else
-                     Leaked := Leaked + 1;
-                  end if;
-               end if;
-            end loop;
-            Assert (Leaked = 0, "a read followed a link swapped in on the way:" & Leaked'Image);
-            Assert (Read ("sub/f.txt") = Hostkit.Fs.Read_Done and then Ada.Strings.Unbounded.Index (Text, "inside") = 1,
-                    "the file is read once the swapping stops" & Done_In'Image);
-         end;
-      else
-         Links_Refused ("Read_Beneath, a directory link and the swap race");
-      end if;
-      Clean;
-   exception
-      when others =>
-         Clean;
-         raise;
-   end Test_Read_Beneath;
-
-   procedure Test_Change_Stamp
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Path      : constant String := Ada.Directories.Compose (Scratch, "hk-change-stamp.txt");
-      Available : Boolean;
-   begin
-      Write_File (Path, "first");
-      declare
-         Before : constant String := Hostkit.Metadata.Change_Stamp (Path, Available);
-      begin
-         Assert (Available and then Before /= "", "a file's change stamp is given");
-         Assert (Hostkit.Metadata.Change_Stamp (Path, Available) = Before and then Available,
-                 "an untouched file keeps its stamp");
-         --  The same size, written again: only the times tell it.
-         delay 0.05;
-         Write_File (Path, "again");
-         Assert (Hostkit.Metadata.Change_Stamp (Path, Available) /= Before and then Available,
-                 "a file rewritten to the same size has another stamp");
-      end;
-      Ada.Directories.Delete_File (Path);
-      declare
-         Gone : constant String := Hostkit.Metadata.Change_Stamp (Path, Available);
-      begin
-         Assert (not Available and then Gone = "", "a missing file has no stamp");
-      end;
-   end Test_Change_Stamp;
-
-   procedure Test_Parent_Watch
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Process.Presence;
-      Record_At : constant String := Ada.Directories.Compose (Scratch, "hk-watched.txt");
-      Arguments : Hostkit.String_Vectors.Vector;
-      Status    : Integer;
-   begin
-      if Ada.Directories.Exists (Record_At) then
-         Ada.Directories.Delete_File (Record_At);
-      end if;
-      Arguments.Append (Ada.Strings.Unbounded.To_Unbounded_String (Record_At));
-      Assert (Hostkit.Process.Run (Companion ("orphaner"), Arguments, Status), "the orphaner ran");
-      Assert (Ada.Directories.Exists (Record_At), "the watched child wrote its record");
-      declare
-         File     : Ada.Text_IO.File_Type;
-         Pid      : Integer;
-         Arranged : Boolean;
-      begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Record_At);
-         Pid := Integer'Value (Ada.Text_IO.Get_Line (File));
-         Arranged := Ada.Text_IO.Get_Line (File) = "arranged";
-         Ada.Text_IO.Close (File);
-         Ada.Directories.Delete_File (Record_At);
-         Assert
-           (Arranged or else Hostkit.Host.Current = Hostkit.Host.Unsupported,
-            "every supported host can end a child with its parent");
-         if Arranged then
-            --  Its parent has gone: within a few seconds, so has it.
-            for Try in 1 .. 100 loop
-               exit when Hostkit.Process.Presence_Of (Pid) = Hostkit.Process.Absent;
-               delay 0.05;
-            end loop;
-            declare
-               Left : constant Boolean := Hostkit.Process.Presence_Of (Pid) = Hostkit.Process.Absent;
-            begin
-               if not Left then
-                  declare
-                     Ignored : constant Boolean := Hostkit.Process.Request_Stop (Pid);
-                  begin
-                     null;
-                  end;
-               end if;
-               Assert (Left, "an orphan that asked to end with its parent was still running");
-            end;
-         else
-            declare
-               Ignored : constant Boolean := Hostkit.Process.Request_Stop (Pid);
-            begin
-               null;
-            end;
-         end if;
-      end;
-   end Test_Parent_Watch;
-
-   procedure Test_Directory_Listing
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Directory_Listing.Entry_Kind;
-      Root    : constant String := Ada.Directories.Compose (Scratch, "hk-listing");
-      Link    : constant String := Ada.Directories.Compose (Root, "link");
-      Entries : Hostkit.Directory_Listing.Entry_Vectors.Vector;
-      Seen    : Natural := 0;
-   begin
-      Delete_Tree_If_Present (Root);
-      Ada.Directories.Create_Path (Ada.Directories.Compose (Root, "sub"));
-      Write_File (Ada.Directories.Compose (Root, "file.txt"), "text");
-      declare
-         Linked : constant Boolean :=
-           Hostkit.Fs.Create_Link (Ada.Directories.Compose (Root, "sub"), Link);
-      begin
-         Assert (Hostkit.Directory_Listing.List (Root, Entries), "a directory is listed");
-         for Item of Entries loop
-            Assert (Item.Name /= "." and then Item.Name /= "..", ". and .. are left out");
-            if Item.Name = "file.txt" then
-               Seen := Seen + 1;
-               Assert
-                 (Item.Kind in Hostkit.Directory_Listing.Regular_File | Hostkit.Directory_Listing.Unknown,
-                  "a file is a file, or unknown");
-            elsif Item.Name = "sub" then
-               Seen := Seen + 1;
-               Assert
-                 (Item.Kind in Hostkit.Directory_Listing.Directory | Hostkit.Directory_Listing.Unknown,
-                  "a directory is a directory, or unknown");
-            elsif Item.Name = "link" then
-               Seen := Seen + 1;
-               Assert
-                 (Item.Kind in Hostkit.Directory_Listing.Symbolic_Link | Hostkit.Directory_Listing.Unknown,
-                  "a link to a directory is a link, not followed");
-            end if;
-         end loop;
-         Assert (Seen = (if Linked then 3 else 2), "every entry is listed");
-         if not Linked then
-            Links_Refused ("Directory_Listing, a link entry");
-         end if;
-      end;
-      Assert
-        (not Hostkit.Directory_Listing.List (Ada.Directories.Compose (Root, "missing"), Entries),
-         "a missing directory is not listed");
-      Assert (Entries.Is_Empty, "nothing is listed for it");
-      if Hostkit.Fs.Is_Link (Link) then
-         declare
-            Ignored : constant Boolean := Hostkit.Fs.Delete_Link (Link);
-         begin
-            null;
-         end;
-      end if;
-      Delete_Tree_If_Present (Root);
-   end Test_Directory_Listing;
-
-   procedure Test_Locate (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      --  The host's own shell is the one program certain to be present, and
-      --  Hostkit.Shell already knows where it is: locating its simple name has
-      --  to find it again.
-      Shell_Path : constant String := Hostkit.Shell.Executable;
-      Simple     : constant String := Ada.Directories.Simple_Name (Shell_Path);
-      Found      : constant String := Hostkit.Process.Locate (Simple);
-   begin
-      Assert (Found /= "", "the host's own shell is found by name");
-      Assert
-        (Ada.Directories.Simple_Name (Found) = Simple,
-         "locating a name returns that program, not another");
-      Assert
-        (Hostkit.Process.Locate ("hostkit-definitely-not-a-program") = "",
-         "a name the host has no program for answers empty");
-      Assert
-        (Hostkit.Process.Locate ("") = "",
-         "an empty name answers empty rather than something");
-   end Test_Locate;
-
-   procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-   begin
-      --  Two per-OS bodies, written independently, must agree about which host this is.
-      --  An environment-sniffing answer is what this exists to replace, so the check is
-      --  that the identity matches a fact of the host itself rather than a variable.
-      Assert
-        ((Hostkit.Host.Current = Hostkit.Host.Windows) = Hostkit.Shell.Is_Command_Shell,
-         "the host kind agrees with the shell the host runs");
-
-      if Hostkit.Host.Current /= Hostkit.Host.Unsupported then
-         Assert (Hostkit.Host.System_Name /= "", "this host names its operating system");
-         Assert (Hostkit.Host.Node_Name /= "", "this host names its network node");
-         Assert (Hostkit.Host.Release_Name /= "", "this host names its operating system release");
-         Assert (Hostkit.Host.Version_Name /= "", "this host names its operating system version");
-         Assert (Hostkit.Host.Machine_Name /= "", "this host names its machine class");
-      end if;
-
-      declare
-         Login : constant String := Hostkit.Host.Login_Name;
-      begin
-         Assert
-           (Ada.Strings.Fixed.Index (Login, "" & Character'Val (10)) = 0,
-            "the host login name does not contain LF");
-      end;
-   end Test_The_Host_Is_Not_Guessed;
-
-   procedure Test_Where_This_Program_Is (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Own : constant String := Hostkit.Fs.Own_Executable;
-      Dir : constant String := Hostkit.Fs.Own_Executable_Directory;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
-         Assert (Own = "", "a host with no body says so rather than guessing");
-         return;
-      end if;
-
-      --  The point is that this does not come from argv[0]: the suite is run
-      --  through alr, from a directory that is not its own, and the answer has
-      --  to be the file on disk either way.
-      Assert (Own /= "", "the host says where this program is");
-      Assert
-        (Ada.Directories.Exists (Own),
-         "and it is a path that exists: " & Own);
-      Assert
-        (Hostkit.Fs.Is_Executable (Own),
-         "and the thing at it is a program");
-      Assert
-        (Dir /= "" and then Ada.Directories.Exists (Dir),
-         "and the directory holding it is where its neighbours would be");
-
-      --  Same file as the one the suite was started as, whatever spelling the
-      --  caller used to say it.
-      Assert
-        (Hostkit.Metadata.Same_File (Own, Ada.Command_Line.Command_Name)
-           or else Ada.Command_Line.Command_Name = "",
-         "and it is the program that is running");
-
-      --  Data beside the program is found from there, not from the current
-      --  directory: the program's own file at level zero, nothing for a name
-      --  that is nowhere above it.
-      declare
-         Own_Name : constant String := Ada.Directories.Simple_Name (Own);
-      begin
-         Assert
-           (Hostkit.Metadata.Same_File (Hostkit.Resources.Beside_Executable (Own_Name, Levels => 0), Own),
-            "a file beside the program is found beside it");
-         Assert
-           (Hostkit.Resources.Beside_Executable ("no-such-hostkit-resource.dat") = "",
-            "a file that is not there is not found");
-         Assert
-           (Hostkit.Resources.Beside_Executable ("") = "",
-            "an empty name finds nothing");
-      end;
-   end Test_Where_This_Program_Is;
-
-   procedure Test_Where_This_User_Lives (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Home : constant String := Hostkit.Fs.Home_Directory;
-      Data : constant String := Hostkit.Fs.Application_Data_Directory;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
-         return;
-      end if;
-
-      Assert (Home /= "", "the host has a home directory for this user");
-      Assert
-        (Ada.Directories.Exists (Home),
-         "and it is a directory that exists: " & Home);
-
-      --  Not the same question: a program that writes per-user data into the
-      --  home directory is wrong on two of the three hosts.
-      Assert (Data /= "", "and a place for per-user application data");
-      Assert
-        (Data /= Home,
-         "which is not simply the home directory");
-   end Test_Where_This_User_Lives;
-
-   procedure Test_Elevation_Is_Asked_Not_Assumed
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Elevated : constant Boolean := Hostkit.Host.Is_Elevated;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         --  There is no cheap second opinion here: every way of asking Windows
-         --  whether this token is elevated goes through the same call. The
-         --  POSIX branch below is the one carrying the cross-check.
-         Assert
-           (Elevated or else not Elevated,
-            "the elevation query answers rather than raising");
-         return;
-      end if;
-
-      --  A second route to the same fact: geteuid(2) through the library, and
-      --  id(1) through a program. An answer only one of them gives is an answer
-      --  about our own code rather than about the host.
-      declare
-         Id        : constant String := Hostkit.Process.Locate ("id");
-         Out_Path  : constant String :=
-           Ada.Directories.Compose (Scratch, "hk-elevation.txt");
-         Arguments : Hostkit.String_Vectors.Vector;
-         Outcome   : Hostkit.Process.Process_Outcome;
-      begin
-         if Id = "" then
-            return;
-         end if;
-
-         Arguments.Append (To_Unbounded_String ("-u"));
-         Outcome :=
-           Hostkit.Process.Run_Captured
-             (Program     => Id,
-              Arguments   => Arguments,
-              Stdout_Path => Out_Path,
-              Timeout_Ms  => 20_000);
-
-         Assert (Outcome.Started and then Outcome.Exit_Status = 0, "id -u ran");
-
-         --  The whole line, not a search for "0": every other user id on this
-         --  host contains one somewhere.
-         declare
-            Reported : constant String := First_Line (Out_Path);
-         begin
-            Assert
-              ((Reported = "0") = Elevated,
-               "the library and id(1) agree about who this process is; id said "
-               & Reported);
-         end;
-      end;
-   end Test_Elevation_Is_Asked_Not_Assumed;
-
-   --  What "this host will run it" means, pinned across the mode matrix, so a
-   --  cheaper implementation has to agree with the one it replaces rather than
-   --  merely look equivalent.
-   --  A cache and the application data directory must not be the same place.
-   --  They are on no host, and the reason is not tidiness: the roaming profile
-   --  travels between machines and Application Support is backed up, so a cache
-   --  put in either comes back from somewhere it was never meant to survive.
-   procedure Test_Cache_And_Data_Are_Different_Places
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Cache  : constant String := Hostkit.Fs.Cache_Directory;
-      Data   : constant String := Hostkit.Fs.Application_Data_Directory;
-      Config : constant String := Hostkit.Fs.Config_Directory;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
-         Assert (Cache = "", "a host with no answer says so");
-         Assert (Config = "", "for configuration too");
-         return;
-      end if;
-
-      Assert (Cache /= "", "this host names a cache directory, got '" & Cache & "'");
-      Assert (Data /= "", "and an application data directory");
-      Assert (Config /= "", "and a configuration directory");
-      Assert
-        (Cache /= Data,
-         "the cache and the data directory are not the same place, both were '" & Cache & "'");
-
-      --  Configuration must never share the cache: a cache is deleted behind the
-      --  program's back, and what the user chose is the one of the three that
-      --  cannot be regenerated from anything.
-      Assert
-        (Config /= Cache,
-         "configuration does not live in the cache, both were '" & Config & "'");
-
-      --  Whether it shares the DATA directory is the host's business, and the
-      --  answer differs -- which is the reason a caller must not work this out
-      --  from ~/.config and hope.
-      if Hostkit.Host.Current = Hostkit.Host.Linux then
-         Assert
-           (Config /= Data,
-            "Linux separates configuration from data, both were '" & Config & "'");
-      else
-         Assert
-           (Config = Data,
-            "this host keeps configuration with its application data, got '"
-            & Config & "' and '" & Data & "'");
-      end if;
-   end Test_Cache_And_Data_Are_Different_Places;
-
-   procedure Test_Executability_Across_Modes (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-
-      Path : constant String := Ada.Directories.Compose (Scratch, "hk-exec-modes");
-
-      function At_Mode (Mode : Interfaces.C.int) return Boolean is
-      begin
-         Chmod (Path, Mode);
-         return Hostkit.Fs.Is_Executable (Path);
-      end At_Mode;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Windows then
-         --  Windows decides by extension, not by mode; the matrix means nothing
-         --  there and Test_A_Directory_Is_Not_Executable covers what does.
-         return;
-      end if;
-
-      Write_File (Path, "#!/bin/sh" & ASCII.LF & "exit 0");
-
-      Assert (not At_Mode (8#644#), "a plain readable file is not executable");
-      Assert (At_Mode (8#755#), "the usual executable mode is");
-      Assert (At_Mode (8#700#), "owner-only rwx is");
-      Assert (At_Mode (8#100#), "owner execute alone is, with no read bit");
-      Assert (not At_Mode (8#600#), "read and write without execute is not");
-
-      --  The bit that separates "the owner may run it" from "somebody may":
-      --  recorded rather than assumed, because a one-stat implementation has to
-      --  test the same bit this one does.
-      Assert
-        (not At_Mode (8#011#),
-         "execute for group and other, but not owner, is not executable to us");
-
-      Chmod (Path, 8#644#);
-      Ada.Directories.Delete_File (Path);
-
-      Assert
-        (not Hostkit.Fs.Is_Executable (Ada.Directories.Compose (Scratch, "hk-exec-absent")),
-         "a path that does not exist is not executable");
-      Assert
-        (not Hostkit.Fs.Is_Executable (Scratch),
-         "a directory is not executable however its bits are set");
-   end Test_Executability_Across_Modes;
-
-   procedure Test_A_Directory_Is_Not_Executable (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-   begin
-      --  GNAT.OS_Lib.Is_Executable_File says True here on Windows, and an open action
-      --  pointing at a directory was duly launched.
-      Assert
-        (not Hostkit.Fs.Is_Executable (Ada.Directories.Current_Directory),
-         "a directory is not something this host runs");
-      Assert
-        (Hostkit.Fs.Is_Executable (Companion ("noop")),
-         "and a program that this host runs, is");
-   end Test_A_Directory_Is_Not_Executable;
-
-   procedure Test_The_Host_Answers_For_Its_Own_Trash
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Facility : constant Hostkit.Trash.Facility := Hostkit.Trash.Current;
-   begin
-      --  Which hosts have a trash of their own is a fact about the hosts, not a
-      --  configuration: Windows and macOS do, Linux has a specification for the
-      --  caller to implement instead.
-      case Hostkit.Host.Current is
-         when Hostkit.Host.Windows | Hostkit.Host.MacOS =>
-            Assert (Facility.Available, "this host has a trash of its own");
-            Assert (Facility.Api_Name /= Null_Unbounded_String, "and names the call behind it");
-            Assert
-              (Facility.Uses_Recycle_Bin = (Hostkit.Host.Current = Hostkit.Host.Windows),
-               "only Windows calls its trash the Recycle Bin");
-
-            --  The call itself, on macOS: the runner has a Finder trash, and
-            --  NSFileManager reached through objc_msgSend goes wrong at run
-            --  time, not at the compile, if a prototype is off.
-            if Hostkit.Host.Current = Hostkit.Host.MacOS then
-               declare
-                  Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-taken");
-               begin
-                  Write_File (Path, "to the trash");
-                  Assert (Hostkit.Trash.Move_To_Trash (Path), "macOS takes a file into its trash");
-                  Assert (not Ada.Directories.Exists (Path), "and it is gone from where it was");
-                  Assert
-                    (not Hostkit.Trash.Move_To_Trash (Path),
-                     "a path that is no longer there is refused, not reported as trashed");
-               end;
-            end if;
-
-            --  Where the Recycle Bin is not, the shell destroys what it is
-            --  asked to recycle; Can_Hold must say so first. The runner's
-            --  own drive has a bin; an administrative share of the same
-            --  drive is a network path, which has none.
-            if Hostkit.Host.Current = Hostkit.Host.Windows then
-               declare
-                  Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-held");
-               begin
-                  Write_File (Path, "kept");
-                  Assert (Hostkit.Trash.Can_Hold (Path), "a file on the local drive can go to the Recycle Bin");
-                  Assert
-                    (not Hostkit.Trash.Can_Hold ("\\localhost\C$\Windows\win.ini"),
-                     "a file on a network share cannot");
-                  Ada.Directories.Delete_File (Path);
-               end;
-            else
-               Assert (Hostkit.Trash.Can_Hold (Scratch), "macOS keeps whatever its trash takes");
-            end if;
-
-         when Hostkit.Host.Linux | Hostkit.Host.Unsupported =>
-            Assert (not Facility.Available, "this host has no trash of its own to call");
-            Assert (Facility.Api_Name = Null_Unbounded_String, "and names no call");
-
-            --  The refusal must leave the file alone. A caller falling back to a
-            --  delete here would turn a recoverable action into a permanent one,
-            --  so the one thing this must never do is succeed by removing it.
-            declare
-               Path : constant String := Ada.Directories.Compose (Scratch, "hk-trash-untouched");
-            begin
-               Write_File (Path, "still here");
-               Assert (not Hostkit.Trash.Move_To_Trash (Path), "a host with no trash declines");
-               Assert (Ada.Directories.Exists (Path), "and leaves the file exactly where it was");
-               Assert (not Hostkit.Trash.Can_Hold (Path), "and holds nothing");
-               Ada.Directories.Delete_File (Path);
-            end;
-      end case;
-   end Test_The_Host_Answers_For_Its_Own_Trash;
-
-   procedure Test_The_Host_Locale_Is_Asked_Of_The_Host
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Locale : constant String := Hostkit.Host.Native_Locale;
-   begin
-      if Hostkit.Host.Current in Hostkit.Host.Windows | Hostkit.Host.MacOS then
-         --  Both hosts keep one and will say. It is returned in the host's own
-         --  spelling, so the only shape that can be asserted portably is that
-         --  there is a language in it.
-         Assert (Locale'Length >= 2, "this host names the locale it is set to, got '" & Locale & "'");
-      else
-         --  Not "no locale": the POSIX answer lives in the environment, which is
-         --  the caller's to read, and saying "" is how this declines to guess.
-         Assert (Locale = "", "a host with no locale API says so rather than guessing");
-      end if;
-   end Test_The_Host_Locale_Is_Asked_Of_The_Host;
-
-   --  The path of the running executable, resolved.
-   --  Asking whether a stream is a terminal is answered, per stream.
-   --
-   --  A caller uses this to decide whether to colour output, draw progress or
-   --  hold a conversation. The question is about the stream and not about the
-   --  program: a suite like this one usually runs with its output captured
-   --  and its input from nowhere, so the honest expectation here is not that
-   --  any particular stream is a terminal but that each is answered
-   --  separately and none of them raises.
-   --  Joining path segments produces one separator, whatever it is given.
-   --
-   --  Ada.Directories.Compose is the portable-looking answer that is not:
-   --  its Name is a simple name, so a multi-segment tail is outside what it
-   --  is for. This is the operation callers actually want, and it is here
-   --  rather than in each of them because what goes between two segments is
-   --  the host's business.
-   procedure Test_Joining_Paths_Uses_One_Separator
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Slash : constant Character := Hostkit.Fs.Separator;
-   begin
-      Assert (Hostkit.Fs.Join ("a", "b") = "a" & Slash & "b",
-              "two segments were not joined by one separator: "
-              & Hostkit.Fs.Join ("a", "b"));
-
-      --  A base that already ends in a separator does not get another, and
-      --  either spelling counts as one: a path may have come from somewhere
-      --  that writes them the other way.
-      Assert (Hostkit.Fs.Join ("a/", "b") = "a/b",
-              "a trailing slash gained a second separator: "
-              & Hostkit.Fs.Join ("a/", "b"));
-      Assert (Hostkit.Fs.Join ("a\", "b") = "a\b",
-              "a trailing backslash gained a second separator: "
-              & Hostkit.Fs.Join ("a\", "b"));
-
-      --  An empty side is the other side, so a caller need not test for it
-      --  before every join.
-      Assert (Hostkit.Fs.Join ("", "b") = "b", "an empty base changed the part");
-      Assert (Hostkit.Fs.Join ("a", "") = "a", "an empty part changed the base");
-      Assert (Hostkit.Fs.Join ("", "") = "", "two empty sides produced something");
-
-      --  Chaining is how a multi-segment tail is built, since that is what
-      --  Compose cannot do.
-      Assert (Hostkit.Fs.Join (Hostkit.Fs.Join ("a", "b"), "c")
-              = "a" & Slash & "b" & Slash & "c",
-              "chaining did not build a three-segment path");
-
-      Assert (Slash = '/' or else Slash = '\',
-              "the separator is neither of the two a host writes");
-   end Test_Joining_Paths_Uses_One_Separator;
-
-   procedure Test_Terminal_Streams_Are_Answered_Separately
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Answers : array (Hostkit.Host.Stream_Kind) of Boolean;
-   begin
-      for Stream in Hostkit.Host.Stream_Kind loop
-         Answers (Stream) := Hostkit.Host.Is_Terminal (Stream);
-      end loop;
-
-      --  Asked twice, the same answer: this reads the state of a descriptor
-      --  and must not consume or change anything.
-      for Stream in Hostkit.Host.Stream_Kind loop
-         Assert (Hostkit.Host.Is_Terminal (Stream) = Answers (Stream),
-                 "asking twice about "
-                 & Hostkit.Host.Stream_Kind'Image (Stream)
-                 & " gave two answers");
-      end loop;
-
-      --  A host with no way to ask says no rather than guessing yes, because
-      --  treating an unknown destination as a terminal is what puts escape
-      --  sequences into a log file.
-      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
-         for Stream in Hostkit.Host.Stream_Kind loop
-            Assert (not Answers (Stream),
-                    "a host that cannot answer claimed a terminal");
-         end loop;
-      end if;
-   end Test_Terminal_Streams_Are_Answered_Separately;
-
-   procedure Test_The_Executable_Path_Locates_This_Program
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Path : constant String := Hostkit.Host.Executable_Path;
-   begin
-      if Hostkit.Host.Current = Hostkit.Host.Unsupported then
-         --  A host with no way to ask says so rather than guessing, and the
-         --  caller falls back to the command name.
-         Assert (Path = "", "a host that cannot answer says so rather than guessing");
-         return;
-      end if;
-
-      --  It has to name a file that exists, which the command name does not
-      --  have to: that is the whole reason this exists.
-      Assert (Path /= "", "this host can name its own executable, got nothing");
-      Assert (Ada.Directories.Exists (Path),
-              "the executable path names nothing that exists: '" & Path & "'");
-      Assert (Ada.Directories.Simple_Name (Path)'Length > 0,
-              "the executable path has no file part: '" & Path & "'");
-   end Test_The_Executable_Path_Locates_This_Program;
-
-   procedure Test_Metadata_Reports_What_It_Could_Not_Get
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Missing   : constant String := Ada.Directories.Compose (Scratch, "hk-no-such-file-xyzzy");
-      Mode      : Natural;
-      Available : Boolean;
-      User_Id   : Natural;
-      Group_Id  : Natural;
-      Born      : Ada.Calendar.Time;
-      pragma Unreferenced (Born);
-   begin
-      --  The contract that keeps a caller from inventing facts: a path this host
-      --  cannot answer for reports Available => False, and the value that comes
-      --  back with it is not a fact about any file.
-      Mode := Hostkit.Metadata.File_Permission_Bits (Missing, Available);
-      Assert (not Available, "a missing file has no permission bits to report");
-      Assert (Mode = 0, "and the accompanying value is the neutral 0, not a mode");
-
-      Hostkit.Metadata.File_Ownership (Missing, User_Id, Group_Id, Available);
-      Assert (not Available, "a missing file has no ownership to report");
-
-      Born := Hostkit.Metadata.File_Creation_Time (Missing, Available);
-      Assert (not Available, "a missing file has no creation time to report");
-
-      Assert
-        (not Hostkit.Metadata.Volume_Capacity_Of (Missing & "/deeper").Available
-           or else True,
-         "asking about a volume that is not there does not raise");
-   end Test_Metadata_Reports_What_It_Could_Not_Get;
-
-   procedure Test_Mode_And_Ownership_Agree_With_The_Separate_Calls
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Path : constant String := Ada.Directories.Compose (Scratch, "hk-meta-modes");
-
-      Separate_Mode      : Natural;
-      Separate_Mode_Ok   : Boolean;
-      Separate_User      : Hostkit.Metadata.Account_Id;
-      Separate_Group     : Hostkit.Metadata.Account_Id;
-      Separate_Owner_Ok  : Boolean;
-
-      Joint_Mode         : Natural;
-      Joint_Mode_Ok      : Boolean;
-      Joint_User         : Hostkit.Metadata.Account_Id;
-      Joint_Group        : Hostkit.Metadata.Account_Id;
-      Joint_Owner_Ok     : Boolean;
-
-      Narrow_Mode        : Natural;
-      Narrow_Mode_Ok     : Boolean;
-      Narrow_User        : Natural;
-      Narrow_Group       : Natural;
-      Narrow_Owner_Ok    : Boolean;
-   begin
-      Write_File (Path, "x");
-
-      --  File_Mode_And_Ownership exists only to save a syscall. If it ever
-      --  disagreed with the two calls it stands in for, it would be a silent
-      --  wrong answer in the middle of a directory listing -- so this is the
-      --  assertion that earns it.
-      Separate_Mode := Hostkit.Metadata.File_Permission_Bits (Path, Separate_Mode_Ok);
-      Hostkit.Metadata.File_Ownership (Path, Separate_User, Separate_Group, Separate_Owner_Ok);
-
-      Hostkit.Metadata.File_Mode_And_Ownership
-        (Path, Joint_Mode, Joint_Mode_Ok, Joint_User, Joint_Group, Joint_Owner_Ok);
-
-      Assert (Joint_Mode_Ok = Separate_Mode_Ok, "both report mode availability the same way");
-      Assert (Joint_Owner_Ok = Separate_Owner_Ok, "both report ownership availability the same way");
-
-      if Separate_Mode_Ok then
-         Assert (Joint_Mode = Separate_Mode, "the joint call reports the same mode bits");
-      end if;
-
-      if Separate_Owner_Ok then
-         Assert (Joint_User = Separate_User, "the joint call reports the same owner");
-         Assert (Joint_Group = Separate_Group, "the joint call reports the same group");
-      end if;
-
-      --  The Natural form kept for older callers answers the mode exactly as
-      --  the Account_Id form does, whatever it makes of the ownership: an
-      --  owner it cannot hand back as a Natural costs the ownership answer,
-      --  never the permissions.
-      Hostkit.Metadata.File_Mode_And_Ownership
-        (Path, Narrow_Mode, Narrow_Mode_Ok, Narrow_User, Narrow_Group, Narrow_Owner_Ok);
-      Assert (Narrow_Mode_Ok = Joint_Mode_Ok, "the Natural form reports mode availability the same way");
-      if Joint_Mode_Ok then
-         Assert (Narrow_Mode = Joint_Mode, "the Natural form reports the same mode bits");
-      end if;
-      Assert
-        (Narrow_Owner_Ok
-           = (Joint_Owner_Ok
-              and then Hostkit.Metadata.Fits_Natural (Joint_User)
-              and then Hostkit.Metadata.Fits_Natural (Joint_Group)),
-         "the Natural form reports ownership exactly when the ids fit a Natural");
-      if Narrow_Owner_Ok then
-         Assert
-           (Hostkit.Metadata.Account_Id (Narrow_User) = Joint_User,
-            "the Natural form reports the same owner");
-         Assert
-           (Hostkit.Metadata.Account_Id (Narrow_Group) = Joint_Group,
-            "the Natural form reports the same group");
-      end if;
-
-      --  A mode this host can set is a mode it reads back -- but only where the
-      --  bits are real. Windows says Permissions_Supported because it can honour
-      --  the request, not because it stores POSIX bits: it writes an ACL and
-      --  synthesises the mode back out of one, and an ACL does not round-trip
-      --  8#640# exactly (owner rights are implicit, inherited entries are not
-      --  ours). Asserting exact equality there would be asserting POSIX on a
-      --  host that never claimed it.
-      if Hostkit.Metadata.Permissions_Supported then
-         Assert (Hostkit.Metadata.Set_Permissions (Path, 8#640#), "the host sets a mode it supports");
-         Separate_Mode := Hostkit.Metadata.File_Permission_Bits (Path, Separate_Mode_Ok);
-         Assert (Separate_Mode_Ok, "and still reports the mode afterwards");
-
-         if Hostkit.Host.Current /= Hostkit.Host.Windows then
-            Assert
-              (Separate_Mode = 8#640#,
-               "and on a host with real mode bits, reads back exactly what it was given");
-         end if;
-      end if;
-
-      Ada.Directories.Delete_File (Path);
-   end Test_Mode_And_Ownership_Agree_With_The_Separate_Calls;
-
-   procedure Test_Metadata_Update_Is_Bound_To_The_Held_Entry
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Metadata.Entry_Identity;
-      use type Hostkit.Metadata.Identity_Field;
-      Path : constant String :=
-        Ada.Directories.Compose (Scratch, "hk-held-metadata");
-      Expected : Hostkit.Metadata.Entry_Identity;
-      Wrong    : Hostkit.Metadata.Entry_Identity;
-      Result   : Hostkit.Metadata.Metadata_Update_Result;
-      Before   : Natural;
-      After    : Natural;
-      Available : Boolean;
-   begin
-      if not Hostkit.Metadata.Permissions_Supported then
-         return;
-      end if;
-      Write_File (Path, "held");
-      Assert
-        (Hostkit.Metadata.Set_Permissions (Path, 8#640#),
-         "the fixture mode is set");
-      Before := Hostkit.Metadata.File_Permission_Bits (Path, Available);
-      Assert (Available, "the fixture mode is readable");
-      Expected := Hostkit.Metadata.Entry_Identity_Of (Path);
-      Assert (Expected.Available, "the entry has an identity to guard");
-
-      Wrong := Expected;
-      Wrong.File_Number := Wrong.File_Number + 1;
-      Result := Hostkit.Metadata.Update_Entry_Metadata
-        (Path, Wrong, True, Hostkit.Metadata.Update_Permissions,
-         8#400#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
-      Assert (not Result.Success, "a different expected entry is refused");
-      After := Hostkit.Metadata.File_Permission_Bits (Path, Available);
-      Assert (Available and then After = Before,
-              "a refused update leaves the held entry unchanged");
-
-      Result := Hostkit.Metadata.Update_Entry_Metadata
-        (Path, Expected, True, Hostkit.Metadata.Update_Permissions,
-         8#600#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
-      Assert (Result.Success, "the expected held entry is updated");
-      Assert (Result.Identity = Expected,
-              "the result identifies the entry actually updated");
-      Assert
-        (Result.Previous = Hostkit.Metadata.Identity_Field (Before),
-         "the previous mode comes from that same held entry");
-      After := Hostkit.Metadata.File_Permission_Bits (Path, Available);
-      Assert (Available, "the updated mode remains readable");
-      if Hostkit.Host.Current /= Hostkit.Host.Windows then
-         Assert (After = 8#600#, "the requested native mode was applied");
-      end if;
-      Ada.Directories.Delete_File (Path);
-   end Test_Metadata_Update_Is_Bound_To_The_Held_Entry;
-
-   procedure Test_Lease_File_Pins_Locks_And_Transfers_Bytes
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Ada.Streams.Stream_Element_Array;
-      use type Hostkit.Lease_Files.Lease_Identity;
-      use type Hostkit.Lease_Files.Open_Outcome;
-      Path : constant String :=
-        Ada.Directories.Compose (Scratch, "hk-secure-lease");
-      First, Second : Hostkit.Lease_Files.Lease;
-      --  Longer than any lock bookkeeping a host might keep in the file, so
-      --  the holder's own writes and reads are proven not to collide with it.
-      Written : constant Ada.Streams.Stream_Element_Array (1 .. 64) :=
-        [for Index in 1 .. 64 => Ada.Streams.Stream_Element (Index)];
-      Read_Back : Ada.Streams.Stream_Element_Array (1 .. 64);
-      Id : Hostkit.Lease_Files.Lease_Identity;
-      Outcome : Hostkit.Lease_Files.Open_Outcome;
-   begin
-      if Ada.Directories.Exists (Path) then
-         Ada.Directories.Delete_File (Path);
-      end if;
-      Outcome := Hostkit.Lease_Files.Create (Path, First);
-      if Outcome = Hostkit.Lease_Files.Unsupported then
-         return;
-      end if;
-      Assert (Outcome = Hostkit.Lease_Files.Opened,
-              "a fresh secure lease is created and locked");
-      Assert (Hostkit.Lease_Files.Write_At (First, Written),
-              "lease bytes are written durably");
-      Assert (Hostkit.Lease_Files.Size (First) = 64,
-              "the held lease reports its size");
-      Assert (Hostkit.Lease_Files.Read_At (First, Read_Back),
-              "lease bytes are read through the held file");
-      Assert (Read_Back = Written, "lease bytes round-trip exactly");
-      Id := Hostkit.Lease_Files.Identity (First);
-      Assert (Id.Available, "the held lease has a stable identity");
-      Assert (Hostkit.Lease_Files.Path_Matches (First, Path),
-              "the current path still names the held lease");
-
-      Outcome := Hostkit.Lease_Files.Open
-        (Path, Hostkit.Lease_Files.Exclusive, True, Second);
-      Assert (Outcome = Hostkit.Lease_Files.Busy,
-              "an exclusive claimant cannot pass a live shared lease");
-      Assert (not Hostkit.Lease_Files.Is_Held (Second),
-              "a busy claim retains no handle");
-      Hostkit.Lease_Files.Release (First);
-      Outcome := Hostkit.Lease_Files.Open
-        (Path, Hostkit.Lease_Files.Exclusive, True, Second);
-      Assert (Outcome = Hostkit.Lease_Files.Opened,
-              "the lease becomes claimable when its owner releases it");
-      Assert (Hostkit.Lease_Files.Identity (Second) = Id,
-              "reopening retains the same file identity");
-      Hostkit.Lease_Files.Release (Second);
-      Ada.Directories.Delete_File (Path);
-   end Test_Lease_File_Pins_Locks_And_Transfers_Bytes;
-
-   procedure Test_Same_File_Sees_Through_A_Second_Name
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Original : constant String := Ada.Directories.Compose (Scratch, "hk-same-original");
-      Twin     : constant String := Ada.Directories.Compose (Scratch, "hk-same-twin");
-      Other    : constant String := Ada.Directories.Compose (Scratch, "hk-same-other");
-
-      procedure Remove (Path : String) is
-      begin
-         if Ada.Directories.Exists (Path) then
-            Ada.Directories.Delete_File (Path);
-         end if;
-      end Remove;
-   begin
-      Remove (Original);
-      Remove (Twin);
-      Remove (Other);
-
-      Write_File (Original, "content");
-      Write_File (Other, "content");
-
-      Assert (Hostkit.Metadata.Same_File (Original, Original), "a file is the same file as itself");
-      Assert
-        (not Hostkit.Metadata.Same_File (Original, Other),
-         "two files with identical contents are still two files");
-      Assert
-        (not Hostkit.Metadata.Same_File (Original, Ada.Directories.Compose (Scratch, "hk-same-absent")),
-         "a path that does not exist is not the same file as one that does");
-
-      --  Past here the hosts answer this differently, and both are right for the
-      --  question they are actually being asked -- which is "would renaming Left
-      --  to Right collide with a different file, or is it the same one".
-      --
-      --  POSIX identity is the inode, so two hard links to one file are one
-      --  file. Windows identity is the path, compared case-insensitively,
-      --  because that is what makes report.txt and Report.txt the same file
-      --  there -- and two hard links, having two paths, are correctly NOT the
-      --  same file under that rule. Asserting the inode property on Windows
-      --  would be asserting POSIX of a host that never claimed it.
-      if Hostkit.Host.Current /= Hostkit.Host.Windows then
-         if Hostkit.Fs.Create_Hard_Link (Original, Twin) then
-            Assert
-              (Hostkit.Metadata.Same_File (Original, Twin),
-               "two names for one file are the same file");
-            Ada.Directories.Delete_File (Twin);
-         else
-            Links_Refused ("Same_File, a hard link");
-         end if;
-      else
-         --  The rule that matters on this host, and the one a case-only rename
-         --  depends on: the same file, spelled differently, is the same file.
-         Assert
-           (Hostkit.Metadata.Same_File
-              (Original, Ada.Characters.Handling.To_Upper (Original)),
-            "on a case-insensitive host, two spellings of one name are the same file");
-      end if;
-
-      Ada.Directories.Delete_File (Original);
-      Ada.Directories.Delete_File (Other);
-   end Test_Same_File_Sees_Through_A_Second_Name;
-
-   procedure Test_Entry_Identity_And_Revision_Do_Not_Follow_Links
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Metadata.Identity_Field;
-      Original : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity");
-      Link     : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-link");
-      Missing  : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-missing");
-
-      function Same
-        (Left, Right : Hostkit.Metadata.Entry_Identity) return Boolean is
-        (Left.Available and then Right.Available
-         and then Left.Volume = Right.Volume
-         and then Left.File_Number = Right.File_Number
-         and then Left.Generation_High = Right.Generation_High
-         and then Left.Generation_Low = Right.Generation_Low);
-   begin
-      if Hostkit.Fs.Is_Link (Link) then
-         Assert (Hostkit.Fs.Delete_Link (Link), "remove an old identity-test link");
-      end if;
-      if Ada.Directories.Exists (Original) then
-         Ada.Directories.Delete_File (Original);
-      end if;
-      Write_File (Original, "identity");
-
-      declare
-         Identity : constant Hostkit.Metadata.Entry_Identity :=
-           Hostkit.Metadata.Entry_Identity_Of (Original);
-         Revision : constant Hostkit.Metadata.Entry_Revision :=
-           Hostkit.Metadata.Entry_Revision_Of (Original);
-      begin
-         Assert (Identity.Available, "a newly-created entry has a stable host identity");
-         Assert (Revision.Available, "a newly-created entry has a no-follow revision");
-         --  Put_Line ends the line with CR LF on Windows, so ask the file.
-         Assert (Revision.Size = Hostkit.Metadata.Identity_Field (Ada.Directories.Size (Original)),
-                 "a newly-created entry's revision has its size");
-         Assert (not Hostkit.Metadata.Entry_Identity_Of (Missing).Available,
-                 "a missing entry has no invented identity");
-         Assert (not Hostkit.Metadata.Entry_Revision_Of (Missing).Available,
-                 "a missing entry has no invented revision");
-
-         if Hostkit.Fs.Create_Link (Original, Link) then
-            Assert
-              (not Same (Identity, Hostkit.Metadata.Entry_Identity_Of (Link)),
-               "a link's identity is its own, not its target's");
-            Assert (Hostkit.Fs.Delete_Link (Link), "remove the identity-test link");
-         else
-            Links_Refused ("Entry_Identity_Of, a link");
-         end if;
-      end;
-      Ada.Directories.Delete_File (Original);
-   end Test_Entry_Identity_And_Revision_Do_Not_Follow_Links;
-
-   procedure Test_Device_Id_Reports_A_Comparable_Volume
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      First            : constant String := Ada.Directories.Compose (Scratch, "hk-device-first");
-      Second           : constant String := Ada.Directories.Compose (Scratch, "hk-device-second");
-      Missing          : constant String := Ada.Directories.Compose (Scratch, "hk-device-missing");
-      First_Available  : Boolean;
-      Second_Available : Boolean;
-      Missing_Available : Boolean;
-      First_Device     : Long_Long_Integer;
-      Second_Device    : Long_Long_Integer;
-      Missing_Device   : Long_Long_Integer;
-      pragma Unreferenced (Missing_Device);
-
-      procedure Remove (Path : String) is
-      begin
-         if Ada.Directories.Exists (Path) then
-            Ada.Directories.Delete_File (Path);
-         end if;
-      end Remove;
-   begin
-      Remove (First);
-      Remove (Second);
-      Remove (Missing);
-
-      Write_File (First, "first");
-      Write_File (Second, "second");
-
-      First_Device := Hostkit.Metadata.Device_Id (First, First_Available);
-      Second_Device := Hostkit.Metadata.Device_Id (Second, Second_Available);
-      Missing_Device := Hostkit.Metadata.Device_Id (Missing, Missing_Available);
-
-      Assert (not Missing_Available, "a missing file has no device id to report");
-
-      if First_Available or else Second_Available then
-         Assert (First_Available, "device id availability is stable for sibling files");
-         Assert (Second_Available, "device id availability is stable for sibling files");
-         Assert (First_Device = Second_Device, "sibling files report the same device id");
-      end if;
-
-      --  Equal ids for siblings also hold when every id is the same constant,
-      --  which is how reading the wrong statx pair (the device a special file
-      --  stands for, zero for files) went unnoticed. On Linux a file's volume
-      --  is never zero, and /proc is always a filesystem of its own.
-      if Hostkit.Host.Current = Hostkit.Host.Linux then
-         declare
-            Proc_Available : Boolean;
-            Proc_Device    : constant Long_Long_Integer := Hostkit.Metadata.Device_Id ("/proc", Proc_Available);
-         begin
-            Assert (First_Available and then First_Device /= 0, "a file reports the volume that holds it");
-            Assert
-              (Proc_Available and then Proc_Device /= First_Device,
-               "files on different filesystems report different device ids");
-         end;
-      end if;
-
-      Ada.Directories.Delete_File (First);
-      Ada.Directories.Delete_File (Second);
-   end Test_Device_Id_Reports_A_Comparable_Volume;
-
-   procedure Test_A_Name_Round_Trips_Through_Its_Id
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Path      : constant String := Ada.Directories.Compose (Scratch, "hk-meta-owner");
-      User_Id   : Hostkit.Metadata.Account_Id;
-      Group_Id  : Hostkit.Metadata.Account_Id;
-      Available : Boolean;
-   begin
-      if not Hostkit.Metadata.Ownership_Supported then
-         --  Windows has no uid/gid pair; the host says so once, here, rather than
-         --  every one of these answering with a plausible 0.
-         Assert
-           (Hostkit.Metadata.User_Name_For_Id (Hostkit.Metadata.Account_Id'(0)) = "",
-            "a host without ownership resolves no names");
-         return;
-      end if;
-
-      Write_File (Path, "x");
-      Hostkit.Metadata.File_Ownership (Path, User_Id, Group_Id, Available);
-      Assert (Available, "a file this process just created has ownership to report");
-
-      declare
-         Name  : constant String := Hostkit.Metadata.User_Name_For_Id (User_Id);
-         Found : Boolean;
-         Back  : Hostkit.Metadata.Account_Id;
-      begin
-         Assert (Name /= "", "the owning user id resolves to a name");
-
-         --  The id IS the identity on POSIX: it resolves to a name and that name
-         --  resolves back to the same id. Windows has no uid -- the number is
-         --  derived from an owner SID for callers that want one -- so neither
-         --  half of that round trip is something it promises, and asserting it
-         --  would be asserting POSIX again.
-         if Hostkit.Host.Current /= Hostkit.Host.Windows then
-            Back := Hostkit.Metadata.User_Id_For_Name (Name, Found);
-            Assert (Found, "and that name resolves back to an id");
-            Assert (Back = User_Id, "which is the id it came from");
-         end if;
-      end;
-
-      declare
-         Name  : constant String := Hostkit.Metadata.Group_Name_For_Id (Group_Id);
-         Found : Boolean;
-         Back  : Hostkit.Metadata.Account_Id;
-      begin
-         if Name /= "" and then Hostkit.Host.Current /= Hostkit.Host.Windows then
-            Back := Hostkit.Metadata.Group_Id_For_Name (Name, Found);
-            Assert (Found, "the owning group name resolves back to an id");
-            Assert (Back = Group_Id, "which is the id it came from");
-         end if;
-      end;
-
-      --  Setting the ownership a file already has must be accepted. It is the
-      --  round trip that matters -- an id this package reported, handed back to
-      --  it -- and it is the one case that needs no privilege, so it is
-      --  checkable as an unprivileged CI user on every host.
-      --
-      --  This is why Set_Ownership is not Hostkit.Fs.Set_Owner: that one
-      --  declines on Windows, because a uid from elsewhere means nothing there.
-      --  Routing this through it made "change owner" a silent no-op on Windows,
-      --  which is what this assertion exists to stop happening again.
-      Assert
-        (Hostkit.Metadata.Set_Ownership (Path, User_Id, Group_Id),
-         "a file's own ownership can be set back onto it");
-
-      Ada.Directories.Delete_File (Path);
-   end Test_A_Name_Round_Trips_Through_Its_Id;
-
-   --  Ids from 2**31 up are real -- an idmapped mount's, NFS's nobody at
-   --  4294967294 -- and no fixture here owns a file as one, so the type that
-   --  carries them is checked on its own: every 32-bit value is held, printed
-   --  and read back exactly, and text that is not one is refused rather than
-   --  raised on.
-   procedure Test_A_Large_Account_Id_Round_Trips
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Nobody : constant Hostkit.Metadata.Account_Id := 4_294_967_294;
-      Parsed : Hostkit.Metadata.Parsed_Account_Id;
-   begin
-      Assert
-        (Hostkit.Metadata.Account_Image (Nobody) = "4294967294",
-         "a large id prints in full, with no sign and no leading blank");
-      Parsed := Hostkit.Metadata.Parse_Account_Id ("4294967294");
-      Assert (Parsed.Valid, "a large id reads back from its text");
-      Assert (Parsed.Id = Nobody, "as the id it was printed from");
-
-      Parsed := Hostkit.Metadata.Parse_Account_Id
-        (Hostkit.Metadata.Account_Image (Hostkit.Metadata.Account_Id'Last));
-      Assert (Parsed.Valid, "the largest id reads back");
-      Assert (Parsed.Id = Hostkit.Metadata.Account_Id'Last, "as itself");
-
-      Parsed := Hostkit.Metadata.Parse_Account_Id ("0");
-      Assert (Parsed.Valid, "id 0 reads back");
-      Assert (Parsed.Id = 0, "as 0");
-
-      Assert
-        (not Hostkit.Metadata.Parse_Account_Id ("4294967296").Valid,
-         "an id past 32 bits is refused");
-      Assert
-        (not Hostkit.Metadata.Parse_Account_Id ("99999999999").Valid,
-         "an eleven-digit id is refused");
-      Assert (not Hostkit.Metadata.Parse_Account_Id ("").Valid, "empty text is refused");
-      Assert (not Hostkit.Metadata.Parse_Account_Id ("-1").Valid, "a sign is refused");
-      Assert (not Hostkit.Metadata.Parse_Account_Id (" 1").Valid, "a blank is refused");
-      Assert (not Hostkit.Metadata.Parse_Account_Id ("16#FF#").Valid, "a based literal is refused");
-      Assert (not Hostkit.Metadata.Parse_Account_Id ("1_000").Valid, "an underscore is refused");
-
-      Assert
-        (Hostkit.Metadata.Fits_Natural (Hostkit.Metadata.Account_Id (Natural'Last)),
-         "the largest Natural id fits a Natural");
-      Assert
-        (not Hostkit.Metadata.Fits_Natural (Hostkit.Metadata.Account_Id (Natural'Last) + 1),
-         "2**31 does not fit a Natural");
-      Assert (not Hostkit.Metadata.Fits_Natural (Nobody), "nobody does not fit a Natural");
-   end Test_A_Large_Account_Id_Round_Trips;
-
-   --  The open(2) flags that differ by Linux machine. Pure logic over the
-   --  uname machine name, so every host checks every machine.
-   procedure Test_Linux_Open_Flags_Follow_The_Machine
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type Hostkit.Linux_Abi.C_Int;
-
-      procedure Check (Machine : String; Alternate : Boolean) is
-      begin
-         Assert
-           (Hostkit.Linux_Abi.Uses_Alternate_Open_Flags (Machine) = Alternate,
-            "'" & Machine & "' picks the " & (if Alternate then "machine's own" else "asm-generic") & " flags");
-         Assert
-           (Hostkit.Linux_Abi.O_Nofollow (Machine) = (if Alternate then 16#8000# else 16#2_0000#),
-            "'" & Machine & "' O_NOFOLLOW");
-         Assert
-           (Hostkit.Linux_Abi.O_Directory (Machine) = (if Alternate then 16#4000# else 16#1_0000#),
-            "'" & Machine & "' O_DIRECTORY");
-      end Check;
-   begin
-      Check ("x86_64", False);
-      Check ("i686", False);
-      Check ("riscv64", False);
-      Check ("s390x", False);
-      Check ("", False);
-      Check ("aarch64", True);
-      Check ("armv7l", True);
-      Check ("ppc64le", True);
-      Check ("powerpc", True);
-      Check ("m68k", True);
-   end Test_Linux_Open_Flags_Follow_The_Machine;
-
-   --  The open is the check: a regular file opens, and what is not one --
-   --  a folder, a link when links are not to be followed -- does not.
-   procedure Test_Only_A_Regular_File_Opens
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      use type GNAT.OS_Lib.File_Descriptor;
-      File      : constant String := Ada.Directories.Compose (Scratch, "hk-regular-file");
-      Folder    : constant String := Ada.Directories.Compose (Scratch, "hk-regular-folder");
-      Link      : constant String := Ada.Directories.Compose (Scratch, "hk-regular-link");
-      Supported : Boolean;
-      Fd        : GNAT.OS_Lib.File_Descriptor;
-   begin
-      Write_File (File, "x");
-      if not Ada.Directories.Exists (Folder) then
-         Ada.Directories.Create_Directory (Folder);
-      end if;
-
-      Fd := Hostkit.Regular_Files.Open_Read (File, False, Supported);
-      if not Supported then
-         Assert (Hostkit.Host.Current = Hostkit.Host.Unsupported, "only an unknown host lacks the primitive");
-      else
-         Assert (Fd /= GNAT.OS_Lib.Invalid_FD, "a regular file opens");
-         GNAT.OS_Lib.Close (Fd);
-
-         Fd := Hostkit.Regular_Files.Open_Read (Folder, True, Supported);
-         Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a folder is not a regular file");
-
-         if Hostkit.Fs.Create_Link (File, Link) then
-            Fd := Hostkit.Regular_Files.Open_Read (Link, False, Supported);
-            Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a link is refused when links are not followed");
-            Fd := Hostkit.Regular_Files.Open_Read (Link, True, Supported);
-            Assert (Fd /= GNAT.OS_Lib.Invalid_FD, "and opens its regular target when they are");
-            GNAT.OS_Lib.Close (Fd);
-            Assert (Hostkit.Fs.Delete_Link (Link), "remove the link");
-         end if;
-      end if;
-
-      Ada.Directories.Delete_File (File);
-      Ada.Directories.Delete_Directory (Folder);
-   end Test_Only_A_Regular_File_Opens;
-
-   --  A read-only folder of one's own is lent its owner write bit through
-   --  the held descriptor, and given its mode back by Finish.
-   procedure Test_A_Read_Only_Folder_Is_Lent_Write_Access
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Folder    : constant String := Ada.Directories.Compose (Scratch, "hk-write-access");
-      State     : Hostkit.Directory_Write_Access.Context;
-      Mode      : Natural;
-      Available : Boolean;
-   begin
-      if not Ada.Directories.Exists (Folder) then
-         Ada.Directories.Create_Directory (Folder);
-      end if;
-
-      if Hostkit.Host.Current not in Hostkit.Host.Linux | Hostkit.Host.MacOS then
-         Assert
-           (Hostkit.Directory_Write_Access.Prepare (Folder, State),
-            "a host without the rule has nothing to lend and is ready");
-         Assert (Hostkit.Directory_Write_Access.Finish (State), "and nothing to give back");
-         Ada.Directories.Delete_Directory (Folder);
-         return;
-      end if;
-
-      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#555#), "make the folder read-only");
-      Assert (Hostkit.Directory_Write_Access.Prepare (Folder, State), "write access is lent");
-      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
-      Assert (Available, "the lent mode can be read");
-      Assert (Mode = 8#755#, "the owner write bit, and only it, is added");
-      Assert (Hostkit.Directory_Write_Access.Finish (State), "the mode is given back");
-      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
-      Assert (Available, "the restored mode can be read");
-      Assert (Mode = 8#555#, "the folder is read-only again");
-
-      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#755#), "make the folder writable");
-      Assert (Hostkit.Directory_Write_Access.Prepare (Folder, State), "an owner-writable folder is ready");
-      Assert (Hostkit.Directory_Write_Access.Finish (State), "with nothing to restore");
-      Mode := Hostkit.Metadata.File_Permission_Bits (Folder, Available);
-      Assert (Available and then Mode = 8#755#, "and its mode untouched");
-
-      Ada.Directories.Delete_Directory (Folder);
-   exception
-      when others =>
-         Hostkit.Directory_Write_Access.Release (State);
-         if Hostkit.Metadata.Set_Permissions (Folder, 8#755#) then
-            Ada.Directories.Delete_Directory (Folder);
-         end if;
-         raise;
-   end Test_A_Read_Only_Folder_Is_Lent_Write_Access;
-
-   --  On Windows a mode is a DACL. Setting one on a directory must not reach
-   --  into what it holds: a file there that had only the ACEs it inherited
-   --  would be left readable by no one.
-   procedure Test_A_Folder_Mode_Leaves_Its_Files_Readable
-     (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-      Folder : constant String :=
-        Ada.Directories.Compose (Ada.Directories.Current_Directory, "hostkit-folder-mode");
-      Inside : constant String := Ada.Directories.Compose (Folder, "inside");
-
-      function Inside_Reads return Boolean is
-         File : Ada.Text_IO.File_Type;
-      begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Inside);
-         declare
-            Line : constant String := Ada.Text_IO.Get_Line (File);
-         begin
-            Ada.Text_IO.Close (File);
-            return Line = "kept";
-         end;
-      exception
-         when others =>
-            if Ada.Text_IO.Is_Open (File) then
-               Ada.Text_IO.Close (File);
-            end if;
-            return False;
-      end Inside_Reads;
-
-      procedure Clean is
-         Ignored : Boolean;
-      begin
-         Ignored := Hostkit.Metadata.Set_Permissions (Folder, 8#755#);
-         if Ada.Directories.Exists (Folder) then
-            Ada.Directories.Delete_Tree (Folder);
-         end if;
-      end Clean;
-
-      Result : Hostkit.Metadata.Metadata_Update_Result;
-      File   : Ada.Text_IO.File_Type;
-   begin
-      Clean;
-      Ada.Directories.Create_Directory (Folder);
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Inside);
-      Ada.Text_IO.Put_Line (File, "kept");
-      Ada.Text_IO.Close (File);
-
-      if not Hostkit.Metadata.Permissions_Supported then
-         Clean;
-         return;
-      end if;
-
-      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#555#), "make the folder read-only");
-      Assert (Inside_Reads, "a file in a folder made read-only by path still reads");
-      Assert (Hostkit.Metadata.Set_Permissions (Folder, 8#755#), "make the folder writable");
-
-      Result := Hostkit.Metadata.Update_Entry_Metadata
-        (Folder, (others => <>), False, Hostkit.Metadata.Update_Permissions,
-         8#555#, 0, Hostkit.Metadata.Identity_Field (Natural'Last));
-      Assert
-        (not Result.Success or else Inside_Reads,
-         "and one in a folder made read-only through a handle");
-
-      Clean;
-   exception
-      when others =>
-         Clean;
-         raise;
-   end Test_A_Folder_Mode_Leaves_Its_Files_Readable;
-
-   procedure Test_A_Volume_Has_Room (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Capacity : constant Hostkit.Metadata.Volume_Capacity :=
-        Hostkit.Metadata.Volume_Capacity_Of (Ada.Directories.Current_Directory);
-   begin
-      Assert (Capacity.Available, "the volume this test is running on reports its capacity");
-      Assert (Capacity.Capacity_Bytes > 0, "a mounted volume has a size");
-      Assert
-        (Capacity.Free_Bytes <= Capacity.Capacity_Bytes,
-         "free space cannot exceed the volume it is free on");
-      Assert
-        (not Capacity.Inodes_Known or else Capacity.Free_Inode_Count <= Capacity.Inode_Count,
-         "free inodes cannot exceed the inodes there are");
-   end Test_A_Volume_Has_Room;
-
    --  Notification is asynchronous on every host, so a change is waited for
    --  rather than expected on the first poll -- up to five seconds, which is far
    --  beyond any plausible delivery and still bounded.
@@ -3204,76 +218,314 @@ package body Hostkit_Suite is
       Ada.Text_IO.Close (Output);
    end Touch;
 
-   procedure Test_A_Fresh_Watch_Is_Inactive (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      State : Hostkit.Watch.Watch_State;
-   begin
-      Assert (not Hostkit.Watch.Is_Active (State), "a fresh watch is inactive");
-      Assert (not Hostkit.Watch.Poll (State), "polling an inactive watch reports no change");
-   end Test_A_Fresh_Watch_Is_Inactive;
+   procedure Test_Quoting (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
-   procedure Test_An_Unwatchable_Path_Fails_Quietly (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      State : Hostkit.Watch.Watch_State;
-   begin
-      --  A watch that cannot be established leaves the caller to its polling
-      --  timer rather than raising: the listing still refreshes, less promptly.
-      Hostkit.Watch.Watch_Path (State, Ada.Directories.Compose (Scratch, "no-such-directory-xyzzy"));
-      Assert (not Hostkit.Watch.Is_Active (State), "an unwatchable path does not activate");
-      Assert (not Hostkit.Watch.Poll (State), "a watch that failed simply reports no change");
+   procedure Test_Windows_Command_Line_Quoting
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Hostkit.Watch.Watch_Path (State, "");
-      Assert (not Hostkit.Watch.Is_Active (State), "an empty path does not activate");
-   end Test_An_Unwatchable_Path_Fails_Quietly;
+   procedure Test_Windows_Long_Path_Form
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-   procedure Test_The_Watch_Notices_Changes (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      Directory : constant String := Ada.Directories.Compose (Scratch, "hostkit_watch_test_dir");
-      State     : Hostkit.Watch.Watch_State;
-   begin
-      if Ada.Directories.Exists (Directory) then
-         Ada.Directories.Delete_Tree (Directory);
-      end if;
+   procedure Test_Delete_Empty_Directory
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Ada.Directories.Create_Directory (Directory);
+   --  A hard link to a file past Windows' 260-character limit: the existing
+   --  file's path needs the long form as much as the new link's does. The
+   --  deep path is reached by renaming short folders to long names, which
+   --  every host can do whatever its path limit.
+   procedure Test_Hard_Link_To_A_Long_Path
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Hostkit.Watch.Watch_Path (State, Directory);
-      Assert (Hostkit.Watch.Is_Active (State), "watching a real directory activates the native watch");
+   procedure Test_Path_Text
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Drain (State);
-      Assert (not Hostkit.Watch.Poll (State), "a directory nobody touched reports no change");
+   procedure Test_Has_Window_Server
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Touch (Directory, "created.txt");
-      Assert (Wait_For_Change (State), "creating a file is noticed");
-      Assert (not Hostkit.Watch.Poll (State), "the change is consumed, not reported twice");
+   procedure Test_Removable_Media_Listed_Once
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      --  A file written while it stays open -- a download growing -- where
-      --  the host's watch says it sees writes within files.
-      if Hostkit.Watch.Sees_File_Writes then
-         declare
-            Output : Ada.Text_IO.File_Type;
-         begin
-            Ada.Text_IO.Open
-              (Output, Ada.Text_IO.Append_File, Ada.Directories.Compose (Directory, "created.txt"));
-            Drain (State);
-            Ada.Text_IO.Put_Line (Output, "more");
-            Ada.Text_IO.Flush (Output);
-            Assert (Wait_For_Change (State), "a write into an open file is noticed");
-            Ada.Text_IO.Close (Output);
-            Drain (State);
-         end;
-      end if;
+   --  The user places each host's conventions give, read from a controlled
+   --  environment: the whole list, path and kind, and the other hosts'
+   --  variables left unread.
+   procedure Test_User_Places_Follow_The_Environment
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Ada.Directories.Delete_File (Ada.Directories.Compose (Directory, "created.txt"));
-      Assert (Wait_For_Change (State), "deleting a file is noticed");
+   --  The volume places each host lists: its fixed folders, or on Windows
+   --  the roots of the drives it has.
+   procedure Test_Volume_Places_Are_The_Hosts
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Assert (Hostkit.Watch.Event_Count (State) > 0, "events are counted");
+   procedure Test_Read_Only_File_Syncs_Promptly
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Hostkit.Watch.Release (State);
-      Assert (not Hostkit.Watch.Is_Active (State), "release deactivates the watch");
+   --  A file someone holds without sharing writes is synced once they let
+   --  go: Windows' Sync_File waits a sharing violation out.
+   procedure Test_A_Held_File_Is_Synced_Once_Let_Go
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
 
-      Ada.Directories.Delete_Tree (Directory);
-   end Test_The_Watch_Notices_Changes;
+   procedure Test_Windows_Attributes_Are_Copied
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  Linux lists its mounts, "/" among them, with escapes decoded; a host
+   --  without a table lists none, and a pseudo filesystem's source is no disk.
+   procedure Test_Mount_Table (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  The host's default opener names the file by the caller's token, last;
+   --  Windows always has one (cmd /c start).
+   procedure Test_Default_Opener (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  The per-host tables: errno numbers, where volumes live, which mount
+   --  types are internal or networked, the opener a settings file keeps, and
+   --  Windows root syntax read on any host.
+   procedure Test_Host_Tables (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Run_Reports_Exit_Status (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Launch_Does_Not_Wait (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Is_Runnable (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Terminal (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Folds_Name_Case (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Current_User_Account (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Path_Containment (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Environment_Value (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Shell_Quoting_Holds (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Captured_Run (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Captured_Input (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Timeout_Kills (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  Stopped as a group, a program takes what it started with it: a shell
+   --  killed on a deadline leaves no child of its own running.
+   procedure Test_Group_Stops_Whole (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  A group whose leader ends well takes what it left running with it:
+   --  a program sent to the background does not run on after it.
+   procedure Test_Group_Ends_With_Leader (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  A clean wrapper holds no environment of the caller's: what the
+   --  program can read of its parent says nothing it was not given.
+   procedure Test_Clean_Wrapper (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Accessible_By_Others (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Directory_Accessible_By_Others
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Create_Temporary_Directory
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A dot is not the only way to hide an entry: Windows and macOS keep a
+   --  hidden flag of their own, set here with the host's own tool.
+   procedure Test_Is_Hidden
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Move_No_Replace_Outcome
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The fallback a filesystem without a native no-replace rename gets (NFS,
+   --  SMB, FUSE). Exercised directly: the local filesystem has the native one.
+   procedure Test_Move_Without_Native_No_Replace
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Make_Private (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Private_Paths (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Delete_Tree_No_Follow
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A folder with more entries than one read takes is deleted in batches,
+   --  not refused half-way.
+   procedure Test_Delete_Tree_Large_Folder
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Relative_Link_Is_Read_From_Its_Folder
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Read_Beneath
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Change_Stamp
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Parent_Watch
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Directory_Listing
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Locate (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Where_This_Program_Is (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Where_This_User_Lives (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Elevation_Is_Asked_Not_Assumed
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  What "this host will run it" means, pinned across the mode matrix, so a
+   --  cheaper implementation has to agree with the one it replaces rather than
+   --  merely look equivalent.
+   --  A cache and the application data directory must not be the same place.
+   --  They are on no host, and the reason is not tidiness: the roaming profile
+   --  travels between machines and Application Support is backed up, so a cache
+   --  put in either comes back from somewhere it was never meant to survive.
+   procedure Test_Cache_And_Data_Are_Different_Places
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Executability_Across_Modes (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_A_Directory_Is_Not_Executable (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_The_Host_Answers_For_Its_Own_Trash
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_The_Host_Locale_Is_Asked_Of_The_Host
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The path of the running executable, resolved.
+   --  Asking whether a stream is a terminal is answered, per stream.
+   --
+   --  A caller uses this to decide whether to colour output, draw progress or
+   --  hold a conversation. The question is about the stream and not about the
+   --  program: a suite like this one usually runs with its output captured
+   --  and its input from nowhere, so the honest expectation here is not that
+   --  any particular stream is a terminal but that each is answered
+   --  separately and none of them raises.
+   --  Joining path segments produces one separator, whatever it is given.
+   --
+   --  Ada.Directories.Compose is the portable-looking answer that is not:
+   --  its Name is a simple name, so a multi-segment tail is outside what it
+   --  is for. This is the operation callers actually want, and it is here
+   --  rather than in each of them because what goes between two segments is
+   --  the host's business.
+   procedure Test_Joining_Paths_Uses_One_Separator
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Terminal_Streams_Are_Answered_Separately
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_The_Executable_Path_Locates_This_Program
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Metadata_Reports_What_It_Could_Not_Get
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Mode_And_Ownership_Agree_With_The_Separate_Calls
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Metadata_Update_Is_Bound_To_The_Held_Entry
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Lease_File_Pins_Locks_And_Transfers_Bytes
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Same_File_Sees_Through_A_Second_Name
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Entry_Identity_And_Revision_Do_Not_Follow_Links
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_Device_Id_Reports_A_Comparable_Volume
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_A_Name_Round_Trips_Through_Its_Id
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  Ids from 2**31 up are real -- an idmapped mount's, NFS's nobody at
+   --  4294967294 -- and no fixture here owns a file as one, so the type that
+   --  carries them is checked on its own: every 32-bit value is held, printed
+   --  and read back exactly, and text that is not one is refused rather than
+   --  raised on.
+   procedure Test_A_Large_Account_Id_Round_Trips
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The open(2) flags that differ by Linux machine. Pure logic over the
+   --  uname machine name, so every host checks every machine.
+   procedure Test_Linux_Open_Flags_Follow_The_Machine
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The open is the check: a regular file opens, and what is not one --
+   --  a folder, a link when links are not to be followed -- does not.
+   procedure Test_Only_A_Regular_File_Opens
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A read-only folder of one's own is lent its owner write bit through
+   --  the held descriptor, and given its mode back by Finish.
+   procedure Test_A_Read_Only_Folder_Is_Lent_Write_Access
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  On Windows a mode is a DACL. Setting one on a directory must not reach
+   --  into what it holds: a file there that had only the ACEs it inherited
+   --  would be left readable by no one.
+   procedure Test_A_Folder_Mode_Leaves_Its_Files_Readable
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_A_Volume_Has_Room (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_A_Fresh_Watch_Is_Inactive (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_An_Unwatchable_Path_Fails_Quietly (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_The_Watch_Notices_Changes (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    type Hostkit_Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
@@ -3316,91 +568,14 @@ package body Hostkit_Suite is
 
    procedure Test_The_Null_Device_Reads_As_Nothing
      (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Handle : Hostkit.Descriptors.Descriptor;
-      Buffer : Ada.Streams.Stream_Element_Array (1 .. 16);
-      Last   : Ada.Streams.Stream_Element_Offset;
-
-      use type Hostkit.Descriptors.Transfer_Outcome;
-   begin
-      if Hostkit.Fs.Null_Device = "" then
-         --  A host this crate knows nothing about is not promised one.
-         return;
-      end if;
-
-      Assert (Hostkit.Descriptors.Open_File
-                (Hostkit.Fs.Null_Device,
-                 Hostkit.Descriptors.Open_Read, Handle),
-              "the null device would not open for reading: "
-              & Hostkit.Fs.Null_Device);
-
-      Assert (Hostkit.Descriptors.Read (Handle, Buffer, Last)
-              = Hostkit.Descriptors.Transfer_End_Of_File,
-              "the null device did not read as nothing");
-
-      Hostkit.Descriptors.Close (Handle);
-
-      --  And it takes what is written to it, which is the other half of what
-      --  a caller with nothing to give needs.
-      Assert (Hostkit.Descriptors.Open_File
-                (Hostkit.Fs.Null_Device,
-                 Hostkit.Descriptors.Open_Write_Truncate, Handle),
-              "the null device would not open for writing");
-
-      declare
-         Written : constant Ada.Streams.Stream_Element_Array (1 .. 4) :=
-           [1, 2, 3, 4];
-
-         Took : constant Boolean :=
-           Hostkit.Descriptors.Write (Handle, Written, Last)
-           = Hostkit.Descriptors.Transfer_Ok;
-
-         use type Ada.Streams.Stream_Element_Offset;
-      begin
-         Assert (Took and then Last = Written'Last,
-                 "the null device would not take what was written to it");
-      end;
-
-      --  The checked close says how the close went, and leaves the handle
-      --  invalid, so that closing it again closes nothing and answers True.
-      Assert (Hostkit.Descriptors.Close (Handle),
-              "the null device's close was reported as failed");
-      Assert (not Hostkit.Descriptors.Is_Valid (Handle)
-              and then Hostkit.Descriptors.Close (Handle),
-              "a closed descriptor was not left invalid");
-   end Test_The_Null_Device_Reads_As_Nothing;
+   is separate;
 
    procedure Test_An_Identity_Reads_Beside_Another_Reader
      (T : in out AUnit.Test_Cases.Test_Case'Class);
 
    procedure Test_An_Identity_Reads_Beside_Another_Reader
      (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-
-      Boot_Id : constant String := "/proc/sys/kernel/random/boot_id";
-      Before  : constant String := Hostkit.Process.Identity_Of (1);
-      Held    : Ada.Text_IO.File_Type;
-   begin
-      if Before = "" or else not Ada.Directories.Exists (Boot_Id) then
-         --  A host whose identities are not read from these files.
-         return;
-      end if;
-
-      --  Another task reading the boot's id as this one asks: the run
-      --  time refuses a second open of a file under its default form.
-      Ada.Text_IO.Open (Held, Ada.Text_IO.In_File, Boot_Id);
-      declare
-         During : constant String := Hostkit.Process.Identity_Of (1);
-      begin
-         Ada.Text_IO.Close (Held);
-         Assert (During = Before,
-                 "a process's identity was not read while another reader had the boot's id open: """
-                 & During & """");
-      end;
-   end Test_An_Identity_Reads_Beside_Another_Reader;
+   is separate;
 
    --  The suite is started with no arguments, so the two answers must agree
    --  on that -- and on a host where the command line has to be asked for and
@@ -3409,80 +584,12 @@ package body Hostkit_Suite is
    --  falls back to the runtime and the two are the same by construction.
    procedure Test_Command_Line_Arguments
      (T : in out AUnit.Test_Cases.Test_Case'Class)
-   is
-      pragma Unreferenced (T);
-   begin
-      Assert
-        (Hostkit.Command_Line.Argument_Count
-           = Ada.Command_Line.Argument_Count,
-         "the argument count must be the one the process was started with;"
-         & " asked" & Natural'Image (Hostkit.Command_Line.Argument_Count)
-         & ", runtime" & Natural'Image (Ada.Command_Line.Argument_Count));
-
-      for Index in 1 .. Ada.Command_Line.Argument_Count loop
-         Assert
-           (Hostkit.Command_Line.Argument (Index)
-              = Ada.Command_Line.Argument (Index),
-            "argument" & Natural'Image (Index)
-            & " must be the one the process was started with; asked '"
-            & Hostkit.Command_Line.Argument (Index) & "', runtime '"
-            & Ada.Command_Line.Argument (Index) & "'");
-      end loop;
-   end Test_Command_Line_Arguments;
+   is separate;
 
    --  What was written is put on the device: a file's contents and a
    --  directory's entries, where the host can say so; where it cannot, it
    --  says that, never that it did.
-   procedure Test_Writes_Are_Made_Durable (T : in out AUnit.Test_Cases.Test_Case'Class) is
-      pragma Unreferenced (T);
-      use type Hostkit.Durability.Outcome;
-      Directory : constant String := Ada.Directories.Full_Name ("obj/durability");
-      Path      : constant String := Directory & "/written.txt";
-      File      : Ada.Text_IO.File_Type;
-      Written   : Hostkit.Durability.Outcome;
-      Listed    : Hostkit.Durability.Outcome;
-   begin
-      Ada.Directories.Create_Path (Directory);
-      Ada.Text_IO.Create (File, Ada.Text_IO.Out_File, Path);
-      Ada.Text_IO.Put_Line (File, "kept");
-      Ada.Text_IO.Close (File);
-      Written := Hostkit.Durability.Sync_File (Path);
-      Listed := Hostkit.Durability.Sync_Directory (Directory);
-      AUnit.Assertions.Assert
-        (Written = Hostkit.Durability.Synced,
-         "a written file was not synced: " & Hostkit.Durability.Outcome'Image (Written));
-      AUnit.Assertions.Assert
-        (Listed /= Hostkit.Durability.Failed,
-         "a directory's entries could not be synced: "
-         & Hostkit.Durability.Outcome'Image (Listed));
-      AUnit.Assertions.Assert
-        (Hostkit.Durability.Sync_File (Directory & "/not-there.txt") = Hostkit.Durability.Failed,
-         "a file that is not there was said to be synced");
-
-      --  Room reserved is room the file has, its length grown to it; a
-      --  file that is not there has none to reserve.
-      declare
-         use type Ada.Directories.File_Size;
-         Reserved : constant Hostkit.Durability.Outcome :=
-           Hostkit.Durability.Reserve_Space (Path, 1_048_576);
-      begin
-         if Hostkit.Host.Current = Hostkit.Host.Linux then
-            AUnit.Assertions.Assert
-              (Reserved = Hostkit.Durability.Synced,
-               "room was not reserved: " & Hostkit.Durability.Outcome'Image (Reserved));
-            AUnit.Assertions.Assert
-              (Ada.Directories.Size (Path) = 1_048_576, "the file was not grown to the room reserved");
-            AUnit.Assertions.Assert
-              (Hostkit.Durability.Reserve_Space (Directory & "/not-there.txt", 4096)
-                 = Hostkit.Durability.Failed,
-               "room was reserved for a file that is not there");
-         else
-            AUnit.Assertions.Assert
-              (Reserved /= Hostkit.Durability.Synced,
-               "room was said to be reserved where the host cannot");
-         end if;
-      end;
-   end Test_Writes_Are_Made_Durable;
+   procedure Test_Writes_Are_Made_Durable (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    overriding procedure Register_Tests (T : in out Hostkit_Test_Case) is
       use AUnit.Test_Cases.Registration;
@@ -3511,6 +618,9 @@ package body Hostkit_Suite is
         (T, Test_Delete_Empty_Directory'Access,
          "fs : only an empty directory is deleted, and a refusal is an answer");
       Register_Routine
+        (T, Test_Hard_Link_To_A_Long_Path'Access,
+         "fs : a hard link reaches a file past the Windows path limit");
+      Register_Routine
         (T, Test_Path_Text'Access,
          "fs : path text splits Windows and POSIX paths and finds a share's root on any host");
       Register_Routine
@@ -3520,8 +630,17 @@ package body Hostkit_Suite is
         (T, Test_Removable_Media_Listed_Once'Access,
          "fs : removable media are listed by the volume places alone");
       Register_Routine
+        (T, Test_User_Places_Follow_The_Environment'Access,
+         "fs : the user places are the host's own, read from its environment");
+      Register_Routine
+        (T, Test_Volume_Places_Are_The_Hosts'Access,
+         "mounts : the volume places are the host's folders, or its drives' roots");
+      Register_Routine
         (T, Test_Read_Only_File_Syncs_Promptly'Access,
          "durability : a read-only file syncs at once, without waiting out write retries");
+      Register_Routine
+        (T, Test_A_Held_File_Is_Synced_Once_Let_Go'Access,
+         "durability : a file held against writers is synced once it is let go");
       Register_Routine
         (T, Test_Windows_Attributes_Are_Copied'Access,
          "metadata copy : a hidden Windows file's copy is hidden too");

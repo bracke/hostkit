@@ -77,8 +77,9 @@ package Hostkit.Mounts is
 
    --  The places this host's conventions put volumes, each host its own:
    --  /mnt, /media and /run/media on Linux; /Volumes and /System/Volumes on
-   --  macOS; every drive letter's root on Windows. Listed whether or not
-   --  they exist; a caller looks.
+   --  macOS; the root of every drive Windows has, removable and optical
+   --  ones only with a medium in. The folders are listed whether or not they
+   --  exist; a caller looks.
    --
    --  @return The places, in the order a file manager shows them.
    function Volume_Places return Volume_Place_List;

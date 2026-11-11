@@ -101,6 +101,12 @@ jobs:
           #  Read back by Test_Environment_Value: a profile path such as
           #  C:\Users\Jürgen must arrive as UTF-8, not in the ANSI code page.
           HOSTKIT_TEST_NON_ASCII: "Jürgen"
+          #  The tests that skip on each host, by name and reason
+          #  (tests/expected-skips-*.txt): a skip passes in AUnit's count, so a
+          #  test that quietly stopped running here would go unseen. Another
+          #  skip fails the run, and so does a listed test that ran. Both macOS
+          #  runners share one list.
+          HOSTKIT_TEST_EXPECTED_SKIPS: expected-skips-${{ runner.os == 'Linux' && 'linux' || runner.os == 'macOS' && 'macos' || 'windows' }}.txt
         run: |
           alr --non-interactive build
           # The binary is hostkit_tests.exe on Windows, and bash will not find it under

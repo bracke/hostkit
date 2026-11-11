@@ -1,0 +1,10 @@
+-- Tests that skip on the macOS CI runners, Intel and Apple silicon alike (see
+-- HOSTKIT_TEST_EXPECTED_SKIPS in .github/workflows/ci.yml), each as "Test: reason",
+-- exactly as the test's Skip call gives them: a skip not listed here fails the run --
+-- a listed test that skips for another reason too -- and so does a listed one that ran.
+Test_Windows_Attributes_Are_Copied: needs Windows file attributes
+Test_A_Held_File_Is_Synced_Once_Let_Go: only Windows refuses an open for a holder's share mode
+Test_Clean_Wrapper: the wrapper's environment is read back through Linux /proc
+Test_Group_Ends_With_Leader: a group ending with its leader is checked on Linux
+Test_An_Identity_Reads_Beside_Another_Reader: process identities are not read from /proc here
+Test_A_Lock_Is_Not_Inherited: no /proc/self/fd to list a program's open files

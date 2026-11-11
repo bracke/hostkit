@@ -396,7 +396,10 @@ package body Hostkit.Metadata_Copy is
          end loop;
       end loop;
       if Ok and then not Item.Is_Link then
-         Ok := C_Chmod (C_Path, C_U32 (Item.Mode and 8#1777#)) = 0;
+         --  The owner was put back, so setuid/setgid keep their meaning (as
+         --  with mv or cp -a); a plain copy belongs to its writer and drops them.
+         Ok := C_Chmod
+           (C_Path, C_U32 (Item.Mode and (if Preserve_Ownership then 8#7777# else 8#1777#))) = 0;
       end if;
       Free (Acl_Access);
       Free (Acl_Default);

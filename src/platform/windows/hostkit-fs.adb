@@ -295,7 +295,9 @@ package body Hostkit.Fs is
         with Import => True, Convention => Stdcall,
              External_Name => "CreateHardLinkW";
 
-      Wide_Target : aliased Wide_String := Wide_Text (Target);
+      --  Both paths in long form: a hard link whose source lies past 260
+      --  characters failed and failed the whole copy.
+      Wide_Target : aliased Wide_String := Wide (Target);
       Wide_Link   : aliased Wide_String := Wide (Link_Path);
       Created     : constant Interfaces.C.int :=
         Create_Hard_Link_W

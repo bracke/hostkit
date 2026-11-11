@@ -27,7 +27,8 @@ package Hostkit.Metadata_Copy is
    procedure Set_Times (Item : in out Snapshot; Times : Entry_Times);
 
    --  Apply extended attributes, then the final mode and timestamps.
-   --  Preserve_Ownership requests the captured owner where the host has one.
+   --  Preserve_Ownership requests the captured owner where the host has one,
+   --  and with it the setuid and setgid bits, which a plain copy drops.
    function Apply
      (Item               : Snapshot;
       Path               : String;
