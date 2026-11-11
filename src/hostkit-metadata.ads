@@ -216,10 +216,28 @@ package Hostkit.Metadata is
    --  one -- stays, and the DACL stays inheriting or protected as it was.
    --  Where the owner would still have a right the mode takes away -- an
    --  inherited ACE, or one for a group it is in, grants it -- a deny ACE
-   --  takes just that right from the owner. The group and Everyone get no
-   --  deny: one would bind the owner too, so a right only inheritance gives
-   --  them stays. The entry alone is changed: nothing is handed down anew to
-   --  what a folder holds.
+   --  takes just that right from the owner.
+   --
+   --  That minimal edit is kept only when File_Permission_Bits would read
+   --  the mode asked for from it. Where it would not -- an inherited ACE
+   --  still grants the group or "other" a right the mode takes away, or the
+   --  group would get a right of Everyone's its bits lack -- the edit does
+   --  what Explorer's "disable inheritance, convert inherited permissions
+   --  into explicit permissions" does, then edits that: the DACL is
+   --  protected and every inherited ACE becomes an explicit one, SYSTEM's,
+   --  the Administrators' and every other trustee's kept as they were. From
+   --  each allow ACE for the owner, the primary group or "other" -- Everyone,
+   --  Authenticated Users and BUILTIN\Users, the groups every account or
+   --  every signed-in one is in -- the rights of the bits that class loses
+   --  are taken (an ACE that is also handed down is split, so what a
+   --  folder's children inherit stays), and an allow ACE for each class's
+   --  bits is added. A deny binds in order, so one placed after the owner's
+   --  allow takes from the group a right only Everyone would give it, and
+   --  leaves the owner, a member of the group, what its own bits give, as
+   --  POSIX does. When even that, or else Set_Exact_Permissions' three ACEs,
+   --  would not read as the mode, nothing is written and the result is
+   --  False. The entry alone is changed: nothing is handed down anew to what
+   --  a folder holds.
    --
    --  @param Path Path whose mode is changed.
    --  @param Mode New permission bits.

@@ -38,10 +38,11 @@ package body Hostkit.Metadata is
    --  Windows has no POSIX mode bits and no uid/gid. It has an ACL and SIDs, so
    --  that is what this reads and writes: the effective rights of the owner, the
    --  primary group and Everyone are evaluated and folded into the rwx triplets
-   --  the neutral interface speaks, and setting permissions builds a fresh DACL
-   --  granting exactly those rights back. A SID is identified to the caller by
-   --  a stable hash of all its bytes, and the SID itself is remembered so a name
-   --  can be recovered from that number later.
+   --  the neutral interface speaks, and setting permissions edits the DACL
+   --  until it reads back as those triplets (see Set_Permissions in the
+   --  spec). A SID is identified to the caller by a stable hash of all its
+   --  bytes, and the SID itself is remembered so a name can be recovered
+   --  from that number later.
 
    Success : constant C_DWord := 0;
    Invalid_Handle_Value : constant System.Address :=
@@ -950,6 +951,31 @@ package body Hostkit.Metadata is
    function Equal_Sid (Left, Right : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "EqualSid";
 
+   --  The header every ACL starts with, and every ACE.
+   type Acl_Header is record
+      Revision  : Interfaces.C.unsigned_char;
+      Padding_1 : Interfaces.C.unsigned_char;
+      Size      : Interfaces.C.unsigned_short;
+      Count     : Interfaces.C.unsigned_short;
+      Padding_2 : Interfaces.C.unsigned_short;
+   end record with Convention => C;
+   type Ace_Header is record
+      Kind  : Interfaces.C.unsigned_char;
+      Flags : Interfaces.C.unsigned_char;
+      Size  : Interfaces.C.unsigned_short;
+   end record with Convention => C;
+
+   function Get_Ace
+     (Acl : System.Address; Index : C_DWord; Ace : access System.Address) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetAce";
+   function Initialize_Acl
+     (Acl : System.Address; Size : C_DWord; Revision : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "InitializeAcl";
+   function Add_Ace
+     (Acl : System.Address; Revision : C_DWord; Start : C_DWord;
+      Aces : System.Address; Size : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "AddAce";
+
    --  The rwx triplet Acl grants Sid, as File_Permission_Bits reads one; 0
    --  where there is no ACL to read or the host will not say.
    function Triplet_Of (Acl : System.Address; Sid : System.Address) return Natural is
@@ -1088,6 +1114,417 @@ package body Hostkit.Metadata is
       end;
    end Edited_Dacl;
 
+   --  When the minimal edit does not give the mode asked for -- an ACE the
+   --  entry inherits still grants a right the mode takes away -- the edit
+   --  does what Explorer's "disable inheritance, convert inherited
+   --  permissions into explicit permissions" and then a permission edit
+   --  do: see Set_Permissions in the spec.
+
+   Access_Allowed_Ace    : constant Interfaces.C.unsigned_char := 0;
+   Access_Denied_Ace     : constant Interfaces.C.unsigned_char := 1;
+   Object_Inherit_Ace    : constant Interfaces.C.unsigned_char := 16#01#;
+   Container_Inherit_Ace : constant Interfaces.C.unsigned_char := 16#02#;
+   No_Propagate_Ace      : constant Interfaces.C.unsigned_char := 16#04#;
+   Inherit_Only_Ace      : constant Interfaces.C.unsigned_char := 16#08#;
+   Ace_Inherited         : constant Interfaces.C.unsigned_char := 16#10#;
+   Ace_Append_At_End     : constant C_DWord := 16#FFFF_FFFF#;
+
+   Generic_Read_Access    : constant C_DWord := 16#8000_0000#;
+   Generic_Write_Access   : constant C_DWord := 16#4000_0000#;
+   Generic_Execute_Access : constant C_DWord := 16#2000_0000#;
+   Generic_All_Access     : constant C_DWord := 16#1000_0000#;
+   Specific_Access_Bits   : constant C_DWord := 16#0FFF_FFFF#;
+   File_All_Access        : constant C_DWord := 16#001F_01FF#;
+   File_Read_Ea           : constant C_DWord := 16#0000_0008#;
+   File_Write_Ea          : constant C_DWord := 16#0000_0010#;
+   File_Delete_Child      : constant C_DWord := 16#0000_0040#;
+
+   Win_Authenticated_User_Sid : constant C_Int := 17;
+   Win_Builtin_Users_Sid      : constant C_Int := 27;
+
+   --  ERROR_NOT_SUPPORTED: no DACL this edit can write gives the mode.
+   Error_Not_Supported : constant Interfaces.Unsigned_32 := 50;
+
+   --  The class of a mode's triplets an ACE's trustee stands for. The owner
+   --  and the primary group are their SIDs. "Other" is Everyone,
+   --  Authenticated Users and BUILTIN\Users: the groups every account, or
+   --  every one signed in, is in -- which is how an inherited ACE grants
+   --  everybody a right. Every other trustee (SYSTEM, the Administrators,
+   --  any named account) is no class: its ACEs are kept as they are.
+   type Access_Class is (Owner_Class, Group_Class, Other_Class, No_Class);
+
+   --  An ACL built here, DWORD-aligned as an ACL must be.
+   type Acl_Words is array (Positive range <>) of Interfaces.Unsigned_32
+     with Convention => C;
+
+   --  Mask with its generic rights mapped to the file rights they stand for.
+   function Specific_Rights (Mask : C_DWord) return C_DWord is
+     ((Mask and Specific_Access_Bits)
+      or (if (Mask and Generic_Read_Access) /= 0 then File_Generic_Read else 0)
+      or (if (Mask and Generic_Write_Access) /= 0 then File_Generic_Write else 0)
+      or (if (Mask and Generic_Execute_Access) /= 0 then File_Generic_Execute else 0)
+      or (if (Mask and Generic_All_Access) /= 0 then File_All_Access else 0));
+
+   --  The rights an ACE carries for a triplet's bits: taken from an allow
+   --  for a class that loses the bits, and from a deny for one that keeps
+   --  them. Reading the attributes, the permissions and synchronising stay:
+   --  POSIX lets anyone see a file's mode, whatever it says.
+   function Rights_Of_Bits (Triplet : Natural) return C_DWord is
+     ((if (Triplet / 4) mod 2 = 1 then File_Read_Data or File_Read_Ea else 0)
+      or (if (Triplet / 2) mod 2 = 1
+          then File_Write_Data or File_Append_Data or File_Write_Ea or File_Write_Attributes
+               or File_Delete_Child or Delete_Access or Write_Dac or Write_Owner
+          else 0)
+      or (if Triplet mod 2 = 1 then File_Execute_Access else 0));
+
+   --  The bits of either triplet.
+   function Union (First, Second : Natural) return Natural is (First + Without (Second, First));
+
+   --  The mode Mode_Of reads once Mode is applied: execute only where
+   --  Runnable, nothing for an account the entry does not name, and the
+   --  owner's bits for a group that is the owner itself -- one SID holds
+   --  one triplet.
+   function Target_Mode
+     (Owner, Group : System.Address;
+      Mode         : Natural;
+      Runnable     : Boolean) return Natural
+   is
+      Owner_Bits : constant Natural :=
+        (if Owner = System.Null_Address then 0 else Shown ((Mode / 64) mod 8, Runnable));
+      Group_Bits : constant Natural :=
+        (if Group = System.Null_Address then 0
+         elsif Owner /= System.Null_Address and then Equal_Sid (Group, Owner) /= 0 then Owner_Bits
+         else Shown ((Mode / 8) mod 8, Runnable));
+   begin
+      return Owner_Bits * 64 + Group_Bits * 8 + Shown (Mode mod 8, Runnable);
+   end Target_Mode;
+
+   --  Dacl (not null) converted to explicit ACEs and edited to read Target
+   --  (Target_Mode): an empty list when the host would not build it.
+   --
+   --  Every ACE is kept, without its inherited flag, in the order it had:
+   --  SYSTEM's, the Administrators', any other trustee's as they were. An
+   --  allow for the owner, the group or "other" (Access_Class) loses the
+   --  rights of the bits its class does not keep; a deny for one loses the
+   --  rights its class is now given (by its own triplet, or the owner's and
+   --  the group's it is part of). An ACE that also hands its rights down
+   --  is split, so what a folder's children inherit does not change: the
+   --  edited copy for the entry alone, and the original inherit-only.
+   --
+   --  Behind the explicit denies, before the explicit allows (where an edit
+   --  puts them), come an allow for each class's bits and the denies the
+   --  mode needs: one for what the owner would still get past its bits from
+   --  a group it is in, and, after the owner's allow so the owner keeps
+   --  what its own bits give, one for what the group would get past its bits
+   --  -- from Everyone, when "other" has a bit the group lacks. A deny binds
+   --  in order: the owner's allow before it has already decided the owner's
+   --  rights, as POSIX decides the owner's access by the owner's bits alone.
+   function Explicit_Dacl
+     (Dacl, Owner, Group, Everyone : System.Address;
+      Target                       : Natural;
+      Runnable                     : Boolean) return Acl_Words
+   is
+      use type Interfaces.Unsigned_32;
+
+      Header : constant Acl_Header with Import, Address => Dacl;
+      --  Room for each ACE twice (an ACE handed down is split in two) and
+      --  for five of the largest a SID makes, within the most an ACL holds.
+      Size   : constant Natural := Natural'Min (8 + 2 * Natural (Header.Size) + 5 * (8 + 68), 65_532);
+      Count  : constant Natural := Natural (Header.Count);
+
+      Considered : constant Natural := (if Runnable then 7 else 6);
+      Owner_Bits : constant Natural := (Target / 64) mod 8;
+      Group_Bits : constant Natural := (Target / 8) mod 8;
+      Other_Bits : constant Natural := Target mod 8;
+      Has_Owner  : constant Boolean := Owner /= System.Null_Address;
+      Has_Group  : constant Boolean :=
+        Group /= System.Null_Address and then (not Has_Owner or else Equal_Sid (Group, Owner) = 0);
+
+      type Other_Sid_List is array (1 .. 3) of aliased Sid_Buffer;
+      Other_Kinds  : constant array (Other_Sid_List'Range) of C_Int :=
+        [Win_World_Sid, Win_Authenticated_User_Sid, Win_Builtin_Users_Sid];
+      Other_Sids   : Other_Sid_List := [others => [others => Interfaces.C.nul]];
+      Other_Known  : array (Other_Sid_List'Range) of Boolean := [others => False];
+      First_Allow  : Natural := 0;
+
+      --  ACE Index of Dacl.
+      function Ace_At (Index : Natural) return System.Address is
+         Found : aliased System.Address := System.Null_Address;
+      begin
+         if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
+            raise Program_Error;
+         end if;
+         return Found;
+      end Ace_At;
+
+      function Class_Of (Sid : System.Address) return Access_Class is
+      begin
+         if Has_Owner and then Equal_Sid (Sid, Owner) /= 0 then
+            return Owner_Class;
+         elsif Has_Group and then Equal_Sid (Sid, Group) /= 0 then
+            return Group_Class;
+         end if;
+         for Index in Other_Sids'Range loop
+            if Other_Known (Index) and then Equal_Sid (Sid, Other_Sids (Index) (1)'Address) /= 0 then
+               return Other_Class;
+            end if;
+         end loop;
+         return No_Class;
+      end Class_Of;
+
+      --  The bits Class keeps.
+      function Kept (Class : Access_Class) return Natural is
+        (case Class is
+            when Owner_Class => Owner_Bits,
+            when Group_Class => Group_Bits,
+            when Other_Class => Other_Bits,
+            when No_Class    => 7);
+
+      --  The bits whoever Class stands for is given: its own, and the
+      --  owner's and the group's when it takes them in.
+      function Granted (Class : Access_Class) return Natural is
+        (case Class is
+            when Owner_Class => Owner_Bits,
+            when Group_Class => Union (Owner_Bits, Group_Bits),
+            when Other_Class => Union (Union (Owner_Bits, Group_Bits), Other_Bits),
+            when No_Class    => 0);
+
+      --  The DACL, with a deny of Owner_Deny for the owner and Group_Deny
+      --  for the group where not 0.
+      function Build (Owner_Deny, Group_Deny : C_DWord) return Acl_Words is
+         Words    : Acl_Words (1 .. Size / 4) := [others => 0];
+         Revision : constant C_DWord := C_DWord (Header.Revision);
+         Built    : Boolean := Initialize_Acl (Words'Address, C_DWord (Size), Revision) /= 0;
+
+         --  Add an ACE of Kind with Flags allowing or denying Mask to Sid.
+         procedure Append
+           (Kind, Flags : Interfaces.C.unsigned_char;
+            Mask        : C_DWord;
+            Sid         : System.Address)
+         is
+            Ace_Size : constant Natural := 8 + Natural (Get_Length_Sid (Sid));
+            Ace      : Acl_Words (1 .. (Ace_Size + 3) / 4) := [others => 0];
+         begin
+            if not Built then
+               return;
+            end if;
+            --  ACE_HEADER, little-endian: type, flags, size; then the mask.
+            Ace (1) :=
+              Interfaces.Unsigned_32 (Kind) + Interfaces.Unsigned_32 (Flags) * 16#100#
+              + Interfaces.Unsigned_32 (Ace_Size) * 16#1_0000#;
+            Ace (2) := Interfaces.Unsigned_32 (Mask);
+            Built :=
+              Copy_Sid (C_DWord (Ace_Size - 8), Ace (3)'Address, Sid) /= 0
+              and then Add_Ace (Words'Address, Revision, Ace_Append_At_End, Ace'Address, C_DWord (Ace_Size)) /= 0;
+         end Append;
+
+         --  Add the ACE at Source as it is, with Flags.
+         procedure Copy (Source : System.Address; Flags : Interfaces.C.unsigned_char) is
+            Head     : constant Ace_Header with Import, Address => Source;
+            Original : constant Acl_Words (1 .. (Natural (Head.Size) + 3) / 4) with Import, Address => Source;
+            Ace      : Acl_Words := Original;
+         begin
+            if not Built then
+               return;
+            end if;
+            Ace (1) := (Ace (1) and 16#FFFF_00FF#) or Interfaces.Unsigned_32 (Flags) * 16#100#;
+            Built := Add_Ace (Words'Address, Revision, Ace_Append_At_End, Ace'Address, C_DWord (Head.Size)) /= 0;
+         end Copy;
+
+         --  Add ACE Index of Dacl, made explicit and edited for its class.
+         procedure Carry (Index : Natural) is
+            Source : constant System.Address := Ace_At (Index);
+            Head   : constant Ace_Header with Import, Address => Source;
+            Raw    : constant Interfaces.Unsigned_32
+              with Import, Address => System.Storage_Elements."+" (Source, 4);
+            Sid    : constant System.Address := System.Storage_Elements."+" (Source, 8);
+            Flags  : constant Interfaces.C.unsigned_char := Head.Flags and not Ace_Inherited;
+            Mask   : constant C_DWord := C_DWord (Raw);
+            Class  : constant Access_Class :=
+              (if Head.Kind = Access_Allowed_Ace or else Head.Kind = Access_Denied_Ace then Class_Of (Sid)
+               else No_Class);
+         begin
+            --  An inherit-only ACE grants nothing here.
+            if Class = No_Class or else (Head.Flags and Inherit_Only_Ace) /= 0 then
+               Copy (Source, Flags);
+               return;
+            end if;
+            declare
+               Edited : constant C_DWord :=
+                 Specific_Rights (Mask)
+                 and not Rights_Of_Bits
+                   (if Head.Kind = Access_Allowed_Ace then Without (Considered, Kept (Class)) else Granted (Class));
+            begin
+               if Edited = Specific_Rights (Mask) then
+                  Copy (Source, Flags);
+                  return;
+               end if;
+               if Edited /= 0 then
+                  Append
+                    (Head.Kind, Flags and not (Object_Inherit_Ace or Container_Inherit_Ace or No_Propagate_Ace),
+                     Edited, Sid);
+               end if;
+               if (Flags and (Object_Inherit_Ace or Container_Inherit_Ace)) /= 0 then
+                  Append (Head.Kind, Flags or Inherit_Only_Ace, Mask, Sid);
+               end if;
+            end;
+         end Carry;
+      begin
+         for Index in 0 .. First_Allow - 1 loop
+            Carry (Index);
+         end loop;
+         if Has_Owner and then Owner_Deny /= 0 then
+            Append (Access_Denied_Ace, 0, Owner_Deny, Owner);
+         end if;
+         if Has_Owner and then Owner_Bits /= 0 then
+            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Owner_Bits), Owner);
+         end if;
+         if Has_Group and then Group_Deny /= 0 then
+            Append (Access_Denied_Ace, 0, Group_Deny, Group);
+         end if;
+         if Has_Group and then Group_Bits /= 0 then
+            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Group_Bits), Group);
+         end if;
+         if Other_Bits /= 0 then
+            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Other_Bits), Everyone);
+         end if;
+         for Index in First_Allow .. Count - 1 loop
+            Carry (Index);
+         end loop;
+         return (if Built then Words else Words (1 .. 0));
+      end Build;
+   begin
+      for Index in Other_Sids'Range loop
+         declare
+            Length : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+         begin
+            Other_Known (Index) :=
+              Create_Well_Known_Sid
+                (Other_Kinds (Index), System.Null_Address, Other_Sids (Index) (1)'Address, Length'Access) /= 0;
+         end;
+      end loop;
+      --  The explicit denies lead a canonical DACL.
+      while First_Allow < Count loop
+         declare
+            Head : constant Ace_Header with Import, Address => Ace_At (First_Allow);
+         begin
+            exit when Head.Kind /= Access_Denied_Ace or else (Head.Flags and Ace_Inherited) /= 0;
+         end;
+         First_Allow := First_Allow + 1;
+      end loop;
+      declare
+         Plain : constant Acl_Words := Build (0, 0);
+      begin
+         if Plain'Length = 0 then
+            return Plain;
+         end if;
+         declare
+            Owner_Left : constant Natural :=
+              (if Has_Owner then Without (Shown (Triplet_Of (Plain'Address, Owner), Runnable), Owner_Bits) else 0);
+            Group_Left : constant Natural :=
+              (if Has_Group then Without (Shown (Triplet_Of (Plain'Address, Group), Runnable), Group_Bits) else 0);
+         begin
+            if Owner_Left = 0 and then Group_Left = 0 then
+               return Plain;
+            end if;
+            return Build (Rights_To_Deny (Owner_Left), Rights_To_Deny (Group_Left));
+         end;
+      end;
+   end Explicit_Dacl;
+
+   --  A fresh DACL granting the owner, the primary group and Everyone
+   --  exactly Mode's triplets and no one else: Set_Exact_Permissions' form.
+   --  Result is a LocalAlloc'd ACL for the caller to free. False when the
+   --  host would not build it.
+   function Exact_Dacl
+     (Owner, Group, Everyone : System.Address;
+      Mode                   : Natural;
+      Result                 : out System.Address) return Boolean
+   is
+      Sids    : constant array (1 .. 3) of System.Address := [Owner, Group, Everyone];
+      Shifts  : constant array (Sids'Range) of Positive := [64, 8, 1];
+      Entries : aliased Explicit_Access_Array;
+      Built   : aliased System.Address := System.Null_Address;
+      Status  : C_DWord;
+   begin
+      Result := System.Null_Address;
+      for Index in Entries'Range loop
+         Build_Trustee_With_Sid (Entries (Index).Trustee'Access, Sids (Index));
+         Entries (Index).Permissions := Triplet_To_Rights ((Mode / Shifts (Index)) mod 8);
+         Entries (Index).Mode := Grant_Access;
+         Entries (Index).Inheritance := No_Inheritance;
+         Entries (Index).Trustee.Form := Trustee_Is_Sid;
+         Entries (Index).Trustee.Kind := Trustee_Is_Unknown;
+      end loop;
+      Status := Set_Entries_In_Acl (3, Entries (1)'Address, System.Null_Address, Built'Access);
+      if Status /= Success or else Built = System.Null_Address then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         return False;
+      end if;
+      Result := Built;
+      return True;
+   end Exact_Dacl;
+
+   --  Edit the access of the entry named by the NUL-terminated wide Path, or
+   --  else open as Handle, from Old_Mode (Mode_Of its Dacl) to Mode, as
+   --  Set_Permissions in the spec says. Control is the DACL's. Each form is
+   --  tried in turn and written only when the mode it reads (Mode_Of, as
+   --  File_Permission_Bits reads the entry once it is written) is the one
+   --  asked for: the minimal edit, keeping inheritance; the DACL converted
+   --  to explicit ACEs (Explicit_Dacl), protected; Exact_Dacl's three ACEs,
+   --  protected. When none is, nothing is written: False, with errno set.
+   function Apply_Permission_Edit
+     (Path, Handle                 : System.Address;
+      Dacl, Owner, Group, Everyone : System.Address;
+      Control                      : Interfaces.C.unsigned_short;
+      Old_Mode, Mode               : Natural;
+      Runnable                     : Boolean) return Boolean
+   is
+      Target  : constant Natural := Target_Mode (Owner, Group, Mode, Runnable);
+      Built   : System.Address := System.Null_Address;
+      Applied : Boolean := False;
+      Freed   : System.Address;
+      pragma Unreferenced (Freed);
+   begin
+      if not Edited_Dacl (Dacl, Owner, Group, Everyone, Old_Mode, Mode, Runnable, Built) then
+         return False;
+      elsif Mode_Of ((if Built = System.Null_Address then Dacl else Built), Owner, Group, Everyone, Runnable)
+        = Target
+      then
+         Applied := Built = System.Null_Address or else Set_Own_Dacl (Path, Handle, Built, Control);
+         if Built /= System.Null_Address then
+            Freed := Local_Free (Built);
+         end if;
+         return Applied;
+      end if;
+      if Built /= System.Null_Address then
+         Freed := Local_Free (Built);
+         Built := System.Null_Address;
+      end if;
+
+      if Dacl /= System.Null_Address then
+         declare
+            Converted : constant Acl_Words := Explicit_Dacl (Dacl, Owner, Group, Everyone, Target, Runnable);
+         begin
+            if Converted'Length > 0 and then Mode_Of (Converted'Address, Owner, Group, Everyone, Runnable) = Target
+            then
+               return Set_Own_Dacl (Path, Handle, Converted'Address, Control or Se_Dacl_Protected);
+            end if;
+         end;
+      end if;
+
+      if not Exact_Dacl (Owner, Group, Everyone, Mode, Built) then
+         return False;
+      end if;
+      if Mode_Of (Built, Owner, Group, Everyone, Runnable) = Target then
+         Applied := Set_Own_Dacl (Path, Handle, Built);
+      else
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Not_Supported);
+      end if;
+      Freed := Local_Free (Built);
+      return Applied;
+   end Apply_Permission_Edit;
+
    --  Descriptor's DACL as SDDL, with whether it is protected ("P") and
    --  inherits automatically ("AI"): "D:AI(A;;FA;;;S-1-5-...)(A;ID;...)".
    --  "" when the host will not write it.
@@ -1184,7 +1621,6 @@ package body Hostkit.Metadata is
       Dacl       : aliased System.Address := System.Null_Address;
       Sacl       : aliased System.Address := System.Null_Address;
       Descriptor : aliased System.Address := System.Null_Address;
-      New_Acl    : System.Address := System.Null_Address;
       Control    : aliased Interfaces.C.unsigned_short := 0;
       Revision   : aliased C_DWord := 0;
       Status     : C_DWord;
@@ -1196,10 +1632,6 @@ package body Hostkit.Metadata is
          Freed : System.Address;
          pragma Unreferenced (Freed);
       begin
-         if New_Acl /= System.Null_Address then
-            Freed := Local_Free (New_Acl);
-            New_Acl := System.Null_Address;
-         end if;
          if Descriptor /= System.Null_Address then
             Freed := Local_Free (Descriptor);
             Descriptor := System.Null_Address;
@@ -1230,14 +1662,11 @@ package body Hostkit.Metadata is
       declare
          Runnable : constant Boolean :=
            Runs_On_Windows (Path) or else Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry;
-         Applied  : Boolean :=
-           Edited_Dacl
-             (Dacl, Owner, Group, Everyone (1)'Address,
-              Mode_Of (Dacl, Owner, Group, Everyone (1)'Address, Runnable), Mode, Runnable, New_Acl);
+         Applied  : constant Boolean :=
+           Apply_Permission_Edit
+             (C_Path'Address, System.Null_Address, Dacl, Owner, Group, Everyone (1)'Address, Control,
+              Mode_Of (Dacl, Owner, Group, Everyone (1)'Address, Runnable), Mode, Runnable);
       begin
-         if Applied and then New_Acl /= System.Null_Address then
-            Applied := Set_Own_Dacl (C_Path'Address, System.Null_Address, New_Acl, Control);
-         end if;
          Free_Allocations;
          return Applied;
       end;
@@ -1259,8 +1688,7 @@ package body Hostkit.Metadata is
       Sacl       : aliased System.Address := System.Null_Address;
       Descriptor : aliased System.Address := System.Null_Address;
 
-      Entries  : aliased Explicit_Access_Array;
-      New_Acl  : aliased System.Address := System.Null_Address;
+      New_Acl  : System.Address := System.Null_Address;
       Status   : C_DWord;
 
       Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
@@ -1305,32 +1733,7 @@ package body Hostkit.Metadata is
 
       --  A fresh DACL granting the owner, the primary group and Everyone exactly
       --  the rights the three POSIX triplets ask for.
-      Build_Trustee_With_Sid (Entries (1).Trustee'Access, Owner);
-      Entries (1).Permissions := Triplet_To_Rights ((Mode / 64) mod 8);
-      Entries (1).Mode := Grant_Access;
-      Entries (1).Inheritance := No_Inheritance;
-      Entries (1).Trustee.Form := Trustee_Is_Sid;
-      Entries (1).Trustee.Kind := Trustee_Is_Unknown;
-
-      Build_Trustee_With_Sid (Entries (2).Trustee'Access, Group);
-      Entries (2).Permissions := Triplet_To_Rights ((Mode / 8) mod 8);
-      Entries (2).Mode := Grant_Access;
-      Entries (2).Inheritance := No_Inheritance;
-      Entries (2).Trustee.Form := Trustee_Is_Sid;
-      Entries (2).Trustee.Kind := Trustee_Is_Unknown;
-
-      Build_Trustee_With_Sid (Entries (3).Trustee'Access, Everyone (1)'Address);
-      Entries (3).Permissions := Triplet_To_Rights (Mode mod 8);
-      Entries (3).Mode := Grant_Access;
-      Entries (3).Inheritance := No_Inheritance;
-      Entries (3).Trustee.Form := Trustee_Is_Sid;
-      Entries (3).Trustee.Kind := Trustee_Is_Unknown;
-
-      Status :=
-        Set_Entries_In_Acl
-          (3, Entries (1)'Address, System.Null_Address, New_Acl'Access);
-
-      if Status /= Success or else New_Acl = System.Null_Address then
+      if not Exact_Dacl (Owner, Group, Everyone (1)'Address, Mode, New_Acl) then
          Free_Allocations;
          return False;
       end if;
@@ -1348,31 +1751,6 @@ package body Hostkit.Metadata is
          Free_Allocations;
          return False;
    end Set_Exact_Permissions;
-
-   --  The header every ACL starts with, and every ACE.
-   type Acl_Header is record
-      Revision  : Interfaces.C.unsigned_char;
-      Padding_1 : Interfaces.C.unsigned_char;
-      Size      : Interfaces.C.unsigned_short;
-      Count     : Interfaces.C.unsigned_short;
-      Padding_2 : Interfaces.C.unsigned_short;
-   end record with Convention => C;
-   type Ace_Header is record
-      Kind  : Interfaces.C.unsigned_char;
-      Flags : Interfaces.C.unsigned_char;
-      Size  : Interfaces.C.unsigned_short;
-   end record with Convention => C;
-
-   function Get_Ace
-     (Acl : System.Address; Index : C_DWord; Ace : access System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetAce";
-   function Initialize_Acl
-     (Acl : System.Address; Size : C_DWord; Revision : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "InitializeAcl";
-   function Add_Ace
-     (Acl : System.Address; Revision : C_DWord; Start : C_DWord;
-      Aces : System.Address; Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "AddAce";
 
    function Inherit_From_Parent (Path : String) return Boolean is
       Inherited_Ace : constant Interfaces.C.unsigned_char := 16#10#;
@@ -1830,7 +2208,6 @@ package body Hostkit.Metadata is
       Dacl       : aliased System.Address := System.Null_Address;
       Sacl       : aliased System.Address := System.Null_Address;
       Descriptor : aliased System.Address := System.Null_Address;
-      New_Acl    : aliased System.Address := System.Null_Address;
 
       procedure Free_Local (Item : in out System.Address) is
          Freed : System.Address;
@@ -1844,7 +2221,6 @@ package body Hostkit.Metadata is
 
       procedure Clean is
       begin
-         Free_Local (New_Acl);
          Free_Local (Descriptor);
          Close_Entry (File);
       end Clean;
@@ -1929,12 +2305,11 @@ package body Hostkit.Metadata is
                Answer.Previous_Access := To_Unbounded_String (Dacl_Text (Descriptor));
                if Access_Text /= "" then
                   Answer.Success := Set_Dacl_Text (File, Access_Text);
-               elsif Value <= 8#7777#
-                 and then Edited_Dacl
-                   (Dacl, Owner, Primary_Group, Everyone (1)'Address, Old_Mode, Natural (Value), Runnable, New_Acl)
-               then
+               elsif Value <= 8#7777# then
                   Answer.Success :=
-                    New_Acl = System.Null_Address or else Set_Own_Dacl (System.Null_Address, File, New_Acl, Control);
+                    Apply_Permission_Edit
+                      (System.Null_Address, File, Dacl, Owner, Primary_Group, Everyone (1)'Address, Control,
+                       Old_Mode, Natural (Value), Runnable);
                end if;
                if Answer.Success then
                   Answer.Applied_Access := To_Unbounded_String (Dacl_Text_Of (File));

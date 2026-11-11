@@ -556,8 +556,9 @@ package body Hostkit_Suite is
    is separate;
 
    --  A permission edit changes only what its bits concern: on Windows the
-   --  entry keeps what it inherits, and the access record it reports puts
-   --  the DACL back exactly.
+   --  entry keeps what it inherits where that does not contradict the edit,
+   --  and has it made explicit where it does, and the access record it
+   --  reports puts the DACL back exactly.
    procedure Test_A_Permission_Edit_Keeps_Inherited_Access
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
