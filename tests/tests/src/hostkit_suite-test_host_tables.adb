@@ -32,7 +32,14 @@ begin
          when Hostkit.Host.MacOS =>
             Assert (Ada.Strings.Unbounded.To_String (Places (1).Path) = "/Volumes", "macOS under /Volumes");
          when Hostkit.Host.Windows =>
-            Assert (Places'Length = 26, "Windows has a root per drive letter");
+            --  The drives Windows has, not every letter.
+            Assert (Places'Length in 1 .. 26, "Windows lists the roots of the drives it has");
+            for Place of Places loop
+               Assert
+                 (Ada.Strings.Unbounded.Length (Place.Path) = 3
+                  and then Ada.Strings.Unbounded.Slice (Place.Path, 2, 3) = ":\",
+                  "each Windows volume place is a drive's root");
+            end loop;
          when Hostkit.Host.Unsupported =>
             null;
       end case;
