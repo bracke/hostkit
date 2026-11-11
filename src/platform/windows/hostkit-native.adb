@@ -1,7 +1,9 @@
 with Hostkit.Windows_Command_Line;
 with Ada.Calendar;
-with Ada.Strings.UTF_Encoding.Conversions;
+with Ada.Strings.Wide_Unbounded;
 
+with Hostkit.Fs;
+with Hostkit.Shell_Paths;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -108,7 +110,33 @@ package body Hostkit.Native is
      with Import => True, Convention => Stdcall, External_Name => "ShellExecuteW";
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+     (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
+
+   --  ASSOCSTR_COMMAND: the command line a file type's verb runs.
+   Assoc_Str_Command : constant Interfaces.C.int := 1;
+
+   --  ASSOCF_NOTRUNCATE: fail rather than cut a command short to the buffer.
+   Assoc_F_No_Truncate : constant C_DWord := 16#20#;
+
+   --  Answers an HRESULT: 0 when the command was found and fits.
+   function Assoc_Query_String
+     (Flags         : C_DWord;
+      Kind          : Interfaces.C.int;
+      Association   : System.Address;
+      Extra         : System.Address;
+      Output        : System.Address;
+      Output_Length : access C_DWord)
+      return Interfaces.C.long
+     with Import => True, Convention => Stdcall, External_Name => "AssocQueryStringW";
+
+   --  Answers the units written, its NUL included; 0 on failure, and more
+   --  than Size when the room was too small.
+   function Expand_Environment_Strings
+     (Source      : System.Address;
+      Destination : System.Address;
+      Size        : C_DWord)
+      return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "ExpandEnvironmentStringsW";
 
    --  Windows has no zombie: a process that has exited is gone once its handles are
    --  closed, and everything here closes both before it returns.
@@ -248,6 +276,60 @@ package body Hostkit.Native is
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "TerminateJobObject";
 
+   --  JOBOBJECT_EXTENDED_LIMIT_INFORMATION, for its LimitFlags alone; the
+   --  rest stays zero, which sets no limit.
+   type Io_Counters is array (1 .. 6) of Interfaces.Unsigned_64 with Convention => C;
+
+   type Extended_Limit_Information is record
+      Per_Process_User_Time_Limit : Interfaces.Integer_64 := 0;
+      Per_Job_User_Time_Limit     : Interfaces.Integer_64 := 0;
+      Limit_Flags                 : C_DWord := 0;
+      Minimum_Working_Set_Size    : Interfaces.C.size_t := 0;
+      Maximum_Working_Set_Size    : Interfaces.C.size_t := 0;
+      Active_Process_Limit        : C_DWord := 0;
+      Affinity                    : Interfaces.C.size_t := 0;
+      Priority_Class              : C_DWord := 0;
+      Scheduling_Class            : C_DWord := 0;
+      Io_Info                     : Io_Counters := [others => 0];
+      Process_Memory_Limit        : Interfaces.C.size_t := 0;
+      Job_Memory_Limit            : Interfaces.C.size_t := 0;
+      Peak_Process_Memory_Used    : Interfaces.C.size_t := 0;
+      Peak_Job_Memory_Used        : Interfaces.C.size_t := 0;
+   end record with Convention => C;
+
+   --  A wrong layout is not refused: SetInformationJobObject checks only
+   --  the length. Pin it, so drift fails the build.
+   pragma Compile_Time_Error
+     (Extended_Limit_Information'Size /= 144 * 8,
+      "Win32 JOBOBJECT_EXTENDED_LIMIT_INFORMATION must be 144 bytes on x64");
+
+   Job_Object_Extended_Limit_Information : constant Interfaces.C.int := 9;
+   Job_Object_Limit_Kill_On_Job_Close    : constant C_DWord := 16#0000_2000#;
+
+   function Set_Information_Job_Object
+     (Job    : System.Address;
+      Class  : Interfaces.C.int;
+      Info   : System.Address;
+      Length : C_DWord)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "SetInformationJobObject";
+
+   --  Make Job one whose last handle closing ends every process still in
+   --  it: what the program started is then ended when the program ends --
+   --  Run_Captured closes the job once it has -- and when the caller dies, as
+   --  the system closes the caller's handles. Without it, closing the job
+   --  lets them run on. A job that will not take the limit still stops the
+   --  whole group on a deadline, so it is kept either way.
+   procedure Kill_On_Close (Job : System.Address) is
+      Limits  : aliased Extended_Limit_Information;
+      Ignored : Interfaces.C.int;
+   begin
+      Limits.Limit_Flags := Job_Object_Limit_Kill_On_Job_Close;
+      Ignored := Set_Information_Job_Object
+        (Job, Job_Object_Extended_Limit_Information, Limits'Address,
+         C_DWord (Extended_Limit_Information'Size / 8));
+   end Kill_On_Close;
+
    function Resume_Thread (Thread : System.Address) return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "ResumeThread";
 
@@ -335,7 +417,14 @@ package body Hostkit.Native is
       end Feed;
 
       Wide_Command : aliased Wide_String := Wide (Command_Line);
-      Wide_Dir     : aliased Wide_String := Wide (Working_Directory);
+
+      --  CreateProcessW takes no \\?\ form and no directory past 258
+      --  characters: a longer one goes by its short (8.3) name.
+      Dir_Usable        : Boolean;
+      Ignored_Shortened : Boolean;
+      Wide_Dir          : aliased constant Wide_String :=
+        Hostkit.Shell_Paths.For_Shell
+          (Working_Directory, Hostkit.Shell_Paths.Directory_Limit, Dir_Usable, Ignored_Shortened);
 
       In_Handle  : System.Address := Feed (Stdin_Path);
       Out_Handle : System.Address := Capture (Stdout_Path);
@@ -391,11 +480,25 @@ package body Hostkit.Native is
       end Close_Captures;
    begin
       Startup.Cb := C_DWord (Startup_Info'Size / 8);
+      if Job /= System.Null_Address then
+         Kill_On_Close (Job);
+      end if;
 
       --  Told to read a file and unable to open it: the child must not silently
       --  get ours instead. See the note on Stdin_Path in Hostkit.Process.
       if Stdin_Path /= "" and then In_Handle = Invalid_Handle then
          Close_Captures;
+         return Result;
+      end if;
+
+      --  A working directory with no form CreateProcessW takes (short names
+      --  disabled on its volume) is refused rather than dropped: the child
+      --  would run somewhere else.
+      if Working_Directory /= "" and then not Dir_Usable then
+         Close_Captures;
+         if Job /= System.Null_Address then
+            Ignored := Close_Handle (Job);
+         end if;
          return Result;
       end if;
 
@@ -712,28 +815,142 @@ package body Hostkit.Native is
       return False;
    end User_Group_Ids;
 
-   function Open_Native (Path : String) return Boolean is
-      Wide_Path : aliased Wide_String := Wide (Path);
+   --  The command line Path's type is associated with, Target standing for
+   --  the file in it, or "" when there is none this can complete: no
+   --  extension, no ASSOCSTR_COMMAND (a type a packaged app handles through
+   --  DelegateExecute has none), or a placeholder other than the file's own
+   --  (%1, %L, %V) and its arguments (%*) -- %I is an item ID list, which
+   --  only ShellExecuteW can supply.
+   function Associated_Command (Path : String; Target : Wide_String) return String is
+      use type Interfaces.C.long;
+
+      Dot : Natural := 0;
+   begin
+      for Index in reverse Path'Range loop
+         exit when Path (Index) in '/' | '\';
+         if Path (Index) = '.' then
+            Dot := Index;
+            exit;
+         end if;
+      end loop;
+      if Dot = 0 or else Dot = Path'Last then
+         return "";
+      end if;
+
+      declare
+         Extension : aliased constant Wide_String := Wide (Path (Dot .. Path'Last));
+         Verb      : aliased constant Wide_String := Wide ("open");
+         Room      : aliased Wide_String (1 .. 4_096) := [others => Wide_Character'Val (0)];
+         Size      : aliased C_DWord := Room'Length;
+         Expanded  : aliased Wide_String (1 .. 8_192) := [others => Wide_Character'Val (0)];
+         Written   : C_DWord;
+      begin
+         if Assoc_Query_String
+              (Assoc_F_No_Truncate, Assoc_Str_Command, Extension'Address, Verb'Address, Room'Address, Size'Access)
+           /= 0
+         then
+            return "";
+         end if;
+         --  REG_EXPAND_SZ commands name %SystemRoot% and the like.
+         Written := Expand_Environment_Strings (Room'Address, Expanded'Address, Expanded'Length);
+         if Written <= 1 or else Written > Expanded'Length then
+            return "";
+         end if;
+
+         declare
+            Template : constant Wide_String := Expanded (1 .. Natural (Written) - 1);
+            Result   : Ada.Strings.Wide_Unbounded.Unbounded_Wide_String;
+            Placed   : Boolean := False;
+            Index    : Positive := Template'First;
+         begin
+            while Index <= Template'Last loop
+               if Template (Index) = '%' and then Index < Template'Last then
+                  case Template (Index + 1) is
+                     when '1' | 'L' | 'l' | 'V' | 'v' =>
+                        Ada.Strings.Wide_Unbounded.Append (Result, Target);
+                        Placed := True;
+                     when '*' =>
+                        null;
+                     when '%' =>
+                        Ada.Strings.Wide_Unbounded.Append (Result, '%');
+                     when others =>
+                        return "";
+                  end case;
+                  Index := Index + 2;
+               else
+                  Ada.Strings.Wide_Unbounded.Append (Result, Template (Index));
+                  Index := Index + 1;
+               end if;
+            end loop;
+            if not Placed then
+               Ada.Strings.Wide_Unbounded.Append (Result, " """ & Target & """");
+            end if;
+            return Hostkit.Windows_Paths.To_UTF_8 (Ada.Strings.Wide_Unbounded.To_Wide_String (Result));
+         end;
+      end;
+   exception
+      when others =>
+         return "";
+   end Associated_Command;
+
+   function Open_Native (Path : String) return Hostkit.Process.Open_Outcome is
+      use type Hostkit.Fs.Entry_Kind;
+
       Operation : aliased Wide_String := Wide ("open");
+      Usable    : Boolean;
+      Shortened : Boolean;
       Result    : System.Address;
    begin
       if Path = "" then
-         return False;
+         return Hostkit.Process.Open_Failed;
       end if;
 
-      Result :=
-        Shell_Execute
-          (Window     => System.Null_Address,
-           Operation  => Operation'Address,
-           File       => Wide_Path'Address,
-           Parameters => System.Null_Address,
-           Directory  => System.Null_Address,
-           Show       => SW_Show_Normal);
+      declare
+         --  ShellExecuteW takes no path past 259 characters and no \\?\ form:
+         --  a longer one goes by its short (8.3) name, and without one
+         --  (short names disabled on its volume) nothing can open it.
+         Target : aliased constant Wide_String :=
+           Hostkit.Shell_Paths.For_Shell (Path, Hostkit.Shell_Paths.Shell_Limit, Usable, Shortened);
+      begin
+         if not Usable then
+            return Hostkit.Process.Open_Path_Too_Long;
+         end if;
 
-      return System.Storage_Elements.To_Integer (Result) > 32;
+         --  The short name is a real path, but the shell may hand it on to a
+         --  handler that resolves it back to the long one and fails there;
+         --  the associated command, run directly, gets the short name
+         --  itself. A folder, or a type with no such command, still goes
+         --  through the shell.
+         if Shortened and then Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Directory_Entry then
+            declare
+               Command        : constant String := Associated_Command (Path, Target (Target'First .. Target'Last - 1));
+               Ignored_Status : Integer;
+            begin
+               if Command /= ""
+                 and then Run_Command_Line (Command, Wait => False, Exit_Status => Ignored_Status)
+               then
+                  return Hostkit.Process.Opened;
+               end if;
+            end;
+         end if;
+
+         Result :=
+           Shell_Execute
+             (Window     => System.Null_Address,
+              Operation  => Operation'Address,
+              File       => Target'Address,
+              Parameters => System.Null_Address,
+              Directory  => System.Null_Address,
+              Show       => SW_Show_Normal);
+      end;
+
+      return
+        (if System.Storage_Elements.To_Integer (Result) > 32
+         then Hostkit.Process.Opened
+         else Hostkit.Process.Open_Failed);
    exception
       when others =>
-         return False;
+         return Hostkit.Process.Open_Failed;
    end Open_Native;
 
 end Hostkit.Native;

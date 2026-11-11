@@ -3,11 +3,11 @@ with Ada.Characters.Handling;
 with Ada.Containers.Indefinite_Vectors;
 with Ada.IO_Exceptions;
 with Ada.Strings.Fixed;
-with Ada.Strings.UTF_Encoding.Conversions;
 with Ada.Strings.Wide_Unbounded;
 
 with GNAT.OS_Lib;
 
+with Hostkit.Errors;
 with Hostkit.Fs.Instants;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
@@ -71,7 +71,7 @@ package body Hostkit.Fs is
 
    --  Text that is not a path to open: a link's target is stored as given.
    function Wide_Text (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+     (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
 
    --  A symbolic link and a junction are both reparse points, and this is how Windows
    --  says so. There is no lstat, which is why GNAT's Is_Symbolic_Link cannot answer
@@ -87,12 +87,22 @@ package body Hostkit.Fs is
          return False;
    end Is_Hidden;
 
+   --  Whether Path names a device rather than a file on a disk, asked of
+   --  the device itself; defined below, beside the calls it makes.
+   function Is_Device (Path : String) return Boolean;
+
    --  GetFileAttributesW through the long form, which GNAT's own stat lacks.
+   --  A device (NUL, CON, a \\.\ name) is asked first: GetFileAttributesW
+   --  reads one as an ordinary file, or as nothing at all.
    function Kind_Of (Path : String) return Entry_Kind is
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
-      if Path = "" or else Attributes = Invalid_File_Attributes then
+      if Path = "" then
+         return Missing_Entry;
+      elsif Is_Device (Path) then
+         return Special_File_Entry;
+      elsif Attributes = Invalid_File_Attributes then
          return Missing_Entry;
       elsif (Attributes and File_Attribute_Directory) /= 0 then
          return Directory_Entry;
@@ -201,6 +211,72 @@ package body Hostkit.Fs is
 
    function Last_Error return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
+
+   function Get_File_Type (Handle : System.Address) return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "GetFileType";
+
+   --  A name the Win32 layer may turn into a device: the device namespace
+   --  (\\.\NUL, \\.\pipe\...), or a last part DOS reserves -- NUL, CON,
+   --  PRN, AUX, COM1 to COM9, LPT1 to LPT9, CONIN$, CONOUT$ -- with or
+   --  without an extension, a trailing colon or trailing spaces. Only the
+   --  text: whether a device answers is asked of it.
+   function May_Name_Device (Path : String) return Boolean is
+      Start : Natural := Path'First;
+      Stop  : Natural;
+   begin
+      if Path'Length >= 4 and then Path (Path'First .. Path'First + 3) in "\\.\" | "//./" then
+         return True;
+      end if;
+      for Index in Path'Range loop
+         if Path (Index) in '\' | '/' | ':' and then Index < Path'Last then
+            Start := Index + 1;
+         end if;
+      end loop;
+      Stop := Start - 1;
+      while Stop < Path'Last and then Path (Stop + 1) not in '.' | ':' | ' ' loop
+         Stop := Stop + 1;
+      end loop;
+      declare
+         Stem : constant String := Ada.Characters.Handling.To_Upper (Path (Start .. Stop));
+      begin
+         return Stem in "NUL" | "CON" | "PRN" | "AUX" | "CONIN$" | "CONOUT$"
+           or else (Stem'Length = 4
+                    and then Stem (Stem'First .. Stem'First + 2) in "COM" | "LPT"
+                    and then Stem (Stem'Last) in '1' .. '9');
+      end;
+   end May_Name_Device;
+
+   --  Opened, asking for no data, and asked its type: FILE_TYPE_CHAR (NUL,
+   --  CON, a serial port), FILE_TYPE_PIPE or anything but FILE_TYPE_DISK is
+   --  a device. A name that does not open as one is not one: where Windows
+   --  no longer reserves a name inside a folder, that is an ordinary file.
+   function Is_Device (Path : String) return Boolean is
+      File_Type_Disk : constant C_DWord := 1;
+      Handle         : System.Address;
+      Kind           : C_DWord;
+      Ignored        : Interfaces.C.int;
+      use type System.Address;
+   begin
+      if not May_Name_Device (Path) then
+         return False;
+      end if;
+      declare
+         Native_Path : aliased constant Wide_String := Wide (Path);
+      begin
+         Handle := Open_Entry
+           (Native_Path'Address, File_Read_Attributes_Access, Share_Everything, System.Null_Address,
+            Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
+      end;
+      if Handle = Invalid_Handle_Value then
+         return False;
+      end if;
+      Kind := Get_File_Type (Handle);
+      Ignored := Close_Entry (Handle);
+      return Kind /= File_Type_Disk;
+   exception
+      when others =>
+         return False;
+   end Is_Device;
 
    function Joined (High : C_DWord; Low : C_DWord) return Interfaces.Unsigned_64 is
      (Interfaces."or" (Interfaces.Shift_Left (Interfaces.Unsigned_64 (High), 32), Interfaces.Unsigned_64 (Low)));
@@ -533,7 +609,11 @@ package body Hostkit.Fs is
       Created : constant Interfaces.C.char :=
         Create_Symbolic_Link (Wide_Link'Address, Wide_Target'Address, Flags);
    begin
-      return Interfaces.C.char'Pos (Created) /= 0;
+      if Interfaces.C.char'Pos (Created) = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      return True;
    exception
       when others =>
          return False;
@@ -656,7 +736,11 @@ package body Hostkit.Fs is
         Create_Hard_Link_W
           (Wide_Link'Address, Wide_Target'Address, System.Null_Address);
    begin
-      return Created /= 0;
+      if Created = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      return True;
    exception
       when others =>
          return False;
@@ -703,6 +787,7 @@ package body Hostkit.Fs is
             return True;
          end if;
          Error := Get_Last_Error;
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
          delay Duration (Attempt) * 0.02;
       end loop;
@@ -758,6 +843,7 @@ package body Hostkit.Fs is
             return Moved;
          end if;
          Error := Get_Last_Error;
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
          delay Duration (Attempt) * 0.02;
       end loop;
@@ -899,7 +985,7 @@ package body Hostkit.Fs is
                  Wide_Character'Val (U16 (Start + Index * 2));
             end loop;
             Target := Ada.Strings.Unbounded.To_Unbounded_String
-              (Ada.Strings.UTF_Encoding.Conversions.Convert (Wide_T));
+              (Hostkit.Windows_Paths.To_UTF_8 (Wide_T));
          end;
       end;
       return True;
@@ -932,11 +1018,14 @@ package body Hostkit.Fs is
          return False;
       end if;
 
-      if (Attributes and File_Attribute_Directory) /= 0 then
-         return Remove_Directory (Wide_Path'Address) /= 0;
-      else
-         return Delete_File (Wide_Path'Address) /= 0;
+      if (if (Attributes and File_Attribute_Directory) /= 0
+          then Remove_Directory (Wide_Path'Address) /= 0
+          else Delete_File (Wide_Path'Address) /= 0)
+      then
+         return True;
       end if;
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      return False;
    exception
       when others =>
          return False;
@@ -1039,6 +1128,27 @@ package body Hostkit.Fs is
              External_Name => "GetFinalPathNameByHandleW";
       function Get_Last_Error return C_DWord
         with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+      --  Name opened to be deleted, never followed. Listing is asked for as
+      --  well, for a folder to be emptied; an entry whose own DACL refuses
+      --  reading (a mode-0 file) is opened again without it, since deleting
+      --  needs no read: its folder's FILE_DELETE_CHILD grants the DELETE,
+      --  as a POSIX folder's write bit lets an unreadable file go.
+      function Open_For_Delete (Name : System.Address) return System.Address is
+         Error_Access_Denied : constant C_DWord := 5;
+         Handle : System.Address := Create_File_W
+           (Name, Delete_Access + File_Read_Attributes + File_List_Directory,
+            Share_All, System.Null_Address, Open_Existing,
+            Backup_Semantics + Open_Reparse_Point, System.Null_Address);
+      begin
+         if Handle = Invalid_Handle and then Get_Last_Error = Error_Access_Denied then
+            Handle := Create_File_W
+              (Name, Delete_Access + File_Read_Attributes,
+               Share_All, System.Null_Address, Open_Existing,
+               Backup_Semantics + Open_Reparse_Point, System.Null_Address);
+         end if;
+         return Handle;
+      end Open_For_Delete;
 
       function File_Index (Info : Handle_Info) return Interfaces.Unsigned_64 is
         (Interfaces.Unsigned_64 (Info.Index_High) * 2 ** 32
@@ -1180,15 +1290,12 @@ package body Hostkit.Fs is
                   declare
                      Name : constant U16_Array := Child_Path (Held, Item.Name);
                      Child_Handle : System.Address :=
-                       (if Name'Length = 0 then Invalid_Handle else
-                          Create_File_W
-                            (Name'Address,
-                             Delete_Access + File_Read_Attributes + File_List_Directory,
-                             Share_All, System.Null_Address, Open_Existing,
-                             Backup_Semantics + Open_Reparse_Point,
-                             System.Null_Address));
+                       (if Name'Length = 0 then Invalid_Handle else Open_For_Delete (Name'Address));
                      Child_Info : aliased Handle_Info;
                   begin
+                     if Child_Handle = Invalid_Handle and then Name'Length /= 0 then
+                        Hostkit.Errors.Set_Errno_From_Last_Error;
+                     end if;
                      Ok := Child_Handle /= Invalid_Handle
                        and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
                        and then Child_Info.Volume = Info.Volume
@@ -1216,6 +1323,11 @@ package body Hostkit.Fs is
                  or else Set_File_Information
                    (Held, File_Disposition_Info, Disposition'Address,
                     C_DWord (Disposition_Info'Size / 8)) /= 0;
+               if not Ok then
+                  --  Why the plain form refused: a folder not empty, a file
+                  --  held open without delete sharing, a refused right.
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
+               end if;
             end;
          end if;
          Ignored := Close_Handle (Held);
@@ -1232,11 +1344,9 @@ package body Hostkit.Fs is
       if Path = "" then
          return Tree_Delete_Failed;
       end if;
-      Held := Create_File_W
-        (Name'Address, Delete_Access + File_Read_Attributes + File_List_Directory,
-         Share_All, System.Null_Address, Open_Existing,
-         Backup_Semantics + Open_Reparse_Point, System.Null_Address);
+      Held := Open_For_Delete (Name'Address);
       if Held = Invalid_Handle then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          return Tree_Delete_Failed;
       end if;
       return (if Delete_Held (Held, 0) then Tree_Deleted else Tree_Delete_Failed);
@@ -1321,7 +1431,7 @@ package body Hostkit.Fs is
 
          declare
             Resolved : constant String :=
-              Ada.Strings.UTF_Encoding.Conversions.Convert
+              Hostkit.Windows_Paths.To_UTF_8
                 (Wide_Buf (1 .. Natural (Length)));
          begin
             --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.
@@ -1567,7 +1677,7 @@ package body Hostkit.Fs is
                   Last : constant Boolean := Index = Parts.Last_Index;
                begin
                   Ada.Strings.Wide_Unbounded.Append
-                    (Current, "\" & Ada.Strings.UTF_Encoding.Conversions.Convert (Parts (Index)));
+                    (Current, "\" & Hostkit.Windows_Paths.From_UTF_8 (Parts (Index)));
                   --  The part as itself: a link or junction is opened, not
                   --  what it points at, and refused below.
                   Handle := Open
@@ -1667,7 +1777,7 @@ package body Hostkit.Fs is
 
       --  UTF-8, as every path here is: the name was cut to Latin-1 before,
       --  dropping any other character and leaving the rest unencoded.
-      return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Length)));
+      return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Length)));
    exception
       when others =>
          return "";
@@ -1727,6 +1837,80 @@ package body Hostkit.Fs is
    --  Windows keeps no freedesktop application entries.
    function Application_Data_Directories return Path_List is ([]);
 
+   --  The Fonts known folder, as the shell names it -- an administrator can
+   --  move Windows elsewhere than C:\Windows -- else %WINDIR%\Fonts; then the
+   --  folder a font installed for this user alone goes to (Windows 10 1809
+   --  and later), under the non-roaming profile.
+   function Font_Directories return Path_List is
+      use Ada.Strings.Unbounded;
+
+      type Guid is record
+         Data_1 : Interfaces.C.unsigned_long;
+         Data_2 : Interfaces.C.unsigned_short;
+         Data_3 : Interfaces.C.unsigned_short;
+         Data_4 : Interfaces.C.char_array (1 .. 8);
+      end record with Convention => C;
+
+      --  FOLDERID_Fonts, {FD228CB7-AE11-4AE3-864C-16F3910AB8FE}.
+      Folder_Id_Fonts : aliased constant Guid :=
+        (Data_1 => 16#FD22_8CB7#,
+         Data_2 => 16#AE11#,
+         Data_3 => 16#4AE3#,
+         Data_4 =>
+           [Interfaces.C.char'Val (16#86#), Interfaces.C.char'Val (16#4C#), Interfaces.C.char'Val (16#16#),
+            Interfaces.C.char'Val (16#F3#), Interfaces.C.char'Val (16#91#), Interfaces.C.char'Val (16#0A#),
+            Interfaces.C.char'Val (16#B8#), Interfaces.C.char'Val (16#FE#)]);
+
+      function Get_Known_Folder_Path
+        (Id     : access constant Guid;
+         Flags  : C_DWord;
+         Token  : System.Address;
+         Result : access System.Address) return Interfaces.C.long
+        with Import, Convention => Stdcall, External_Name => "SHGetKnownFolderPath";
+
+      procedure Free (Block : System.Address)
+        with Import, Convention => Stdcall, External_Name => "CoTaskMemFree";
+
+      function Wide_Length (Text : System.Address) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "lstrlenW";
+
+      function Known_Fonts return String is
+         use type Interfaces.C.long;
+         use type System.Address;
+         Text   : aliased System.Address := System.Null_Address;
+         Status : constant Interfaces.C.long :=
+           Get_Known_Folder_Path (Folder_Id_Fonts'Access, 0, System.Null_Address, Text'Access);
+      begin
+         if Status /= 0 or else Text = System.Null_Address then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+            if Text /= System.Null_Address then
+               Free (Text);
+            end if;
+            return "";
+         end if;
+         declare
+            Length : constant Natural := Natural (Wide_Length (Text));
+            Units  : constant Wide_String (1 .. Length) with Import, Address => Text;
+            Folder : constant String := Hostkit.Windows_Paths.To_UTF_8 (Units);
+         begin
+            Free (Text);
+            return Folder;
+         end;
+      end Known_Fonts;
+
+      function Env (Name : String) return String is (Hostkit.Environment.Value (Name, ""));
+      Known   : constant String := Known_Fonts;
+      Windows : constant String := (if Env ("WINDIR") /= "" then Env ("WINDIR") else Env ("SystemRoot"));
+      System_Fonts : constant String :=
+        (if Known /= "" then Known elsif Windows /= "" then Windows & "\Fonts" else "");
+      Local   : constant String := Cache_Directory;
+      function Place (Folder : String) return Path_List is
+        (if Folder = "" then [] else [1 => To_Unbounded_String (Folder)]);
+   begin
+      return Place (System_Fonts)
+        & Place ((if Local = "" then "" else Local & "\Microsoft\Windows\Fonts"));
+   end Font_Directories;
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin
@@ -1763,7 +1947,7 @@ package body Hostkit.Fs is
          return ".";
       end if;
       declare
-         Raw : constant String := Ada.Strings.UTF_Encoding.Conversions.Convert (Buf (1 .. Natural (N)));
+         Raw : constant String := Hostkit.Windows_Paths.To_UTF_8 (Buf (1 .. Natural (N)));
       begin
          --  GetTempPathW always appends a trailing backslash; drop it so the
          --  result composes with "/" or "\" the way callers expect.
@@ -1935,7 +2119,11 @@ package body Hostkit.Fs is
       if Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0 then
          Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
       end if;
-      return Remove_Directory (Wide_Path'Address) /= 0;
+      if Remove_Directory (Wide_Path'Address) = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      return True;
    exception
       when others =>
          return False;
@@ -1971,10 +2159,14 @@ package body Hostkit.Fs is
             if Delete_File_W (Wide_Path'Address) /= 0 then
                return True;
             end if;
+            Hostkit.Errors.Set_Errno_From_Last_Error;
             Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
             return False;
+         elsif Delete_File_W (Wide_Path'Address) = 0 then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+            return False;
          end if;
-         return Delete_File_W (Wide_Path'Address) /= 0;
+         return True;
       end;
    exception
       when others =>
@@ -1993,7 +2185,11 @@ package body Hostkit.Fs is
       declare
          Wide_Path : aliased constant Wide_String := Wide (Path);
       begin
-         return Create_Directory_W (Wide_Path'Address, System.Null_Address) /= 0;
+         if Create_Directory_W (Wide_Path'Address, System.Null_Address) = 0 then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+            return False;
+         end if;
+         return True;
       end;
    exception
       when others =>
@@ -2020,7 +2216,7 @@ package body Hostkit.Fs is
             if Written = 0 then
                return "";
             elsif Written < Needed then
-               return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Written)));
+               return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Written)));
             end if;
             Needed := Written;
          end;
@@ -2043,7 +2239,7 @@ package body Hostkit.Fs is
    function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is
       use type System.Address;
       Wide_Mode : aliased constant Wide_String :=
-        Ada.Strings.UTF_Encoding.Conversions.Convert (Mode & (if Text then "t" else "b")) & Wide_Character'Val (0);
+        Hostkit.Windows_Paths.From_UTF_8 (Mode & (if Text then "t" else "b")) & Wide_Character'Val (0);
       Stream    : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
       Error     : Integer := 2;
    begin

@@ -1,4 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
 
 with Interfaces.C;
 
@@ -71,7 +71,7 @@ package body Hostkit.Local_Channel is
      with Import => True, Convention => Stdcall, External_Name => "Sleep";
 
    function Wide (Value : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+     (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
 
    function To_Handle (Item : Channel) return System.Address is
      (System.Storage_Elements.To_Address

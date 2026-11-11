@@ -89,6 +89,7 @@ private package Hostkit.Native is
       return Boolean;
 
    --  Start whatever the host thinks Path is, the way a double-click would.
-   function Open_Native (Path : String) return Boolean;
+   --  See Hostkit.Process.Open_Native_Outcome.
+   function Open_Native (Path : String) return Hostkit.Process.Open_Outcome;
 
 end Hostkit.Native;

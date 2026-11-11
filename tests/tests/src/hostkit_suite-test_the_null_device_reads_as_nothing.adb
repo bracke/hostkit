@@ -16,6 +16,12 @@ begin
       return;
    end if;
 
+   --  A device, not a file and not nothing: a caller that wants a regular
+   --  file (a settings file) can refuse it before reading it.
+   Assert (Hostkit.Fs."=" (Hostkit.Fs.Kind_Of (Hostkit.Fs.Null_Device), Hostkit.Fs.Special_File_Entry),
+           "the null device is a special file: "
+           & Hostkit.Fs.Entry_Kind'Image (Hostkit.Fs.Kind_Of (Hostkit.Fs.Null_Device)));
+
    Assert (Hostkit.Descriptors.Open_File
              (Hostkit.Fs.Null_Device,
               Hostkit.Descriptors.Open_Read, Handle),

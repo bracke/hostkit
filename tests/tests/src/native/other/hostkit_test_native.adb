@@ -27,4 +27,17 @@ package body Hostkit_Test_Native is
       return Available and then (Interfaces.Unsigned_32 (Bits) and Write_Bits) = 0;
    end Is_Read_Only;
 
+   function Create_With_Units (Folder : String; Leaf : Wide_String) return Boolean is
+      pragma Unreferenced (Folder, Leaf);
+   begin
+      return False;
+   end Create_With_Units;
+
+   function Handle_Inheritance (Handle : Interfaces.Integer_64; Inheritable : out Boolean) return Boolean is
+      pragma Unreferenced (Handle);
+   begin
+      Inheritable := False;
+      return False;
+   end Handle_Inheritance;
+
 end Hostkit_Test_Native;

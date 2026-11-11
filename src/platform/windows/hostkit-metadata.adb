@@ -2,11 +2,13 @@ with Ada.Calendar.Formatting;
 with Ada.Characters.Handling;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Conversions;
+with Ada.Strings.UTF_Encoding;
 with Ada.Containers.Vectors;
 
+with Hostkit.Errors;
 with Hostkit.Fs;
 with Hostkit.Path_Text;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
@@ -265,13 +267,24 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall,
           External_Name => "SetKernelObjectSecurity";
 
-   --  Set Dacl, protected from what the parent hands down, on the object
-   --  named by the NUL-terminated wide Path, or else open as Handle; whether
-   --  it was set.
+   --  SE_DACL_AUTO_INHERITED: the DACL's inherited ACEs came by automatic
+   --  inheritance, so a later change to the parent knows them for its own.
+   Se_Dacl_Auto_Inherited : constant Interfaces.C.unsigned_short := 16#0400#;
+
+   --  The control bits a DACL written here carries over: whether it is
+   --  protected, and whether its inherited ACEs are automatic ones.
+   Dacl_Control_Bits : constant Interfaces.C.unsigned_short := Se_Dacl_Protected or Se_Dacl_Auto_Inherited;
+
+   --  Set Dacl on the object named by the NUL-terminated wide Path, or else
+   --  open as Handle, with Control's protection and auto-inheritance bits
+   --  (Dacl_Control_Bits) -- by default protected from what the parent hands
+   --  down. The object alone: nothing is handed down anew to what a folder
+   --  holds. Whether it was set.
    function Set_Own_Dacl
-     (Path   : System.Address;
-      Handle : System.Address;
-      Dacl   : System.Address) return Boolean
+     (Path    : System.Address;
+      Handle  : System.Address;
+      Dacl    : System.Address;
+      Control : Interfaces.C.unsigned_short := Se_Dacl_Protected) return Boolean
    is
       Descriptor : aliased Descriptor_Buffer := [others => 0];
    begin
@@ -280,17 +293,19 @@ package body Hostkit.Metadata is
         or else Set_Security_Descriptor_Dacl
                   (Descriptor'Address, 1, Dacl, 0) = 0
         or else Set_Security_Descriptor_Control
-                  (Descriptor'Address, Se_Dacl_Protected,
-                   Se_Dacl_Protected) = 0
+                  (Descriptor'Address, Dacl_Control_Bits,
+                   Control and Dacl_Control_Bits) = 0
       then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
-      elsif Path /= System.Null_Address then
-         return Set_File_Security
-           (Path, Dacl_Information, Descriptor'Address) /= 0;
-      else
-         return Set_Kernel_Object_Security
-           (Handle, Dacl_Information, Descriptor'Address) /= 0;
+      elsif (if Path /= System.Null_Address
+             then Set_File_Security (Path, Dacl_Information, Descriptor'Address) /= 0
+             else Set_Kernel_Object_Security (Handle, Dacl_Information, Descriptor'Address) /= 0)
+      then
+         return True;
       end if;
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      return False;
    end Set_Own_Dacl;
 
    procedure Build_Trustee_With_Sid
@@ -576,7 +591,7 @@ package body Hostkit.Metadata is
             end loop;
             return
               (if Last < Value'First then ""
-               else Ada.Strings.UTF_Encoding.Conversions.Convert
+               else Hostkit.Windows_Paths.To_UTF_8
                  (Value (Value'First .. Last)));
          end Text_Of;
       begin
@@ -909,7 +924,341 @@ package body Hostkit.Metadata is
          return 0;
    end File_Permission_Bits;
 
+   --  A permission edit, the minimal kind: see Set_Permissions in the spec.
+
+   Set_Access    : constant C_Int := 2;
+   Deny_Access   : constant C_Int := 3;
+   Revoke_Access : constant C_Int := 4;
+
+   File_Append_Data         : constant C_DWord := 16#0000_0004#;
+   File_Attribute_Directory : constant C_DWord := 16#0000_0010#;
+   Sddl_Revision            : constant C_DWord := 1;
+
+   function Get_Security_Descriptor_Control
+     (Descriptor : System.Address;
+      Control    : access Interfaces.C.unsigned_short;
+      Revision   : access C_DWord) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "GetSecurityDescriptorControl";
+
+   function Convert_Descriptor_To_Text
+     (Descriptor  : System.Address;
+      Revision    : C_DWord;
+      Information : C_DWord;
+      Text        : access System.Address;
+      Length      : access C_DWord) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "ConvertSecurityDescriptorToStringSecurityDescriptorW";
+
+   function Convert_Text_To_Descriptor
+     (Text       : System.Address;
+      Revision   : C_DWord;
+      Descriptor : access System.Address;
+      Size       : access C_DWord) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "ConvertStringSecurityDescriptorToSecurityDescriptorW";
+
+   function Equal_Sid (Left, Right : System.Address) return C_Int
+     with Import, Convention => Stdcall, External_Name => "EqualSid";
+
+   --  The rwx triplet Acl grants Sid, as File_Permission_Bits reads one; 0
+   --  where there is no ACL to read or the host will not say.
+   function Triplet_Of (Acl : System.Address; Sid : System.Address) return Natural is
+      Trustee : aliased Trustee_Record;
+      Rights  : aliased C_DWord := 0;
+   begin
+      if Sid = System.Null_Address or else Acl = System.Null_Address then
+         return 0;
+      end if;
+      Build_Trustee_With_Sid (Trustee'Access, Sid);
+      Trustee.Form := Trustee_Is_Sid;
+      Trustee.Kind := Trustee_Is_Unknown;
+      if Get_Effective_Rights_From_Acl (Acl, Trustee'Access, Rights'Access) /= Success then
+         return 0;
+      end if;
+      return Rights_To_Triplet (Rights);
+   end Triplet_Of;
+
+   --  Triplet less its execute bit, unless execute means something here.
+   function Shown (Triplet : Natural; Runnable : Boolean) return Natural is
+     (if Runnable then Triplet else Triplet - Triplet mod 2);
+
+   --  The mode Dacl gives the owner, the primary group and Everyone, as
+   --  File_Permission_Bits reads it: execute only where Runnable (a program
+   --  by its extension, or a folder).
+   function Mode_Of
+     (Dacl, Owner, Group, Everyone : System.Address;
+      Runnable : Boolean) return Natural is
+     (Shown (Triplet_Of (Dacl, Owner), Runnable) * 64
+      + Shown (Triplet_Of (Dacl, Group), Runnable) * 8
+      + Shown (Triplet_Of (Dacl, Everyone), Runnable));
+
+   --  The bits of triplet Left that triplet Right lacks.
+   function Without (Left, Right : Natural) return Natural is
+      type Bit_List is array (1 .. 3) of Positive;
+      Bits   : constant Bit_List := [4, 2, 1];
+      Result : Natural := 0;
+   begin
+      for Bit of Bits loop
+         if (Left / Bit) mod 2 = 1 and then (Right / Bit) mod 2 = 0 then
+            Result := Result + Bit;
+         end if;
+      end loop;
+      return Result;
+   end Without;
+
+   --  Just the rights a triplet's bits stand for, to deny: not the generic
+   --  sets Triplet_To_Rights grants, whose READ_CONTROL and SYNCHRONIZE a
+   --  deny would take away with them.
+   function Rights_To_Deny (Triplet : Natural) return C_DWord is
+     ((if (Triplet / 4) mod 2 = 1 then File_Read_Data else 0)
+      or (if (Triplet / 2) mod 2 = 1 then File_Write_Data or File_Append_Data else 0)
+      or (if Triplet mod 2 = 1 then File_Execute_Access else 0));
+
+   --  The DACL a permission edit from Old_Mode to New_Mode leaves (see
+   --  Set_Permissions in the spec): Dacl with the explicit ACEs of each of
+   --  the owner, the group and Everyone whose bits change replaced
+   --  (SetEntriesInAcl keeps every other ACE, the inherited ones too, in
+   --  canonical order), then a deny for what the owner could still do past
+   --  its new bits. Result is a LocalAlloc'd ACL for the caller to free, or
+   --  null when no bit changes. False when the host would not build it.
+   function Edited_Dacl
+     (Dacl, Owner, Group, Everyone : System.Address;
+      Old_Mode, New_Mode           : Natural;
+      Runnable                     : Boolean;
+      Result                       : out System.Address) return Boolean
+   is
+      type Sid_List is array (1 .. 3) of System.Address;
+      type Shift_List is array (1 .. 3) of Positive;
+      Sids     : constant Sid_List := [Owner, Group, Everyone];
+      Shifts   : constant Shift_List := [64, 8, 1];
+      Entries  : aliased Explicit_Access_Array;
+      Count    : Natural := 0;
+      Replaced : aliased System.Address := System.Null_Address;
+      Denied   : aliased System.Address := System.Null_Address;
+      Status   : C_DWord;
+      Freed    : System.Address;
+      pragma Unreferenced (Freed);
+   begin
+      Result := System.Null_Address;
+      for Index in Sids'Range loop
+         declare
+            Old_Bits : constant Natural := (Old_Mode / Shifts (Index)) mod 8;
+            New_Bits : constant Natural := Shown ((New_Mode / Shifts (Index)) mod 8, Runnable);
+         begin
+            --  An owner that is also the primary group is edited as the
+            --  owner: the group's bits cannot differ from its own, and
+            --  editing them apart would take the owner's ACE with them.
+            if Old_Bits /= New_Bits
+              and then Sids (Index) /= System.Null_Address
+              and then (Index /= 2 or else Owner = System.Null_Address or else Equal_Sid (Group, Owner) = 0)
+            then
+               Count := Count + 1;
+               Build_Trustee_With_Sid (Entries (Count).Trustee'Access, Sids (Index));
+               Entries (Count).Permissions := Triplet_To_Rights (New_Bits);
+               --  SET_ACCESS replaces the trustee's explicit allow and deny
+               --  ACEs; with no bits left, REVOKE_ACCESS just removes them.
+               Entries (Count).Mode := (if New_Bits = 0 then Revoke_Access else Set_Access);
+               Entries (Count).Inheritance := No_Inheritance;
+               Entries (Count).Trustee.Form := Trustee_Is_Sid;
+               Entries (Count).Trustee.Kind := Trustee_Is_Unknown;
+            end if;
+         end;
+      end loop;
+      if Count = 0 then
+         return True;
+      end if;
+      Status := Set_Entries_In_Acl (C_DWord (Count), Entries (1)'Address, Dacl, Replaced'Access);
+      if Status /= Success or else Replaced = System.Null_Address then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         return False;
+      end if;
+      declare
+         Left : constant Natural :=
+           Without (Shown (Triplet_Of (Replaced, Owner), Runnable), Shown ((New_Mode / 64) mod 8, Runnable));
+      begin
+         if Left = 0 or else Owner = System.Null_Address then
+            Result := Replaced;
+            return True;
+         end if;
+         Entries := [others => <>];
+         Build_Trustee_With_Sid (Entries (1).Trustee'Access, Owner);
+         Entries (1).Permissions := Rights_To_Deny (Left);
+         Entries (1).Mode := Deny_Access;
+         Entries (1).Inheritance := No_Inheritance;
+         Entries (1).Trustee.Form := Trustee_Is_Sid;
+         Entries (1).Trustee.Kind := Trustee_Is_Unknown;
+         Status := Set_Entries_In_Acl (1, Entries (1)'Address, Replaced, Denied'Access);
+         Freed := Local_Free (Replaced);
+         if Status /= Success or else Denied = System.Null_Address then
+            Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+            return False;
+         end if;
+         Result := Denied;
+         return True;
+      end;
+   end Edited_Dacl;
+
+   --  Descriptor's DACL as SDDL, with whether it is protected ("P") and
+   --  inherits automatically ("AI"): "D:AI(A;;FA;;;S-1-5-...)(A;ID;...)".
+   --  "" when the host will not write it.
+   function Dacl_Text (Descriptor : System.Address) return String is
+      Text   : aliased System.Address := System.Null_Address;
+      Length : aliased C_DWord := 0;
+      Freed  : System.Address;
+      pragma Unreferenced (Freed);
+   begin
+      if Descriptor = System.Null_Address then
+         return "";
+      elsif Convert_Descriptor_To_Text
+              (Descriptor, Sddl_Revision, Dacl_Information, Text'Access, Length'Access) = 0
+        or else Text = System.Null_Address
+      then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return "";
+      end if;
+      declare
+         Units : constant Wide_String (1 .. Natural (Length)) with Import, Address => Text;
+         Last  : Natural := 0;
+      begin
+         --  The length may count the terminating NUL.
+         while Last < Units'Last and then Units (Last + 1) /= Wide_Character'Val (0) loop
+            Last := Last + 1;
+         end loop;
+         declare
+            Result : constant String := Hostkit.Windows_Paths.To_UTF_8 (Units (1 .. Last));
+         begin
+            Freed := Local_Free (Text);
+            return Result;
+         end;
+      end;
+   end Dacl_Text;
+
+   --  The DACL of the entry open as File, as Dacl_Text writes it.
+   function Dacl_Text_Of (File : System.Address) return String is
+      Owner, Group, Dacl, Sacl : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+      Freed      : System.Address;
+      pragma Unreferenced (Freed);
+   begin
+      if Get_Security_Info
+           (File, Se_File_Object, Dacl_Information, Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
+            Descriptor'Access) /= Success
+      then
+         return "";
+      end if;
+      declare
+         Result : constant String := Dacl_Text (Descriptor);
+      begin
+         Freed := Local_Free (Descriptor);
+         return Result;
+      end;
+   end Dacl_Text_Of;
+
+   --  Put the DACL Text describes (Dacl_Text) back on the entry open as
+   --  File exactly: its ACEs, inherited ones as they were, and whether it
+   --  is protected. The entry alone, as Set_Own_Dacl.
+   function Set_Dacl_Text (File : System.Address; Text : String) return Boolean is
+      Wide_Text  : aliased constant Wide_String := Hostkit.Windows_Paths.From_UTF_8 (Text) & Wide_Character'Val (0);
+      Descriptor : aliased System.Address := System.Null_Address;
+      Size       : aliased C_DWord := 0;
+      Applied    : Boolean;
+      Freed      : System.Address;
+      pragma Unreferenced (Freed);
+   begin
+      if Convert_Text_To_Descriptor (Wide_Text'Address, Sddl_Revision, Descriptor'Access, Size'Access) = 0
+        or else Descriptor = System.Null_Address
+      then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      Applied := Set_Kernel_Object_Security (File, Dacl_Information, Descriptor) /= 0;
+      if not Applied then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+      end if;
+      Freed := Local_Free (Descriptor);
+      return Applied;
+   exception
+      when Ada.Strings.UTF_Encoding.Encoding_Error =>
+         --  Not text Dacl_Text wrote.
+         return False;
+   end Set_Dacl_Text;
+
    function Set_Permissions
+     (Path : String;
+      Mode : Natural) return Boolean
+   is
+      C_Path : aliased Wide_String := Wide (Path);
+
+      Owner      : aliased System.Address := System.Null_Address;
+      Group      : aliased System.Address := System.Null_Address;
+      Dacl       : aliased System.Address := System.Null_Address;
+      Sacl       : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+      New_Acl    : System.Address := System.Null_Address;
+      Control    : aliased Interfaces.C.unsigned_short := 0;
+      Revision   : aliased C_DWord := 0;
+      Status     : C_DWord;
+
+      Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
+      Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+
+      procedure Free_Allocations is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if New_Acl /= System.Null_Address then
+            Freed := Local_Free (New_Acl);
+            New_Acl := System.Null_Address;
+         end if;
+         if Descriptor /= System.Null_Address then
+            Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
+         end if;
+      end Free_Allocations;
+   begin
+      if Mode > 8#7777# then
+         return False;
+      end if;
+      Status :=
+        Get_Named_Security_Info
+          (C_Path'Address, Se_File_Object,
+           Owner_Information or Group_Information or Dacl_Information,
+           Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
+           Descriptor'Access);
+      if Status /= Success then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         return False;
+      end if;
+      if Create_Well_Known_Sid
+           (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) = 0
+        or else Get_Security_Descriptor_Control (Descriptor, Control'Access, Revision'Access) = 0
+      then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         Free_Allocations;
+         return False;
+      end if;
+      declare
+         Runnable : constant Boolean :=
+           Runs_On_Windows (Path) or else Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry;
+         Applied  : Boolean :=
+           Edited_Dacl
+             (Dacl, Owner, Group, Everyone (1)'Address,
+              Mode_Of (Dacl, Owner, Group, Everyone (1)'Address, Runnable), Mode, Runnable, New_Acl);
+      begin
+         if Applied and then New_Acl /= System.Null_Address then
+            Applied := Set_Own_Dacl (C_Path'Address, System.Null_Address, New_Acl, Control);
+         end if;
+         Free_Allocations;
+         return Applied;
+      end;
+   exception
+      when others =>
+         Free_Allocations;
+         return False;
+   end Set_Permissions;
+
+   function Set_Exact_Permissions
      (Path : String;
       Mode : Natural) return Boolean
    is
@@ -953,6 +1302,7 @@ package body Hostkit.Metadata is
            Descriptor'Access);
 
       if Status /= Success then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
          return False;
       end if;
 
@@ -1008,7 +1358,141 @@ package body Hostkit.Metadata is
       when others =>
          Free_Allocations;
          return False;
-   end Set_Permissions;
+   end Set_Exact_Permissions;
+
+   --  The header every ACL starts with, and every ACE.
+   type Acl_Header is record
+      Revision  : Interfaces.C.unsigned_char;
+      Padding_1 : Interfaces.C.unsigned_char;
+      Size      : Interfaces.C.unsigned_short;
+      Count     : Interfaces.C.unsigned_short;
+      Padding_2 : Interfaces.C.unsigned_short;
+   end record with Convention => C;
+   type Ace_Header is record
+      Kind  : Interfaces.C.unsigned_char;
+      Flags : Interfaces.C.unsigned_char;
+      Size  : Interfaces.C.unsigned_short;
+   end record with Convention => C;
+
+   function Get_Ace
+     (Acl : System.Address; Index : C_DWord; Ace : access System.Address) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetAce";
+   function Initialize_Acl
+     (Acl : System.Address; Size : C_DWord; Revision : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "InitializeAcl";
+   function Add_Ace
+     (Acl : System.Address; Revision : C_DWord; Start : C_DWord;
+      Aces : System.Address; Size : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "AddAce";
+
+   function Inherit_From_Parent (Path : String) return Boolean is
+      Inherited_Ace : constant Interfaces.C.unsigned_char := 16#10#;
+      --  UNPROTECTED_DACL_SECURITY_INFORMATION: inherit from the parent.
+      Unprotected_Dacl_Information : constant C_DWord := 16#2000_0000#;
+      Append_At_End : constant C_DWord := 16#FFFF_FFFF#;
+      Acl_Header_Size : constant := 8;
+
+      C_Path     : aliased Wide_String := Wide (Path);
+      Owner      : aliased System.Address := System.Null_Address;
+      Group      : aliased System.Address := System.Null_Address;
+      Dacl       : aliased System.Address := System.Null_Address;
+      Sacl       : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+      Status     : C_DWord;
+
+      procedure Free_Descriptor is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if Descriptor /= System.Null_Address then
+            Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
+         end if;
+      end Free_Descriptor;
+
+      --  Whether ACE Index of Dacl was set on Path itself; its address and
+      --  size when so.
+      function Explicit_Ace
+        (Index : Natural; Ace : out System.Address; Size : out Natural) return Boolean
+      is
+         Found : aliased System.Address := System.Null_Address;
+      begin
+         Ace := System.Null_Address;
+         Size := 0;
+         if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
+            raise Program_Error;
+         end if;
+         declare
+            Header : constant Ace_Header with Import, Address => Found;
+         begin
+            Ace := Found;
+            Size := Natural (Header.Size);
+            return (Header.Flags and Inherited_Ace) = 0;
+         end;
+      end Explicit_Ace;
+   begin
+      --  The security calls follow a link: its target is not what moved.
+      if Hostkit.Fs.Is_Link (Path) then
+         return True;
+      end if;
+      Status :=
+        Get_Named_Security_Info
+          (C_Path'Address, Se_File_Object, Dacl_Information,
+           Owner'Access, Group'Access, Dacl'Access, Sacl'Access, Descriptor'Access);
+      if Status /= Success then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         return False;
+      end if;
+      if Dacl = System.Null_Address then
+         --  No ACL: a volume that keeps none, or an entry open to all.
+         Free_Descriptor;
+         return True;
+      end if;
+      declare
+         Header : constant Acl_Header with Import, Address => Dacl;
+         Ace    : System.Address;
+         Size   : Natural;
+         Needed : Natural := Acl_Header_Size;
+      begin
+         for Index in 0 .. Natural (Header.Count) - 1 loop
+            if Explicit_Ace (Index, Ace, Size) then
+               Needed := Needed + Size;
+            end if;
+         end loop;
+         declare
+            --  An ACL is DWORD-aligned.
+            Kept : aliased array (1 .. (Needed + 3) / 4) of Interfaces.Unsigned_32 := [others => 0];
+         begin
+            if Initialize_Acl (Kept'Address, C_DWord (Needed), C_DWord (Header.Revision)) = 0 then
+               Hostkit.Errors.Set_Errno_From_Last_Error;
+               Free_Descriptor;
+               return False;
+            end if;
+            for Index in 0 .. Natural (Header.Count) - 1 loop
+               if Explicit_Ace (Index, Ace, Size)
+                 and then Add_Ace (Kept'Address, C_DWord (Header.Revision), Append_At_End, Ace, C_DWord (Size)) = 0
+               then
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
+                  Free_Descriptor;
+                  return False;
+               end if;
+            end loop;
+            --  The explicit ACEs, unprotected: Windows adds what the parent
+            --  hands down and carries it on to the children.
+            Status :=
+              Set_Named_Security_Info
+                (C_Path'Address, Se_File_Object, Dacl_Information or Unprotected_Dacl_Information,
+                 System.Null_Address, System.Null_Address, Kept'Address, System.Null_Address);
+         end;
+      end;
+      Free_Descriptor;
+      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+      return Status = Success;
+   exception
+      when others =>
+         Free_Descriptor;
+         return False;
+   end Inherit_From_Parent;
 
    function Set_File_Times
      (Path          : String;
@@ -1041,6 +1525,7 @@ package body Hostkit.Metadata is
            System.Null_Address);
 
       if File = System.Null_Address or else File = Invalid_Handle_Value then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
       end if;
 
@@ -1050,6 +1535,9 @@ package body Hostkit.Metadata is
            System.Null_Address,
            Access_Filetime'Access,
            Modified_Filetime'Access);
+      if Result = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+      end if;
       declare
          Ignored : constant C_Int := Close_Handle (File);
       begin
@@ -1269,7 +1757,8 @@ package body Hostkit.Metadata is
       Group          : Identity_Field;
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
-      Group_Name     : String := "") return Metadata_Update_Result
+      Group_Name     : String := "";
+      Access_Text    : String := "") return Metadata_Update_Result
    is
       function Identity_From_Handle
         (File : System.Address;
@@ -1428,95 +1917,52 @@ package body Hostkit.Metadata is
                  (if Borrow_Group then Primary_Group else Group_Sid (1)'Address);
             begin
                if Have_Owner and then Have_Group then
-                  Answer.Success := Set_Security_Info
-                    (File, Se_File_Object,
-                     Owner_Information or Group_Information,
-                     New_Owner, New_Group, System.Null_Address,
-                     System.Null_Address) = Success;
+                  declare
+                     Status : constant C_DWord := Set_Security_Info
+                       (File, Se_File_Object,
+                        Owner_Information or Group_Information,
+                        New_Owner, New_Group, System.Null_Address,
+                        System.Null_Address);
+                  begin
+                     Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+                     Answer.Success := Status = Success;
+                  end;
                end if;
             end;
          end if;
       else
+         --  The edit Set_Permissions makes, on the held entry; or, given an
+         --  access record an earlier update reported, that record exactly.
          declare
-            function Rights_For (Sid : System.Address) return Natural is
-               Trustee : aliased Trustee_Record;
-               Rights  : aliased C_DWord := 0;
-            begin
-               if Sid = System.Null_Address
-                 or else Dacl = System.Null_Address
-               then
-                  return 0;
-               end if;
-               Build_Trustee_With_Sid (Trustee'Access, Sid);
-               Trustee.Form := Trustee_Is_Sid;
-               Trustee.Kind := Trustee_Is_Unknown;
-               if Get_Effective_Rights_From_Acl
-                 (Dacl, Trustee'Access, Rights'Access) /= Success
-               then
-                  return 0;
-               end if;
-               return Rights_To_Triplet (Rights);
-            end Rights_For;
-
-            Everyone : aliased Sid_Buffer := [others => Interfaces.C.nul];
+            Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
             Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
-            Entries : aliased Explicit_Access_Array;
-            type Bit_List is array (1 .. 3) of Positive;
-            Execute_Bits : constant Bit_List := [64, 8, 1];
-            Mode : Natural;
-            Status : C_DWord;
+            Control       : aliased Interfaces.C.unsigned_short := 0;
+            Revision      : aliased C_DWord := 0;
+            Runnable      : constant Boolean :=
+              Runs_On_Windows (Path) or else (Info.Attributes and File_Attribute_Directory) /= 0;
+            Old_Mode      : Natural;
          begin
             if Create_Well_Known_Sid
-              (Win_World_Sid, System.Null_Address, Everyone (1)'Address,
-               Everyone_Size'Access) /= 0
+                 (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) /= 0
+              and then Get_Security_Descriptor_Control (Descriptor, Control'Access, Revision'Access) /= 0
             then
-               Mode := Rights_For (Owner) * 64
-                 + Rights_For (Primary_Group) * 8
-                 + Rights_For (Everyone (1)'Address);
-               if not Runs_On_Windows (Path) then
-                  --  Clear the owner, group and other execute bits.
-                  for Execute_Bit of Execute_Bits loop
-                     if (Mode / Execute_Bit) rem 2 = 1 then
-                        Mode := Mode - Execute_Bit;
-                     end if;
-                  end loop;
-               end if;
-               Answer.Previous := Identity_Field (Mode);
-
-               Build_Trustee_With_Sid
-                 (Entries (1).Trustee'Access, Owner);
-               Entries (1).Permissions := Triplet_To_Rights
-                 (Natural (Value / 64 mod 8));
-               Entries (1).Mode := Grant_Access;
-               Entries (1).Inheritance := No_Inheritance;
-               Entries (1).Trustee.Form := Trustee_Is_Sid;
-               Entries (1).Trustee.Kind := Trustee_Is_Unknown;
-
-               Build_Trustee_With_Sid
-                 (Entries (2).Trustee'Access, Primary_Group);
-               Entries (2).Permissions := Triplet_To_Rights
-                 (Natural (Value / 8 mod 8));
-               Entries (2).Mode := Grant_Access;
-               Entries (2).Inheritance := No_Inheritance;
-               Entries (2).Trustee.Form := Trustee_Is_Sid;
-               Entries (2).Trustee.Kind := Trustee_Is_Unknown;
-
-               Build_Trustee_With_Sid
-                 (Entries (3).Trustee'Access, Everyone (1)'Address);
-               Entries (3).Permissions := Triplet_To_Rights
-                 (Natural (Value mod 8));
-               Entries (3).Mode := Grant_Access;
-               Entries (3).Inheritance := No_Inheritance;
-               Entries (3).Trustee.Form := Trustee_Is_Sid;
-               Entries (3).Trustee.Kind := Trustee_Is_Unknown;
-
-               Status := Set_Entries_In_Acl
-                 (3, Entries (1)'Address, System.Null_Address,
-                  New_Acl'Access);
-               if Status = Success and then New_Acl /= System.Null_Address then
+               Old_Mode := Mode_Of (Dacl, Owner, Primary_Group, Everyone (1)'Address, Runnable);
+               Answer.Previous := Identity_Field (Old_Mode);
+               Answer.Previous_Access := To_Unbounded_String (Dacl_Text (Descriptor));
+               if Access_Text /= "" then
+                  Answer.Success := Set_Dacl_Text (File, Access_Text);
+               elsif Value <= 8#7777#
+                 and then Edited_Dacl
+                   (Dacl, Owner, Primary_Group, Everyone (1)'Address, Old_Mode, Natural (Value), Runnable, New_Acl)
+               then
                   Answer.Success :=
-                    Set_Own_Dacl (System.Null_Address, File, New_Acl);
+                    New_Acl = System.Null_Address or else Set_Own_Dacl (System.Null_Address, File, New_Acl, Control);
                end if;
+               if Answer.Success then
+                  Answer.Applied_Access := To_Unbounded_String (Dacl_Text_Of (File));
+               end if;
+            else
+               Hostkit.Errors.Set_Errno_From_Last_Error;
             end if;
          end;
       end if;
@@ -1847,6 +2293,7 @@ package body Hostkit.Metadata is
            (if Have_Group then Group_Sid (1)'Address else System.Null_Address),
            System.Null_Address, System.Null_Address);
 
+      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
       return Status = Success;
 
    exception

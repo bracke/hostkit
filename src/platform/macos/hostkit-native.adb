@@ -633,7 +633,7 @@ package body Hostkit.Native is
          return False;
    end User_Group_Ids;
 
-   function Open_Native (Path : String) return Boolean is
+   function Open_Native (Path : String) return Hostkit.Process.Open_Outcome is
       --  "open" is how macOS starts a document or an application bundle.
       Opener   : constant String := "open";
       Located  : GNAT.OS_Lib.String_Access := GNAT.OS_Lib.Locate_Exec_On_Path (Opener);
@@ -643,24 +643,24 @@ package body Hostkit.Native is
       Started  : GNAT.OS_Lib.Process_Id;
    begin
       if Located = null then
-         return False;
+         return Hostkit.Process.Open_Failed;
       end if;
 
       Started := GNAT.OS_Lib.Non_Blocking_Spawn (Located.all, Args);
       GNAT.OS_Lib.Free (Located);
 
       if Started = GNAT.OS_Lib.Invalid_Pid then
-         return False;
+         return Hostkit.Process.Open_Failed;
       end if;
 
       Reap_Finished_Children;
-      return True;
+      return Hostkit.Process.Opened;
    exception
       when others =>
          if Located /= null then
             GNAT.OS_Lib.Free (Located);
          end if;
-         return False;
+         return Hostkit.Process.Open_Failed;
    end Open_Native;
 
 end Hostkit.Native;

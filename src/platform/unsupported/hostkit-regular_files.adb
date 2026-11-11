@@ -12,10 +12,11 @@ package body Hostkit.Regular_Files is
 
    --  No host call to make: GNAT's own, with its path limit and its mode.
    function Create_New
-     (Path : String;
-      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor
+     (Path      : String;
+      Mode      : Natural := 8#644#;
+      Encrypted : Boolean := False) return GNAT.OS_Lib.File_Descriptor
    is
-      pragma Unreferenced (Mode);
+      pragma Unreferenced (Mode, Encrypted);
    begin
       return GNAT.OS_Lib.Create_New_File (Path, GNAT.OS_Lib.Binary);
    exception

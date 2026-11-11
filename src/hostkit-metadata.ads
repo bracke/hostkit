@@ -103,6 +103,14 @@ package Hostkit.Metadata is
       Previous       : Identity_Field := 0;
       Previous_Group : Identity_Field := 0;
       Identity       : Entry_Identity;
+      --  A permission update on a host whose access is more than mode bits
+      --  (Windows): the entry's whole access record before the update and
+      --  after it, as text an Access_Text update puts back exactly -- the
+      --  DACL as SDDL, with whether it is protected and inherits. Empty on
+      --  a POSIX host, where the mode is the whole record, and where the
+      --  host would not write one.
+      Previous_Access : UString;
+      Applied_Access  : UString;
    end record;
 
    --  Change metadata through a handle that pins Path to one filesystem entry.
@@ -114,6 +122,12 @@ package Hostkit.Metadata is
    --  Owner_Name and Group_Name are used only on hosts whose native ownership
    --  API needs names as well as the ids Hostkit reported. Max_Previous lets a
    --  narrower caller refuse an undo value it could not retain losslessly.
+   --
+   --  A permission update edits as Set_Permissions does. With Access_Text --
+   --  a Previous_Access or Applied_Access an earlier update reported -- it
+   --  puts that access record back exactly instead of applying Value: how an
+   --  undo restores what an edit changed, on a host where the mode cannot say
+   --  it all. It is ignored where the mode is the whole record.
    function Update_Entry_Metadata
      (Path           : String;
       Expected       : Entry_Identity;
@@ -123,7 +137,8 @@ package Hostkit.Metadata is
       Group          : Identity_Field;
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
-      Group_Name     : String := "") return Metadata_Update_Result;
+      Group_Name     : String := "";
+      Access_Text    : String := "") return Metadata_Update_Result;
 
    --  What a filesystem has room for. All byte and inode counts saturate: a value
    --  beyond this host's range is clamped to 'Last rather than wrapping.
@@ -193,6 +208,19 @@ package Hostkit.Metadata is
    --  a path to its owner, which is a request every host can honour some way.
    --  This one takes literal POSIX bits, so it only means something where they do.
    --
+   --  On Windows it is an edit of the access the entry has, as a permission
+   --  editor makes one, not a replacement of it: only the owner's, the primary
+   --  group's and Everyone's explicit ACEs whose bits change (as
+   --  File_Permission_Bits reads them) are replaced, by one allowing the new
+   --  bits; every other ACE -- SYSTEM's, the Administrators', each inherited
+   --  one -- stays, and the DACL stays inheriting or protected as it was.
+   --  Where the owner would still have a right the mode takes away -- an
+   --  inherited ACE, or one for a group it is in, grants it -- a deny ACE
+   --  takes just that right from the owner. The group and Everyone get no
+   --  deny: one would bind the owner too, so a right only inheritance gives
+   --  them stays. The entry alone is changed: nothing is handed down anew to
+   --  what a folder holds.
+   --
    --  @param Path Path whose mode is changed.
    --  @param Mode New permission bits.
    --  @return True when the host applied it.
@@ -200,6 +228,42 @@ package Hostkit.Metadata is
      (Path : String;
       Mode : Natural)
       return Boolean;
+
+   --  Set exactly Mode's access and no other: Set_Permissions on a POSIX
+   --  host. On Windows the DACL is replaced by three ACEs, protected from
+   --  inheritance, allowing the owner, the primary group and Everyone exactly
+   --  their bits: SYSTEM, the Administrators and whatever was inherited lose
+   --  their access too, and 0 leaves the entry to no one -- even an
+   --  administrator, as an elevated process holds no backup privilege unless
+   --  it enables it. What a test fixture needs to take access away; not what
+   --  a user's edit should do.
+   --
+   --  @param Path Path whose access is replaced.
+   --  @param Mode New permission bits.
+   --  @return True when the host applied it.
+   function Set_Exact_Permissions
+     (Path : String;
+      Mode : Natural)
+      return Boolean;
+
+   --  Give Path, just moved into its directory, the access that directory
+   --  hands down, as if it had been made there.
+   --
+   --  A file made in a private staging folder and then renamed into place
+   --  keeps what the stage handed it: on Windows a rename within a volume
+   --  carries a file's inherited ACEs along unchanged, so a copy published
+   --  from an owner-only stage would stay owner-only. Windows drops the
+   --  ACEs Path inherited, keeps those set on it explicitly, and inherits
+   --  afresh from the new parent (SetNamedSecurityInfoW with an unprotected
+   --  DACL), which carries on down to everything a directory holds. That
+   --  writes the change time of each entry it reaches. A volume without ACLs
+   --  (FAT, exFAT) has nothing to recompute, and a link is left alone (the
+   --  security calls would reach its target). POSIX hosts decide access by
+   --  mode bits a rename does not touch, so there this does nothing.
+   --
+   --  @param Path Entry whose inherited access is recomputed.
+   --  @return True when it was, or there was nothing to do.
+   function Inherit_From_Parent (Path : String) return Boolean;
 
    --  Set Path's access and modification timestamps independently.
    --

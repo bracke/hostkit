@@ -23,11 +23,12 @@ package body Hostkit.Metadata is
       Group          : Identity_Field;
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
-      Group_Name     : String := "") return Metadata_Update_Result
+      Group_Name     : String := "";
+      Access_Text    : String := "") return Metadata_Update_Result
    is
       pragma Unreferenced
         (Path, Expected, Check_Expected, Kind, Value, Group, Max_Previous,
-         Owner_Name, Group_Name);
+         Owner_Name, Group_Name, Access_Text);
    begin
       return (others => <>);
    end Update_Entry_Metadata;
@@ -80,6 +81,20 @@ package body Hostkit.Metadata is
    begin
       return False;
    end Set_Permissions;
+
+   --  Mode bits are the whole of access here: exactly what Set_Permissions
+   --  sets.
+   function Set_Exact_Permissions
+     (Path : String;
+      Mode : Natural)
+      return Boolean is (Set_Permissions (Path, Mode));
+
+   --  Access here is mode bits, which a rename leaves as they were.
+   function Inherit_From_Parent (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return True;
+   end Inherit_From_Parent;
 
    function Set_File_Times
      (Path          : String;

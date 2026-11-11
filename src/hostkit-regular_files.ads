@@ -38,15 +38,28 @@ package Hostkit.Regular_Files is
    --  every host, for GNAT.OS_Lib.Write and Close, Skip_Zeros and
    --  Finish_Sparse, and Hostkit.Durability.Sync_Descriptor.
    --
+   --  Encrypted asks for a file the file system encrypts (Windows' EFS) from
+   --  its creation, so that a copy of an encrypted file never holds its bytes
+   --  in the clear, not even for a moment: Windows creates it with
+   --  FILE_ATTRIBUTE_ENCRYPTED, and refuses (errno set) where the volume made
+   --  it anything else -- a FAT stick, a share without EFS -- rather than
+   --  hand back a plaintext file. Other hosts have no such attribute and
+   --  ignore it.
+   --
    --  @param Path File to create.
    --  @param Mode Permission bits for the new file.
+   --  @param Encrypted Whether the file must be encrypted from creation.
    --  @return Open descriptor, or Invalid_FD when something is there or the
    --    host refused.
    function Create_New
-     (Path : String;
-      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor;
+     (Path      : String;
+      Mode      : Natural := 8#644#;
+      Encrypted : Boolean := False) return GNAT.OS_Lib.File_Descriptor;
 
    --  Advance a sparse output without physically writing Count zero bytes.
+   --  Windows marks the file sparse the first time (FSCTL_SET_SPARSE), and
+   --  answers False on a volume that has no sparse files, where the caller
+   --  writes the zeros instead.
    --  @param Descriptor Open output descriptor.
    --  @param Count Number of zero bytes represented by the hole.
    --  @return True when the host advanced the sparse output.
@@ -54,7 +67,9 @@ package Hostkit.Regular_Files is
      (Descriptor : GNAT.OS_Lib.File_Descriptor;
       Count      : Integer) return Boolean;
 
-   --  Materialize the final sparse extent at the descriptor's current offset.
+   --  Materialize the final sparse extent at the descriptor's current offset:
+   --  the file ends there, and a trailing hole stays a hole (Windows sets the
+   --  end of file rather than writing zeros up to it).
    --  @param Descriptor Open sparse output descriptor.
    --  @return True when the final file length was established.
    function Finish_Sparse (Descriptor : GNAT.OS_Lib.File_Descriptor) return Boolean;

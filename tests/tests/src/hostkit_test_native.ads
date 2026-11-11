@@ -1,3 +1,5 @@
+with Interfaces;
+
 private with System;
 
 --  Fixture code only one host can link: the Windows API a test needs to set
@@ -31,6 +33,27 @@ package Hostkit_Test_Native is
    --  @return True when it is read-only; False when it is not, or cannot be
    --    asked.
    function Is_Read_Only (Path : String) return Boolean;
+
+   --  Create an empty file named Leaf in Folder through CreateFileW, the
+   --  name's UTF-16 units given as they are -- a lone surrogate among them,
+   --  which no UTF-8 text spells -- so that hostkit's own reading of the
+   --  name is what a test checks.
+   --
+   --  @param Folder An existing folder.
+   --  @param Leaf The new file's name, as UTF-16 units.
+   --  @return True when the file was created; False on a host whose names
+   --    are not UTF-16 (every one but Windows) or when the create failed.
+   function Create_With_Units (Folder : String; Leaf : Wide_String) return Boolean;
+
+   --  Whether a program started from now on would inherit the open file
+   --  Handle names: its HANDLE_FLAG_INHERIT, as GetHandleInformation reads
+   --  it.
+   --
+   --  @param Handle A Windows HANDLE, as an integer.
+   --  @param Inheritable Whether the flag is set, when the result is True.
+   --  @return True when the host answered; False on a host without such
+   --    handles (every one but Windows) or when it would not say.
+   function Handle_Inheritance (Handle : Interfaces.Integer_64; Inheritable : out Boolean) return Boolean;
 
 private
 

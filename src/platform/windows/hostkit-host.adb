@@ -1,6 +1,6 @@
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Conversions;
 with Hostkit.Environment;
+with Hostkit.Windows_Paths;
 
 with Interfaces.C;
 with System;
@@ -195,7 +195,7 @@ package body Hostkit.Host is
          return "";
       end if;
 
-      return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Filled)));
+      return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Filled)));
    exception
       when others =>
          return "";
@@ -264,7 +264,7 @@ package body Hostkit.Host is
    begin
       --  On success Size is the name's length, without the terminator.
       if Get_Computer_Name (Buffer'Address, Size'Access) /= 0 and then Size <= 256 then
-         return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Size)));
+         return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Size)));
       else
          return Hostkit.Environment.Value ("COMPUTERNAME", "");
       end if;
@@ -285,7 +285,7 @@ package body Hostkit.Host is
 
       declare
          Raw : aliased constant Wide_String :=
-           Ada.Strings.UTF_Encoding.Conversions.Convert (Name) & Wide_Character'Val (0);
+           Hostkit.Windows_Paths.From_UTF_8 (Name) & Wide_Character'Val (0);
       begin
          return Set_Computer_Name (Raw'Address) /= 0;
       end;
@@ -357,7 +357,7 @@ package body Hostkit.Host is
       --  On success Size counts the terminator too. A user named Jürgen must
       --  not come back in the ANSI code page.
       if Get_User_Name (Buffer'Address, Size'Access) /= 0 and then Size in 1 .. 256 then
-         return Ada.Strings.UTF_Encoding.Conversions.Convert (Buffer (1 .. Natural (Size) - 1));
+         return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Size) - 1));
       else
          return "";
       end if;

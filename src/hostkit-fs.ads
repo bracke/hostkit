@@ -33,7 +33,9 @@ package Hostkit.Fs is
    --  What Path names, as Ada.Directories.Kind says it, without its limits:
    --  GNAT's Windows runtime cannot ask about a path past 260 characters or
    --  a name past 256, where this asks with the \\?\ form. Windows reads a
-   --  link as itself, as GNAT does there; POSIX follows it.
+   --  link as itself, as GNAT does there; POSIX follows it. A device -- a
+   --  FIFO or a character device such as /dev/null, or Windows' NUL, CON
+   --  or a \\.\ name -- is Special_File_Entry.
    --
    --  @param Path Path to look at.
    --  @return Its kind, or Missing_Entry when Path names nothing, is empty,
@@ -787,6 +789,20 @@ package Hostkit.Fs is
    --
    --  @return The base folders; empty on a host without such entries.
    function Application_Data_Directories return Path_List;
+
+   --  Where this host keeps font files, the system's folders first and then
+   --  the current user's -- where a font installed without administrator
+   --  rights lands. On Windows the Fonts known folder (SHGetKnownFolderPath
+   --  of FOLDERID_Fonts, else %WINDIR%\Fonts) and the per-user
+   --  %LOCALAPPDATA%\Microsoft\Windows\Fonts; on macOS /System/Library/Fonts,
+   --  /Library/Fonts and ~/Library/Fonts; elsewhere fontconfig's defaults,
+   --  /usr/share/fonts and /usr/local/share/fonts, then $XDG_DATA_HOME/fonts
+   --  (else ~/.local/share/fonts) and ~/.fonts. No drive letter or prefix is
+   --  assumed. Not checked for existence; a caller looks in those that are
+   --  there.
+   --
+   --  @return The folders, each once; empty on a host that names none.
+   function Font_Directories return Path_List;
 
    --  Where this host keeps per-user caches -- regenerable data that may be
    --  deleted behind the program's back without losing anything.

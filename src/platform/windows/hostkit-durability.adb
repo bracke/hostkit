@@ -1,3 +1,4 @@
+with Hostkit.Errors;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -41,6 +42,25 @@ package body Hostkit.Durability is
    function commit (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_commit";
 
+   --  _commit, its refusal kept as itself: the runtime's own sets errno to
+   --  EBADF whatever FlushFileBuffers said, so a full disk -- which often
+   --  shows only here -- read as a bad descriptor.
+   function Committed (FD : C_Int) return Boolean is
+   begin
+      if commit (FD) = 0 then
+         return True;
+      end if;
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      return False;
+   end Committed;
+
+   --  The last error of an open just refused, put into errno as well.
+   function Refusal return C_DWord is
+   begin
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      return Get_Last_Error;
+   end Refusal;
+
    function close (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_close";
 
@@ -49,7 +69,7 @@ package body Hostkit.Durability is
       Name   : aliased constant Wide_String :=
         Hostkit.Windows_Paths.Native (Path);
       FD     : C_Int := open (Name'Address, O_Rdwr + O_Binary);
-      Error  : C_DWord := (if FD < 0 then Get_Last_Error else 0);
+      Error  : C_DWord := (if FD < 0 then Refusal else 0);
       Result : Outcome := Failed;
    begin
       --  A file just written may be held a moment by someone else (a virus
@@ -59,7 +79,7 @@ package body Hostkit.Durability is
          exit when FD >= 0 or else not Transient (Error);
          delay Duration (Attempt) * 0.02;
          FD := open (Name'Address, O_Rdwr + O_Binary);
-         Error := (if FD < 0 then Get_Last_Error else 0);
+         Error := (if FD < 0 then Refusal else 0);
       end loop;
       --  A read-only file cannot be opened for writing, and only a writer
       --  may flush it: drop the attribute for the flush and put it back.
@@ -72,8 +92,10 @@ package body Hostkit.Durability is
               and then Set_File_Attributes_W (Name'Address, Attributes - Read_Only) /= 0
             then
                FD := open (Name'Address, O_Rdwr + O_Binary);
-               if FD >= 0 then
-                  if commit (FD) = 0 then
+               if FD < 0 then
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
+               else
+                  if Committed (FD) then
                      Result := Synced;
                   end if;
                   if close (FD) /= 0 then
@@ -88,7 +110,7 @@ package body Hostkit.Durability is
          end;
          return Failed;
       end if;
-      if commit (FD) = 0 then
+      if Committed (FD) then
          Result := Synced;
       end if;
       if close (FD) /= 0 then
@@ -99,7 +121,7 @@ package body Hostkit.Durability is
 
    --  _commit is FlushFileBuffers on the descriptor's handle.
    function Sync_Descriptor (Descriptor : Integer) return Outcome is
-     (if commit (C_Int (Descriptor)) = 0 then Synced else Failed);
+     (if Committed (C_Int (Descriptor)) then Synced else Failed);
 
    --  NTFS journals its directory entries itself; there is nothing to ask.
    function Sync_Directory (Path : String) return Outcome is

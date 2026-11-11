@@ -367,7 +367,23 @@ begin
 
    --  The host's own trash. Linux deliberately binds nothing: the freedesktop
    --  trash is a filesystem layout for the caller to write, not a call to make.
-   Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHFileOperationW");
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "CoCreateInstance");
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHCreateItemFromParsingName");
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHChangeNotify");
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "GetVolumePathNameW");
+   Require_Binding ("src/platform/windows/hostkit-trash.adb", "ConvertSidToStringSidW");
+   Require_Binding ("src/platform/windows/hostkit-shell_paths.adb", "GetShortPathNameW");
+   Require_Binding ("src/platform/windows/hostkit-native.adb", "AssocQueryStringW");
+   Require_Binding ("src/platform/windows/hostkit-errors.adb", "GetLastError");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileType");
+   Require_Binding ("src/platform/windows/hostkit-fs.adb", "SHGetKnownFolderPath");
+   Require_Binding ("src/platform/windows/hostkit-native.adb", "SetInformationJobObject");
+   Require_Binding
+     ("src/platform/windows/hostkit-metadata.adb", "ConvertSecurityDescriptorToStringSecurityDescriptorW");
+   Require_Binding
+     ("src/platform/windows/hostkit-metadata.adb", "ConvertStringSecurityDescriptorToSecurityDescriptorW");
+   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "EqualSid");
+   Require_Binding ("src/platform/windows/hostkit-metadata_copy.adb", "GetVolumeInformationByHandleW");
    Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
    Require_Text
      ("src/platform/macos/hostkit-trash.adb",
@@ -408,7 +424,9 @@ begin
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_open_osfhandle");
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "DeviceIoControl");
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_lseeki64");
-   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_chsize_s");
+   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "SetEndOfFile");
+   Require_Binding ("src/platform/windows/hostkit-metadata_copy.adb", "FindFirstStreamW");
+   Require_Binding ("src/platform/windows/hostkit-metadata_copy.adb", "EncryptFileW");
 
    --  Lending a directory its owner's write bit for a rename, through a held
    --  descriptor. Windows has no such rule, and its body binds nothing.

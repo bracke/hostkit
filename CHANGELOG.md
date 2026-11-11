@@ -17,6 +17,59 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **Windows names that are not UTF-16 list, and round-trip.** NTFS keeps an
+  unpaired surrogate in a name; every UTF-16 to UTF-8 conversion in the
+  Windows bodies raised on one, so a single such name left a whole folder
+  unlistable. `Windows_Paths.To_UTF_8` and `From_UTF_8` carry it as WTF-8
+  (the lone surrogate as its own three bytes, `ED A0..BF xx`), which a
+  caller sees as invalid UTF-8 just as it sees a POSIX name that is not
+  text, and which goes back to Windows as the same unit; well-formed text
+  converts as before, except that a leading U+FEFF is kept as part of a
+  name. A recycled item's `$I` path is read the same way rather than
+  refused. `Windows_Paths.Native` also makes a long relative or dotted path
+  absolute (`Native_Form`, after `Path_Text.Absolute`) so it takes the
+  `\\?\` prefix too.
+- **`Fs.Font_Directories`**: where the host keeps fonts, the system's
+  folders before the user's -- on Windows the Fonts known folder (wherever
+  Windows is installed) and the per-user `%LOCALAPPDATA%\Microsoft\Windows\Fonts`.
+- **`Metadata.Set_Exact_Permissions`**: the old Windows `Set_Permissions`
+  (a protected DACL of exactly the three accounts' bits), for a caller --
+  a test fixture -- that needs access taken away even from an
+  administrator; `chmod` on POSIX.
+- **A permission update's whole access record.** On Windows
+  `Update_Entry_Metadata` reports the DACL before and after a permission
+  update as SDDL (`Previous_Access`, `Applied_Access`), and with
+  `Access_Text` puts such a record back exactly: how an undo restores what
+  an edit changed. Empty, and ignored, on POSIX.
+
+- **Copies keep Windows' named streams, encryption, and take their new
+  folder's access.** `Metadata_Copy.Capture` lists an entry's named data
+  streams and `Apply` copies them -- the Zone.Identifier (Mark of the Web)
+  a browser puts on a download among them -- before the times and the
+  read-only attribute; a volume without streams (FAT, exFAT) takes the
+  entry without them, as with xattrs. `Metadata_Copy.Is_Encrypted` and
+  `Regular_Files.Create_New`'s new `Encrypted` make a copy of an EFS file
+  encrypted from its creation (refused, never decrypted, where the volume
+  cannot), and `Apply` marks a copied encrypted directory.
+  `Metadata.Inherit_From_Parent` gives an entry renamed out of a private
+  stage the access its new parent hands down (POSIX: nothing to do).
+- **Why a Windows call failed, through errno.** Hostkit's Windows bodies call
+  Win32 directly, which reports through `GetLastError` and leaves errno
+  alone, so a caller telling a full disk from a refusal by errno saw nothing.
+  `Errors.Set_Errno_From_Last_Error` (a no-op on POSIX) now puts the reason
+  there after each failing call a caller reports -- creating, deleting,
+  renaming and linking in `Fs`, `Metadata`, `Metadata_Copy`,
+  `Regular_Files`, `Durability`, `Private_Paths`, `Lease_Files` and
+  `Directory_Listing` -- through the pure table `Windows_Errors.Errno_Of`
+  (access denied is EACCES, a sharing or lock violation EBUSY, a full disk
+  ENOSPC, write protection EROFS, a name too long ENAMETOOLONG), tested on
+  every host.
+- `Fs.Kind_Of` reads a Windows device (`NUL`, `CON`, a `\\.\` name) as
+  `Special_File_Entry`, as POSIX reads `/dev/null`.
+- `Fs.Delete_Tree_No_Follow` on Windows deletes an entry whose own DACL
+  refuses reading (mode 0) where its folder grants the delete, as a POSIX
+  folder's write bit lets an unreadable file go.
+
 - **File operations past Windows' 260-character path limit**, with one
   contract on every host. GNAT's Windows runtime refuses a longer path in
   `Ada.Directories`, `GNAT.OS_Lib` and `Stream_IO`/`Text_IO` (`Name_Error`
@@ -153,8 +206,28 @@ recently enough to matter to somebody pinning it; the history before that is in
   a caller that passes its program only what it may have (`env -i`) leaves
   nothing else readable in `/proc/<parent>/environ`. Ignored on other hosts.
 
+### Changed
+
+- **A Windows permission edit is an edit.** `Metadata.Set_Permissions` and a
+  permission `Update_Entry_Metadata` used to replace the DACL with three
+  protected ACEs, dropping SYSTEM's, the Administrators' and every inherited
+  ACE. They now replace only the explicit ACEs of the owner, the primary
+  group and Everyone whose bits change, keep every other ACE and the DACL's
+  inheritance, deny the owner a right that inheritance or a group would
+  still give it, and change the entry alone. Consumers that used
+  `Set_Permissions` to lock something away on Windows want
+  `Set_Exact_Permissions`.
+- **A whole group ends with its leader on Windows.** `Run_Captured` with
+  `Whole_Group` now creates its job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`:
+  what the program left running ends when it does, and when the caller dies,
+  as on Linux.
+
 ### Fixed
 
+- **Sparse copies on Windows stay sparse to the end.** `Finish_Sparse`
+  extended the file with `_chsize_s`, which writes zeros and so allocated
+  the trailing hole; it now sets the end of file. `Skip_Zeros` issues
+  FSCTL_SET_SPARSE once per file rather than for every zero block.
 - **On Windows, `Directory_Listing.List` lists a folder past 260
   characters**, with `FindFirstFileW` over the long form rather than GNAT's
   `Ada.Directories` search, and now reports each entry's kind from the

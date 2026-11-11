@@ -1,5 +1,4 @@
-with Ada.Strings.UTF_Encoding.Conversions;
-
+with Hostkit.Errors;
 with Hostkit.Fs;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
@@ -83,7 +82,7 @@ package body Hostkit.Directory_Listing is
                Units (Index) := Data.File_Name (Index);
             end loop;
             declare
-               Name : constant String := Ada.Strings.UTF_Encoding.Conversions.Convert (Units);
+               Name : constant String := Hostkit.Windows_Paths.To_UTF_8 (Units);
                Kind : constant Entry_Kind :=
                  (if (Data.Attributes and Attribute_Reparse_Point) /= 0
                     and then Data.Reserved_0 in Tag_Symlink | Tag_Mount_Point
@@ -112,8 +111,13 @@ package body Hostkit.Directory_Listing is
       if Handle = Invalid_Handle then
          --  Nothing matched: a drive's root has no . and .. to list, so an
          --  empty one says so -- as does a path that is not there.
-         return Get_Last_Error = Error_File_Not_Found
-           and then Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry;
+         if Get_Last_Error = Error_File_Not_Found
+           and then Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry
+         then
+            return True;
+         end if;
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
       end if;
       loop
          Take;
@@ -122,6 +126,9 @@ package body Hostkit.Directory_Listing is
       declare
          Error : constant C_DWord := Get_Last_Error;
       begin
+         if Error /= Error_No_More_Files then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+         end if;
          Ignored := Find_Close (Handle);
          return Error = Error_No_More_Files;
       end;

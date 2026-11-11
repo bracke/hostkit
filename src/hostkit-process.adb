@@ -696,8 +696,13 @@ package body Hostkit.Process is
 
    function Open_Native (Path : String) return Boolean is
    begin
-      return Hostkit.Native.Open_Native (Path);
+      return Hostkit.Native.Open_Native (Path) = Opened;
    end Open_Native;
+
+   function Open_Native_Outcome (Path : String) return Open_Outcome is
+   begin
+      return Hostkit.Native.Open_Native (Path);
+   end Open_Native_Outcome;
 
    ---------------
    -- End_Now --

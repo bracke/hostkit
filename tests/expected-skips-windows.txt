@@ -3,8 +3,6 @@
 -- call gives them: a skip not listed here fails the run -- a listed test that
 -- skips for another reason too -- and so does a listed test that did not skip.
 Test_Clean_Wrapper: the wrapper's environment is read back through Linux /proc
-Test_Group_Stops_Whole: no POSIX shell to start a group with
-Test_Group_Ends_With_Leader: a group ending with its leader is checked on Linux
 Test_Executability_Across_Modes: Windows decides by extension, not by mode
 Test_An_Identity_Reads_Beside_Another_Reader: process identities are not read from /proc here
 Test_A_Child_Can_Be_Put_In_Its_Own_Group: this host has no signals, so no process groups
@@ -13,4 +11,3 @@ Test_A_Disposition_Round_Trips: this host has no SIGPIPE
 Test_A_Child_Can_Own_A_Terminal: no pseudo-terminal sessions and signals here
 Test_The_Open_File_Limit_Is_What_Stops_An_Open: Windows has no open-file limit to lower
 Test_A_Taken_Signal_Is_Gone_And_A_Replaced_Disposition_Is_Said: this host records no window changes
-Test_A_Lock_Is_Not_Inherited: no /proc/self/fd to list a program's open files

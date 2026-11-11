@@ -25,4 +25,15 @@ package Hostkit.Errors is
    --    (EDQUOT on Windows) or no table.
    function Code_Of (Item : Cause) return Integer;
 
+   --  Put into errno why the host call that just failed failed, where the
+   --  host says so somewhere else. Windows' own API reports through
+   --  GetLastError and leaves errno alone, so a caller that reads errno to
+   --  tell a full disk from a refusal saw nothing; a Windows body calls this
+   --  straight after each failing call whose failure its caller reports,
+   --  before any other call can overwrite the last error. It reads the code
+   --  through Hostkit.Windows_Errors.Errno_Of, and leaves errno as it was
+   --  when the last error is zero. A POSIX call sets errno itself, so on
+   --  every other host this does nothing.
+   procedure Set_Errno_From_Last_Error;
+
 end Hostkit.Errors;

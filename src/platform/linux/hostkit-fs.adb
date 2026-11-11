@@ -1587,6 +1587,24 @@ package body Hostkit.Fs is
       return Result (1 .. Last);
    end Application_Data_Directories;
 
+   function Font_Directories return Path_List is
+      use Ada.Strings.Unbounded;
+      Home      : constant String := Home_Directory;
+      Data_Home : constant String :=
+        (if Ada.Environment_Variables.Exists ("XDG_DATA_HOME")
+         then Ada.Environment_Variables.Value ("XDG_DATA_HOME") else "");
+      User_Data : constant String :=
+        (if Data_Home /= "" and then Data_Home (Data_Home'First) = '/' then Data_Home
+         elsif Home /= "" then Home & "/.local/share"
+         else "");
+      function Place (Folder : String) return Path_List is
+        (if Folder = "" then [] else [1 => To_Unbounded_String (Folder)]);
+   begin
+      return Place ("/usr/share/fonts") & Place ("/usr/local/share/fonts")
+        & Place ((if User_Data = "" then "" else User_Data & "/fonts"))
+        & Place ((if Home = "" then "" else Home & "/.fonts"));
+   end Font_Directories;
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin

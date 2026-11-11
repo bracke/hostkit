@@ -288,9 +288,12 @@ package Hostkit.Process is
    --                     job; where neither can be made, the program alone.
    --                     On POSIX its standard input should then be a file:
    --                     a group not in the terminal's foreground cannot
-   --                     read it. On Linux the program is also killed when
-   --                     the caller dies, whatever kills it; elsewhere it
-   --                     runs on until it ends.
+   --                     read it. On Linux and Windows what the program
+   --                     left running ends when it ends, and the program
+   --                     is also killed when the caller dies, whatever
+   --                     kills it -- on Windows by a job that ends what is
+   --                     in it when its last handle closes; elsewhere they
+   --                     run on until they end.
    --  @param Clean_Wrapper With Whole_Group, start the shell that stands
    --                       for the group with no environment but PATH, the
    --                       program with what the shell gives it: for a
@@ -329,6 +332,29 @@ package Hostkit.Process is
    --  the quotes on the way and cmd then strips the ones it finds. ShellExecuteW takes
    --  the path itself, and nothing quotes or parses anything.
    function Open_Native (Path : String) return Boolean;
+
+   --  What became of Open_Native_Outcome.
+   type Open_Outcome is
+     (
+      --  The host started whatever opens Path.
+      Opened,
+
+      --  The host could not open it: nothing handles it, or the launch failed.
+      Open_Failed,
+
+      --  Windows only: the shell takes no path past 259 characters, and Path
+      --  has no short (8.3) form that fits -- short names are disabled on its
+      --  volume. Nothing was started; a caller says the path is too long
+      --  rather than that opening failed.
+      Open_Path_Too_Long);
+
+   --  Open_Native, saying why it did not open. On Windows a path the shell
+   --  cannot take goes by its short (8.3) form, to the command its type is
+   --  associated with where there is one, else to ShellExecuteW.
+   --
+   --  @param Path What to open.
+   --  @return Opened exactly when Open_Native would return True.
+   function Open_Native_Outcome (Path : String) return Open_Outcome;
 
    --  The command line that opens a file in this host's default application
    --  for it, for a caller that keeps opening as a command it can show and

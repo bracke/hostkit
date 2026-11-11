@@ -13,6 +13,8 @@ package body Hostkit_Test_Native is
 
    Generic_Read          : constant C_DWord := 16#8000_0000#;
    File_Share_Read       : constant C_DWord := 16#0000_0001#;
+   Generic_Write         : constant C_DWord := 16#4000_0000#;
+   Create_New            : constant C_DWord := 1;
    Open_Existing         : constant C_DWord := 3;
    File_Attribute_Normal : constant C_DWord := 16#0000_0080#;
    Attribute_Read_Only   : constant C_DWord := 16#0000_0001#;
@@ -34,6 +36,11 @@ package body Hostkit_Test_Native is
 
    function Close_Handle (Handle : System.Address) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "CloseHandle";
+
+   function Get_Handle_Information (Handle : System.Address; Flags : access C_DWord) return Interfaces.C.int
+     with Import, Convention => Stdcall, External_Name => "GetHandleInformation";
+
+   Handle_Flag_Inherit : constant C_DWord := 16#0000_0001#;
 
    function Get_File_Attributes_W (Path : System.Address) return C_DWord
      with Import, Convention => Stdcall, External_Name => "GetFileAttributesW";
@@ -72,5 +79,40 @@ package body Hostkit_Test_Native is
    begin
       return Attributes /= Invalid_Attributes and then (Attributes and Attribute_Read_Only) /= 0;
    end Is_Read_Only;
+
+   function Create_With_Units (Folder : String; Leaf : Wide_String) return Boolean is
+      use type Interfaces.C.int;
+      Base   : constant Wide_String := Hostkit.Windows_Paths.Native (Folder);
+      --  Native ends in a NUL; the leaf goes before it.
+      Name   : aliased constant Wide_String :=
+        Base (Base'First .. Base'Last - 1) & "\" & Leaf & Wide_Character'Val (0);
+      Handle : constant System.Address :=
+        Create_File_W
+          (Name'Address, Generic_Write, 0, System.Null_Address, Create_New, File_Attribute_Normal,
+           System.Null_Address);
+   begin
+      if Handle = Invalid_Handle or else Handle = System.Null_Address then
+         return False;
+      end if;
+      return Close_Handle (Handle) /= 0;
+   end Create_With_Units;
+
+   function Handle_Inheritance (Handle : Interfaces.Integer_64; Inheritable : out Boolean) return Boolean is
+      use type Interfaces.C.int;
+      use type Interfaces.Integer_64;
+      Flags : aliased C_DWord := 0;
+   begin
+      Inheritable := False;
+      if Handle < 0 then
+         return False;
+      end if;
+      if Get_Handle_Information
+           (System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address (Handle)), Flags'Access) = 0
+      then
+         return False;
+      end if;
+      Inheritable := (Flags and Handle_Flag_Inherit) /= 0;
+      return True;
+   end Handle_Inheritance;
 
 end Hostkit_Test_Native;

@@ -1,3 +1,5 @@
+with Hostkit.Errors;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces;
 with Interfaces.C;
@@ -79,6 +81,13 @@ package body Hostkit.Private_Paths is
      with Import, Convention => Stdcall, External_Name => "CreateDirectoryW";
    function Get_Last_Error return C_DWord
      with Import, Convention => Stdcall, External_Name => "GetLastError";
+
+   --  For an open that failed: its last error put into errno; always False.
+   function Refused return Boolean is
+   begin
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      return False;
+   end Refused;
    function Create_File_W
      (Name : System.Address; Access_Mode, Share : C_DWord;
       Security : System.Address; Disposition, Flags : C_DWord;
@@ -207,11 +216,16 @@ package body Hostkit.Private_Paths is
            and then Present /= 0;
       end if;
       if Ok then
-         Ok := Set_Security_Info
-           (Handle, Se_File_Object,
-            Dacl_Security_Information + Protected_Dacl_Information,
-            System.Null_Address, System.Null_Address, Dacl,
-            System.Null_Address) = 0;
+         declare
+            Status : constant C_DWord := Set_Security_Info
+              (Handle, Se_File_Object,
+               Dacl_Security_Information + Protected_Dacl_Information,
+               System.Null_Address, System.Null_Address, Dacl,
+               System.Null_Address);
+         begin
+            Ok := Status = 0;
+            Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         end;
       end if;
       if Descriptor /= System.Null_Address then
          Ignored := Local_Free (Descriptor);
@@ -254,6 +268,9 @@ package body Hostkit.Private_Paths is
       end if;
       Ok := Create_Directory_W (Name'Address, Attributes'Access) /= 0;
       Error := Get_Last_Error;
+      if not Ok then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+      end if;
       Ignored := Local_Free (Descriptor);
       if Ok then
          return Created;
@@ -283,7 +300,8 @@ package body Hostkit.Private_Paths is
             File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point,
             System.Null_Address);
          Info : aliased By_Handle_File_Information;
-         Ok : constant Boolean := Handle /= Invalid_Handle
+         Opened : constant Boolean := Handle /= Invalid_Handle or else Refused;
+         Ok : constant Boolean := Opened
            and then Get_File_Information (Handle, Info'Access) /= 0
            and then (Info.Attributes and File_Attribute_Directory) /= 0
            and then (Info.Attributes and File_Attribute_Reparse_Point) = 0

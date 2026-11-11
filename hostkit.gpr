@@ -38,13 +38,16 @@ project Hostkit is
    package Linker is
       case Hostkit_Config.Alire_Host_OS is
          when "windows" =>
-            --  ShellExecuteW and SHFileOperationW live in shell32, and RtlGetVersion
-            --  in ntdll -- which mingw does not link by default, so asking Windows
-            --  its own version failed at the link with nothing else wrong. A consumer
-            --  inherits both, so nobody has to know that asking Hostkit to open
-            --  something, to trash it, or to say which Windows this is drags in a
-            --  Windows library.
-            for Linker_Options use ("-lshell32", "-lntdll", "-lwinmm");
+            --  ShellExecuteW and SHCreateItemFromParsingName live in shell32, and
+            --  RtlGetVersion in ntdll -- which mingw does not link by default, so
+            --  asking Windows its own version failed at the link with nothing else
+            --  wrong. The Recycle Bin also needs COM (ole32: CoCreateInstance for
+            --  IFileOperation), the user's SID (advapi32: OpenProcessToken,
+            --  ConvertSidToStringSidW), and opening a long path needs shlwapi
+            --  (AssocQueryStringW). A consumer inherits them all, so nobody has to
+            --  know that asking Hostkit to open something, to trash it, or to say
+            --  which Windows this is drags in a Windows library.
+            for Linker_Options use ("-lshell32", "-lntdll", "-lwinmm", "-lole32", "-ladvapi32", "-lshlwapi");
          when "macos" =>
             --  Foundation and the Objective-C runtime for the trash (NSFileManager,
             --  through objc_msgSend), CoreFoundation for the host locale

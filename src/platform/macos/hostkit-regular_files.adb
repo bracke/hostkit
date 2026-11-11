@@ -67,9 +67,11 @@ package body Hostkit.Regular_Files is
 
    --  O_EXCL refuses whatever is at Path and follows no link there.
    function Create_New
-     (Path : String;
-      Mode : Natural := 8#644#) return GNAT.OS_Lib.File_Descriptor
+     (Path      : String;
+      Mode      : Natural := 8#644#;
+      Encrypted : Boolean := False) return GNAT.OS_Lib.File_Descriptor
    is
+      pragma Unreferenced (Encrypted);
       Name   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
       Result : C_Int;
    begin

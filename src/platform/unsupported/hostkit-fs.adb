@@ -274,6 +274,8 @@ package body Hostkit.Fs is
 
    function Application_Data_Directories return Path_List is ([]);
 
+   function Font_Directories return Path_List is ([]);
+
    function Application_Data_Directory return String is
    begin
       return "";

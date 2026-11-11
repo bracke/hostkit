@@ -1,3 +1,5 @@
+with Hostkit.Locks.Testing;
+with Hostkit_Test_Native;
 separate (Hostkit_Shell_Cases)
 procedure Test_A_Lock_Is_Not_Inherited
   (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -13,6 +15,25 @@ is
    File    : Ada.Text_IO.File_Type;
    Found   : Boolean := False;
 begin
+   --  Windows lists no program's open files; the handle's own inherit flag
+   --  is what a program started meanwhile would go by.
+   if Hostkit.Host."=" (Hostkit.Host.Current, Hostkit.Host.Windows) then
+      declare
+         Inheritable : Boolean;
+      begin
+         Assert
+           (Hostkit.Locks.Acquire (Path, Hostkit.Locks.Lock_Exclusive, False, Held) = Hostkit.Locks.Lock_Ok,
+            "the local disk carries locks");
+         Assert
+           (Hostkit_Test_Native.Handle_Inheritance (Hostkit.Locks.Testing.Host_Handle (Held), Inheritable),
+            "the lock's handle can be asked about");
+         Hostkit.Locks.Release (Held);
+         Ada.Directories.Delete_File (Path);
+         Assert (not Inheritable, "a program started while a lock was held would get the lock's file");
+      end;
+      return;
+   end if;
+
    --  Where a program's open files cannot be listed, there is nothing to see.
    if not Ada.Directories.Exists ("/proc/self/fd") or else not Ada.Directories.Exists ("/bin/sh") then
       Skip ("Test_A_Lock_Is_Not_Inherited", "no /proc/self/fd to list a program's open files");

@@ -1,5 +1,5 @@
-with Ada.Strings.UTF_Encoding;
-with Ada.Strings.UTF_Encoding.Conversions;
+with Hostkit.Windows_Paths;
+
 with Interfaces.C;
 with System;
 
@@ -26,11 +26,11 @@ package body Hostkit.Environment is
      with Import, Convention => C, External_Name => "_wputenv";
 
    function Wide_Of (Text : String) return Wide_String is
-     (Ada.Strings.UTF_Encoding.Conversions.Convert (Text) & Wide_Character'Val (0));
+     (Hostkit.Windows_Paths.From_UTF_8 (Text) & Wide_Character'Val (0));
 
    function Value (Name : String; Found : out Boolean) return String is
       Wide_Name : aliased constant Wide_String :=
-        Ada.Strings.UTF_Encoding.Conversions.Convert (Name) & Wide_Character'Val (0);
+        Hostkit.Windows_Paths.From_UTF_8 (Name) & Wide_Character'Val (0);
       Probe     : aliased Wide_String (1 .. 1);
       Needed    : Interfaces.C.unsigned_long;
    begin
@@ -53,8 +53,7 @@ package body Hostkit.Environment is
             return "";
          end if;
          Found := True;
-         return Ada.Strings.UTF_Encoding.Conversions.Convert
-           (Buffer (1 .. Natural (Length)), Output_Scheme => Ada.Strings.UTF_Encoding.UTF_8);
+         return Hostkit.Windows_Paths.To_UTF_8 (Buffer (1 .. Natural (Length)));
       end;
    exception
       when others =>

@@ -1,7 +1,8 @@
 with Ada.Strings.Unbounded;
-with Ada.Strings.UTF_Encoding.Conversions;
 
+with Hostkit.Shell_Paths;
 with Hostkit.Windows_Command_Line;
+with Hostkit.Windows_Paths;
 
 with Interfaces.C;
 
@@ -191,7 +192,7 @@ package body Hostkit.Spawn is
      with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String
-   is (Ada.Strings.UTF_Encoding.Conversions.Convert (Value) & Wide_Character'Val (0));
+   is (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
 
    function To_Handle (Item : Hostkit.Descriptors.Descriptor) return System.Address
    is (System.Storage_Elements.To_Address
@@ -289,8 +290,14 @@ package body Hostkit.Spawn is
       --  CreateProcessW is documented to be able to write to this buffer, so it
       --  has to be a variable of ours rather than a constant.
       Wide_Command : aliased Wide_String := Wide (Command);
-      Wide_Dir     : aliased Wide_String :=
-        Wide (To_String (With_Options.Working_Directory));
+      --  CreateProcessW takes no \\?\ form and no directory past 258
+      --  characters: a longer one goes by its short (8.3) name.
+      Dir_Usable        : Boolean;
+      Ignored_Shortened : Boolean;
+      Wide_Dir          : aliased constant Wide_String :=
+        Hostkit.Shell_Paths.For_Shell
+          (To_String (With_Options.Working_Directory), Hostkit.Shell_Paths.Directory_Limit,
+           Dir_Usable, Ignored_Shortened);
 
       Startup     : aliased Startup_Info;
       Information : aliased Process_Information;
@@ -307,6 +314,14 @@ package body Hostkit.Spawn is
       --  terminal on one host and not on another is the difference this crate
       --  exists to make visible.
       if With_Options.Controlling_Terminal /= Hostkit.Descriptors.Invalid then
+         return Spawn_Failed;
+      end if;
+
+      --  A working directory with no form CreateProcessW takes -- past 258
+      --  characters on a volume with short names disabled -- is the "working
+      --  directory that does not exist" of Spawn_Failed: refused, rather than
+      --  started somewhere else.
+      if With_Options.Working_Directory /= Null_Unbounded_String and then not Dir_Usable then
          return Spawn_Failed;
       end if;
 
@@ -369,7 +384,7 @@ package body Hostkit.Spawn is
       declare
          Wide_Environment : aliased Wide_String :=
            (if Use_Environment
-            then Ada.Strings.UTF_Encoding.Conversions.Convert
+            then Hostkit.Windows_Paths.From_UTF_8
                    (To_String (Environment_Block))
             else "" & Wide_Character'Val (0));
 

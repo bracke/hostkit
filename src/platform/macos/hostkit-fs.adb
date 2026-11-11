@@ -1565,6 +1565,16 @@ package body Hostkit.Fs is
    --  macOS keeps no freedesktop application entries.
    function Application_Data_Directories return Path_List is ([]);
 
+   function Font_Directories return Path_List is
+      use Ada.Strings.Unbounded;
+      Home : constant String := Home_Directory;
+      function Place (Folder : String) return Path_List is
+        (if Folder = "" then [] else [1 => To_Unbounded_String (Folder)]);
+   begin
+      return Place ("/System/Library/Fonts") & Place ("/Library/Fonts")
+        & Place ((if Home = "" then "" else Home & "/Library/Fonts"));
+   end Font_Directories;
+
    function Application_Data_Directory return String is
       Home : constant String := Home_Directory;
    begin

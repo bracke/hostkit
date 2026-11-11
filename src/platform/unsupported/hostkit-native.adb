@@ -129,10 +129,10 @@ package body Hostkit.Native is
       return False;
    end User_Group_Ids;
 
-   function Open_Native (Path : String) return Boolean is
+   function Open_Native (Path : String) return Hostkit.Process.Open_Outcome is
       pragma Unreferenced (Path);
    begin
-      return False;
+      return Hostkit.Process.Open_Failed;
    end Open_Native;
 
 end Hostkit.Native;

@@ -12,4 +12,7 @@ package body Hostkit.Errors is
          when Text_Busy            => 26,
          when Name_Too_Long        => 63);
 
+   --  POSIX calls set errno themselves.
+   procedure Set_Errno_From_Last_Error is null;
+
 end Hostkit.Errors;

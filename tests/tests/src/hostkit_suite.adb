@@ -41,6 +41,7 @@ with Hostkit.Shell;
 with Hostkit.Trash;
 with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Hostkit.Command_Line;
 
@@ -68,6 +69,27 @@ package body Hostkit_Suite is
       when others =>
          return Name;
    end Companion;
+
+   --  Windows: PowerShell stands for the shell. It starts the sleeper
+   --  companion hanging, records its process id, then runs Then_Run -- so the
+   --  sleeper is what the group's leader started, in the leader's job.
+   function Windows_Leader (Pid_Path : String; Then_Run : String) return Hostkit.String_Vectors.Vector is
+      Arguments : Hostkit.String_Vectors.Vector;
+   begin
+      Arguments.Append (To_Unbounded_String ("-NoProfile"));
+      Arguments.Append (To_Unbounded_String ("-NonInteractive"));
+      Arguments.Append (To_Unbounded_String ("-Command"));
+      Arguments.Append
+        (To_Unbounded_String
+           ("$p = Start-Process -FilePath '" & Companion ("sleeper") & "' -ArgumentList '--hang'"
+            & " -NoNewWindow -PassThru; Set-Content -LiteralPath '" & Pid_Path & "' -Value $p.Id -NoNewline; "
+            & Then_Run));
+      return Arguments;
+   end Windows_Leader;
+
+   --  Windows PowerShell, where Windows is.
+   function Power_Shell return String is
+     (Hostkit.Environment.Value ("SystemRoot", "C:\Windows") & "\System32\WindowsPowerShell\v1.0\powershell.exe");
 
    --  Somewhere to put captured output. The host's own temporary directory, because /tmp
    --  is not a place Windows has.
@@ -228,6 +250,18 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A Windows name that is not well-formed UTF-16 reads as WTF-8 and goes
+   --  back as the same units; a name that is UTF-8 converts as it always did.
+   procedure Test_Windows_Names_Round_Trip_As_WTF_8
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A Windows system error code is read as the errno a caller asks about,
+   --  and a refused create says why through errno on every host.
+   procedure Test_Windows_Errors_Read_As_Errno
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Delete_Empty_Directory
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -299,6 +333,11 @@ package body Hostkit_Suite is
    --  environment: the whole list, path and kind, and the other hosts'
    --  variables left unread.
    procedure Test_User_Places_Follow_The_Environment
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The font folders each host keeps: the system's, then the user's own.
+   procedure Test_Font_Directories_Are_The_Hosts
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -464,6 +503,14 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   procedure Test_A_Recycle_Bin_Record_Round_Trips
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   procedure Test_The_Recycle_Bin_Says_Where_An_Item_Went
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_The_Host_Locale_Is_Asked_Of_The_Host
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -505,6 +552,13 @@ package body Hostkit_Suite is
    is separate;
 
    procedure Test_Metadata_Update_Is_Bound_To_The_Held_Entry
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A permission edit changes only what its bits concern: on Windows the
+   --  entry keeps what it inherits, and the access record it reports puts
+   --  the DACL back exactly.
+   procedure Test_A_Permission_Edit_Keeps_Inherited_Access
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -658,6 +712,12 @@ package body Hostkit_Suite is
         (T, Test_Windows_Long_Path_Form'Access,
          "process : a long Windows path is given the \\?\ form only when that keeps its meaning");
       Register_Routine
+        (T, Test_Windows_Names_Round_Trip_As_WTF_8'Access,
+         "process : a Windows name with a lone surrogate reads as WTF-8 and goes back unchanged");
+      Register_Routine
+        (T, Test_Windows_Errors_Read_As_Errno'Access,
+         "errors : a Windows error code is read as errno, and a refused create says why");
+      Register_Routine
         (T, Test_Delete_Empty_Directory'Access,
          "fs : only an empty directory is deleted, and a refusal is an answer");
       Register_Routine
@@ -696,6 +756,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_User_Places_Follow_The_Environment'Access,
          "fs : the user places are the host's own, read from its environment");
+      Register_Routine
+        (T, Test_Font_Directories_Are_The_Hosts'Access,
+         "fs : the font folders are the host's own, the system's before the user's");
       Register_Routine
         (T, Test_Volume_Places_Are_The_Hosts'Access,
          "mounts : the volume places are the host's folders, or its drives' roots");
@@ -809,6 +872,12 @@ package body Hostkit_Suite is
         (T, Test_The_Host_Answers_For_Its_Own_Trash'Access,
          "trash : a host with no trash of its own declines and leaves the file alone");
       Register_Routine
+        (T, Test_A_Recycle_Bin_Record_Round_Trips'Access,
+         "trash : a recycle bin $I record encodes and decodes, versions 1 and 2");
+      Register_Routine
+        (T, Test_The_Recycle_Bin_Says_Where_An_Item_Went'Access,
+         "trash : the recycle bin says where an item went, restores it and purges it, past MAX_PATH too");
+      Register_Routine
         (T, Test_The_Host_Locale_Is_Asked_Of_The_Host'Access,
          "host : the locale is asked of the host, and declined where there is none");
       Register_Routine
@@ -830,6 +899,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Metadata_Update_Is_Bound_To_The_Held_Entry'Access,
          "metadata : updates stay bound to the held entry and report its old value");
+      Register_Routine
+        (T, Test_A_Permission_Edit_Keeps_Inherited_Access'Access,
+         "metadata : a permission edit keeps inherited access, and its record puts the old one back");
       Register_Routine
         (T, Test_Lease_File_Pins_Locks_And_Transfers_Bytes'Access,
          "lease files : secure held identities combine locking and durable bytes");

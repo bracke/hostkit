@@ -10,19 +10,34 @@ procedure Test_Group_Ends_With_Leader (T : in out AUnit.Test_Cases.Test_Case'Cla
    Child     : Integer := 0;
    Gone      : Boolean := False;
 begin
-   if Hostkit.Host.Current /= Hostkit.Host.Linux then
-      Skip ("Test_Group_Ends_With_Leader", "a group ending with its leader is checked on Linux");
-      return;
+   if Ada.Directories.Exists (Pid_Path) then
+      Ada.Directories.Delete_File (Pid_Path);
    end if;
-   Arguments.Append (To_Unbounded_String ("-c"));
-   Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; exit 0"));
-   Outcome :=
-     Hostkit.Process.Run_Captured
-       (Program     => "/bin/sh",
-        Arguments   => Arguments,
-        Stdin_Path  => "/dev/null",
-        Timeout_Ms  => 10_000,
-        Whole_Group => True);
+   if Hostkit.Host.Current = Hostkit.Host.Windows then
+      --  The leader exits and its job is closed: a job that ends what is
+      --  in it on its last close takes the hanging sleeper with it.
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program     => Power_Shell,
+           Arguments   => Windows_Leader (Pid_Path, "exit 0"),
+           Stdin_Path  => Hostkit.Fs.Null_Device,
+           Stdout_Path => Ada.Directories.Compose (Scratch, "group-left.out"),
+           Timeout_Ms  => 60_000,
+           Whole_Group => True);
+   elsif Hostkit.Host.Current /= Hostkit.Host.Linux then
+      Skip ("Test_Group_Ends_With_Leader", "a group ending with its leader is checked on Linux and Windows");
+      return;
+   else
+      Arguments.Append (To_Unbounded_String ("-c"));
+      Arguments.Append (To_Unbounded_String ("sleep 30 & echo $! > " & Pid_Path & "; exit 0"));
+      Outcome :=
+        Hostkit.Process.Run_Captured
+          (Program     => "/bin/sh",
+           Arguments   => Arguments,
+           Stdin_Path  => "/dev/null",
+           Timeout_Ms  => 10_000,
+           Whole_Group => True);
+   end if;
    Assert (Outcome.Started and then not Outcome.Timed_Out and then Outcome.Exit_Status = 0,
            "the shell did not end on its own");
    Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Pid_Path);

@@ -1,3 +1,4 @@
+with Hostkit.Errors;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
@@ -197,7 +198,9 @@ package body Hostkit.Lease_Files is
       end if;
       if Lock_File_Ex (Handle, Flags, 0, 1, 0, Region'Access) /= 0 then
          return Opened;
-      elsif Get_Last_Error in Error_Sharing | Error_Lock then
+      end if;
+      Hostkit.Errors.Set_Errno_From_Last_Error;
+      if Get_Last_Error in Error_Sharing | Error_Lock then
          return Busy;
       else
          return Error;
@@ -223,6 +226,7 @@ package body Hostkit.Lease_Files is
          Open_Reparse_Point + (if New_File then Hidden else 0), System.Null_Address);
       if Handle = Invalid_Handle then
          Code := Get_Last_Error;
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          if not New_File and then Code in Error_Not_Found | Error_Path_Not_Found | Error_Invalid_Name then
             return Refused;
          elsif Code in Error_Sharing | Error_Lock then
@@ -301,7 +305,11 @@ package body Hostkit.Lease_Files is
            (To_Handle (Item), Data (Data'First + Position)'Address,
             C_DWord (Ada.Streams.Stream_Element_Offset (Data'Length) - Position),
             Count'Access, System.Null_Address) = 0
-           or else Count = 0
+         then
+            --  A full disk is said as such.
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+            return False;
+         elsif Count = 0
            or else Count >
              C_DWord (Ada.Streams.Stream_Element_Offset (Data'Length) - Position)
          then
@@ -309,7 +317,11 @@ package body Hostkit.Lease_Files is
          end if;
          Position := Position + Ada.Streams.Stream_Element_Offset (Count);
       end loop;
-      return Flush_File_Buffers (To_Handle (Item)) /= 0;
+      if Flush_File_Buffers (To_Handle (Item)) = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      return True;
    exception
       when others => return False;
    end Write_At;

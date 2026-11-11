@@ -1,9 +1,11 @@
+with Hostkit_Test_Native;
 separate (Hostkit_Suite)
 procedure Test_Directory_Listing
   (T : in out AUnit.Test_Cases.Test_Case'Class)
 is
    pragma Unreferenced (T);
    use type Hostkit.Directory_Listing.Entry_Kind;
+   use type Hostkit.Fs.Entry_Kind;
    Root    : constant String := Ada.Directories.Compose (Scratch, "hk-listing");
    Link    : constant String := Ada.Directories.Compose (Root, "link");
    Entries : Hostkit.Directory_Listing.Entry_Vectors.Vector;
@@ -41,6 +43,29 @@ begin
          Links_Refused ("Directory_Listing, a link entry");
       end if;
    end;
+   --  Windows: a name NTFS keeps that is not well-formed UTF-16, a lone
+   --  surrogate in it, lists -- as WTF-8 -- rather than failing the folder,
+   --  and the listed name opens the same file again.
+   if Hostkit.Host.Current = Hostkit.Host.Windows then
+      declare
+         Lone   : constant String :=
+           "lone" & Character'Val (16#ED#) & Character'Val (16#A0#) & Character'Val (16#80#) & ".txt";
+         Listed : Boolean := False;
+      begin
+         Assert
+           (Hostkit_Test_Native.Create_With_Units (Root, "lone" & Wide_Character'Val (16#D800#) & ".txt"),
+            "a name with a lone surrogate is created");
+         Assert (Hostkit.Directory_Listing.List (Root, Entries), "a folder holding it is still listed");
+         for Item of Entries loop
+            Listed := Listed or else Item.Name = Lone;
+         end loop;
+         Assert (Listed, "the name lists as WTF-8, the surrogate as its three bytes");
+         Assert
+           (Hostkit.Fs.Kind_Of (Root & "\" & Lone) = Hostkit.Fs.Ordinary_File_Entry,
+            "and the listed name finds the file again");
+         Assert (Hostkit.Fs.Delete_File (Root & "\" & Lone), "and deletes it");
+      end;
+   end if;
    Assert
      (not Hostkit.Directory_Listing.List (Ada.Directories.Compose (Root, "missing"), Entries),
       "a missing directory is not listed");
