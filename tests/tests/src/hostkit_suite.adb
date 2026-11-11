@@ -244,6 +244,18 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Roots, leaves and parents read from text alone, for the drive, share
+   --  and long forms and for components past GNAT's Windows limit.
+   procedure Test_Path_Text_Roots_Leaves_And_Parents
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  An entry's kind past Windows' 260-character limit and GNAT's
+   --  256-character name, reached by renaming short names to long ones.
+   procedure Test_Kind_Of_A_Long_Path
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Has_Window_Server
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -623,6 +635,12 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Path_Text'Access,
          "fs : path text splits Windows and POSIX paths and finds a share's root on any host");
+      Register_Routine
+        (T, Test_Path_Text_Roots_Leaves_And_Parents'Access,
+         "fs : path text finds a root, a leaf and a parent for drive, share and long paths on any host");
+      Register_Routine
+        (T, Test_Kind_Of_A_Long_Path'Access,
+         "fs : an entry's kind is read past the Windows path limit");
       Register_Routine
         (T, Test_Has_Window_Server'Access,
          "host : a window server is an X or Wayland display on Linux, always there elsewhere");

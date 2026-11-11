@@ -17,6 +17,15 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- `Path_Text.Root_Length`, `Path_Text.Leaf` and `Path_Text.Parent`: a path's
+  root, last component and parent read from its text alone, with Windows and
+  POSIX semantics on every host -- drives, `\\server\share`, the `\\?\` and
+  `\\?\UNC\` forms -- and no limit on a component's length, where GNAT's
+  Windows `Ada.Directories` refuses one past 256 characters and reads
+  `\\server\share` as a folder of `\\server`.
+- `Fs.Kind_Of (Path)`: what a path names, as `Ada.Directories.Kind` says it,
+  asked on Windows through the `\\?\` form so a path past 260 characters
+  still answers.
 - `Fs.Folds_Name_Case (Directory)`: whether a volume takes names differing
   only in case for one file -- Windows yes, macOS asks the volume
   (`pathconf _PC_CASE_SENSITIVE`), Linux yes for a DOS-family volume.

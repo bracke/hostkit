@@ -23,6 +23,19 @@ package Hostkit.Fs is
    --  Linux has only the dot, so it answers False without asking.
    function Is_Hidden (Path : String) return Boolean;
 
+   --  What an entry is, as Ada.Directories.Kind reads it on this host.
+   type Entry_Kind is (Missing_Entry, Directory_Entry, Ordinary_File_Entry, Special_File_Entry);
+
+   --  What Path names, as Ada.Directories.Kind says it, without its limits:
+   --  GNAT's Windows runtime cannot ask about a path past 260 characters or
+   --  a name past 256, where this asks with the \\?\ form. Windows reads a
+   --  link as itself, as GNAT does there; POSIX follows it.
+   --
+   --  @param Path Path to look at.
+   --  @return Its kind, or Missing_Entry when Path names nothing, is empty,
+   --    or cannot be asked about.
+   function Kind_Of (Path : String) return Entry_Kind;
+
    --  Create a symbolic link at Link_Path pointing at Target.
    --
    --  False when the host will not: Windows needs Developer Mode or a privilege, and

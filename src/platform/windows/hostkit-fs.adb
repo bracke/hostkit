@@ -85,6 +85,22 @@ package body Hostkit.Fs is
          return False;
    end Is_Hidden;
 
+   --  GetFileAttributesW through the long form, which GNAT's own stat lacks.
+   function Kind_Of (Path : String) return Entry_Kind is
+      Wide_Path  : aliased Wide_String := Wide (Path);
+      Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+   begin
+      if Path = "" or else Attributes = Invalid_File_Attributes then
+         return Missing_Entry;
+      elsif (Attributes and File_Attribute_Directory) /= 0 then
+         return Directory_Entry;
+      end if;
+      return Ordinary_File_Entry;
+   exception
+      when others =>
+         return Missing_Entry;
+   end Kind_Of;
+
    --  Only the symbolic-link and junction tags are links: OneDrive
    --  placeholders, deduplicated files and app-execution aliases are reparse
    --  points too, but ordinary files and folders to the user.
