@@ -331,9 +331,13 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
                      C_DWord (Disposition_Info'Size / 8)) /= 0;
                   if not Ok then
                      Error := Get_Last_Error;
-                     if not Set_Attributes (Held, Info.Attributes) then
+                     declare
+                        --  Best effort: the deletion's error is the one reported.
+                        Restored : constant Boolean := Set_Attributes (Held, Info.Attributes);
+                        pragma Unreferenced (Restored);
+                     begin
                         null;
-                     end if;
+                     end;
                   end if;
                end if;
                if not Ok then
