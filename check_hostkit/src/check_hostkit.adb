@@ -384,6 +384,7 @@ begin
      ("src/platform/windows/hostkit-metadata.adb", "ConvertStringSecurityDescriptorToSecurityDescriptorW");
    Require_Binding ("src/platform/windows/hostkit-metadata.adb", "EqualSid");
    Require_Binding ("src/platform/windows/hostkit-metadata_copy.adb", "GetVolumeInformationByHandleW");
+   Require_Binding ("src/platform/windows/hostkit-private_paths.adb", "GetVolumeInformationByHandleW");
    Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
    Require_Text
      ("src/platform/macos/hostkit-trash.adb",

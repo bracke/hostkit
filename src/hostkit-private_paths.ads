@@ -1,5 +1,11 @@
 --  Owner-only files and directories, including the host ACL work that chmod
 --  alone does not express.
+--
+--  A FAT or exFAT volume (a USB stick, a memory card) keeps no owner and no
+--  access of its own: its modes come from how it is mounted, and on Windows
+--  it has no access control lists (Linux ignores a chmod there). There is
+--  nothing to restrict on one, and each call below succeeds with what the
+--  volume gives.
 package Hostkit.Private_Paths is
 
    type Create_Outcome is

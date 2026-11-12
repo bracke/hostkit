@@ -145,17 +145,44 @@ package body Hostkit.Private_Paths is
           External_Name => "GetFinalPathNameByHandleW";
    function Osfhandle (Descriptor : C_Int) return System.Address
      with Import, Convention => C, External_Name => "_get_osfhandle";
+   function Get_Volume_Information_By_Handle_W
+     (Handle : System.Address; Volume_Name : System.Address; Volume_Name_Size : C_DWord;
+      Serial, Max_Component, Flags : access C_DWord;
+      File_System_Name : System.Address; File_System_Name_Size : C_DWord) return C_Int
+     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
 
+   --  Whether the volume Handle is on keeps access control lists: NTFS and
+   --  ReFS do; FAT and exFAT -- a USB stick, a memory card -- keep none, and
+   --  every entry there is open to whoever can reach the volume. When the
+   --  volume will not say, it is taken to keep them.
+   function Keeps_Access_Control (Handle : System.Address) return Boolean is
+      File_Persistent_Acls : constant C_DWord := 16#0000_0008#;
+      Serial, Max_Component, Flags : aliased C_DWord := 0;
+   begin
+      return Get_Volume_Information_By_Handle_W
+          (Handle, System.Null_Address, 0, Serial'Access, Max_Component'Access, Flags'Access,
+           System.Null_Address, 0) = 0
+        or else (Flags and File_Persistent_Acls) /= 0;
+   end Keeps_Access_Control;
+
+   --  Whether Left and Right are one entry: by the 128-bit file ID, or on a
+   --  volume that has none (FAT, exFAT) by volume serial and file index.
    function Same_File (Left, Right : System.Address) return Boolean is
       Left_Id, Right_Id : aliased File_Id_Info;
+      Left_Info, Right_Info : aliased By_Handle_File_Information;
    begin
-      return Get_File_Information_Ex
-        (Left, File_Id_Info_Class, Left_Id'Address,
-         C_DWord (File_Id_Info'Size / 8)) /= 0
+      if Get_File_Information_Ex
+          (Left, File_Id_Info_Class, Left_Id'Address, C_DWord (File_Id_Info'Size / 8)) /= 0
         and then Get_File_Information_Ex
-          (Right, File_Id_Info_Class, Right_Id'Address,
-           C_DWord (File_Id_Info'Size / 8)) /= 0
-        and then Left_Id = Right_Id;
+          (Right, File_Id_Info_Class, Right_Id'Address, C_DWord (File_Id_Info'Size / 8)) /= 0
+      then
+         return Left_Id = Right_Id;
+      end if;
+      return Get_File_Information (Left, Left_Info'Access) /= 0
+        and then Get_File_Information (Right, Right_Info'Access) /= 0
+        and then Left_Info.Volume_Serial = Right_Info.Volume_Serial
+        and then Left_Info.File_Index_High = Right_Info.File_Index_High
+        and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
    end Same_File;
 
    function Owned_By_Current_Token (Handle : System.Address) return Boolean is
@@ -200,16 +227,24 @@ package body Hostkit.Private_Paths is
          return False;
    end Owned_By_Current_Token;
 
+   --  Make the entry open as Handle its owner's alone. On a volume that
+   --  keeps no access control there is nothing to restrict and no owner to
+   --  check: it is as private as that volume lets anything be, as a POSIX
+   --  host's vfat mount gives every file the mode its mount options say.
    function Set_Private (Handle : System.Address) return Boolean is
       Text : aliased Wide_String := Wide ("D:P(A;OICI;FA;;;OW)");
       Descriptor, Dacl : aliased System.Address := System.Null_Address;
       Present, Defaulted : aliased C_Int := 0;
-      Ok : Boolean := Owned_By_Current_Token (Handle)
+      Ok : Boolean;
+      Ignored : System.Address;
+   begin
+      if not Keeps_Access_Control (Handle) then
+         return True;
+      end if;
+      Ok := Owned_By_Current_Token (Handle)
         and then Convert_Sddl
           (Text'Address, Sddl_Revision_1, Descriptor'Access,
            System.Null_Address) /= 0;
-      Ignored : System.Address;
-   begin
       if Ok then
          Ok := Get_Descriptor_Dacl
            (Descriptor, Present'Access, Dacl'Access, Defaulted'Access) /= 0
