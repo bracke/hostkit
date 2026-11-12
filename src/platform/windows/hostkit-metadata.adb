@@ -651,8 +651,14 @@ package body Hostkit.Metadata is
 
    function Triplet_To_Rights (Triplet : Natural) return C_DWord;
 
+   --  Whatever the bits, the rights a POSIX stat needs none for: reading
+   --  the attributes and the permissions, and synchronising. Without them
+   --  a mode-0 entry could not even be looked at -- and so not renamed or
+   --  deleted, which its folder allows -- for NTFS grants FILE_READ_ATTRIBUTES
+   --  by no folder right.
    function Triplet_To_Rights (Triplet : Natural) return C_DWord is
-      Result : C_DWord := 0;
+      Synchronize : constant C_DWord := 16#0010_0000#;
+      Result      : C_DWord := File_Read_Attributes or Read_Control or Synchronize;
    begin
       if (Triplet / 4) mod 2 = 1 then
          Result := Result or File_Generic_Read;
@@ -976,9 +982,23 @@ package body Hostkit.Metadata is
       Aces : System.Address; Size : C_DWord) return C_Int
      with Import, Convention => Stdcall, External_Name => "AddAce";
 
+   --  The rights Acl grants Sid, read the way the access check reads it --
+   --  ACE by ACE, a right decided by the first allow or deny that names it --
+   --  where an ACE names Sid, Everyone (S-1-1-0) or Member_Of. For the
+   --  owner, Member_Of is the primary group, and Authenticated Users and
+   --  BUILTIN\Users count too: the groups an account it is signed in as is
+   --  in. Body below, by Specific_Rights.
+   function Evaluated_Rights (Acl, Sid, Everyone, Member_Of : System.Address) return C_DWord;
+
    --  The rwx triplet Acl grants Sid, as File_Permission_Bits reads one; 0
-   --  where there is no ACL to read or the host will not say.
-   function Triplet_Of (Acl : System.Address; Sid : System.Address) return Natural is
+   --  where there is no ACL to read. GetEffectiveRightsFromAcl answers it,
+   --  and where it will not -- it fails outright when an ACE names a group
+   --  whose members it cannot look up, as a deny for the primary group "None"
+   --  on a machine outside a domain -- Evaluated_Rights does.
+   function Triplet_Of
+     (Acl, Sid, Everyone : System.Address;
+      Member_Of          : System.Address := System.Null_Address) return Natural
+   is
       Trustee : aliased Trustee_Record;
       Rights  : aliased C_DWord := 0;
    begin
@@ -989,7 +1009,7 @@ package body Hostkit.Metadata is
       Trustee.Form := Trustee_Is_Sid;
       Trustee.Kind := Trustee_Is_Unknown;
       if Get_Effective_Rights_From_Acl (Acl, Trustee'Access, Rights'Access) /= Success then
-         return 0;
+         Rights := Evaluated_Rights (Acl, Sid, Everyone, Member_Of);
       end if;
       return Rights_To_Triplet (Rights);
    end Triplet_Of;
@@ -1004,9 +1024,9 @@ package body Hostkit.Metadata is
    function Mode_Of
      (Dacl, Owner, Group, Everyone : System.Address;
       Runnable : Boolean) return Natural is
-     (Shown (Triplet_Of (Dacl, Owner), Runnable) * 64
-      + Shown (Triplet_Of (Dacl, Group), Runnable) * 8
-      + Shown (Triplet_Of (Dacl, Everyone), Runnable));
+     (Shown (Triplet_Of (Dacl, Owner, Everyone, Group), Runnable) * 64
+      + Shown (Triplet_Of (Dacl, Group, Everyone), Runnable) * 8
+      + Shown (Triplet_Of (Dacl, Everyone, Everyone), Runnable));
 
    --  The bits of triplet Left that triplet Right lacks.
    function Without (Left, Right : Natural) return Natural is
@@ -1090,7 +1110,9 @@ package body Hostkit.Metadata is
       end if;
       declare
          Left : constant Natural :=
-           Without (Shown (Triplet_Of (Replaced, Owner), Runnable), Shown ((New_Mode / 64) mod 8, Runnable));
+           Without
+             (Shown (Triplet_Of (Replaced, Owner, Everyone, Group), Runnable),
+              Shown ((New_Mode / 64) mod 8, Runnable));
       begin
          if Left = 0 or else Owner = System.Null_Address then
             Result := Replaced;
@@ -1164,6 +1186,69 @@ package body Hostkit.Metadata is
       or (if (Mask and Generic_Write_Access) /= 0 then File_Generic_Write else 0)
       or (if (Mask and Generic_Execute_Access) /= 0 then File_Generic_Execute else 0)
       or (if (Mask and Generic_All_Access) /= 0 then File_All_Access else 0));
+
+   function Evaluated_Rights (Acl, Sid, Everyone, Member_Of : System.Address) return C_DWord is
+      Header      : constant Acl_Header with Import, Address => Acl;
+      Granted     : C_DWord := 0;
+      Denied      : C_DWord := 0;
+      Signed_In   : constant Boolean := Member_Of /= System.Null_Address;
+      Kinds       : constant array (1 .. 2) of C_Int := [Win_Authenticated_User_Sid, Win_Builtin_Users_Sid];
+      Groups      : array (Kinds'Range) of aliased Sid_Buffer := [others => [others => Interfaces.C.nul]];
+      Known       : array (Kinds'Range) of Boolean := [others => False];
+
+      function Applies (Ace_Sid : System.Address) return Boolean is
+      begin
+         if Equal_Sid (Ace_Sid, Sid) /= 0
+           or else (Everyone /= System.Null_Address and then Equal_Sid (Ace_Sid, Everyone) /= 0)
+           or else (Signed_In and then Equal_Sid (Ace_Sid, Member_Of) /= 0)
+         then
+            return True;
+         end if;
+         for Index in Kinds'Range loop
+            if Known (Index) and then Equal_Sid (Ace_Sid, Groups (Index) (1)'Address) /= 0 then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Applies;
+   begin
+      if Signed_In then
+         for Index in Kinds'Range loop
+            declare
+               Length : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+            begin
+               Known (Index) :=
+                 Create_Well_Known_Sid (Kinds (Index), System.Null_Address, Groups (Index) (1)'Address, Length'Access)
+                 /= 0;
+            end;
+         end loop;
+      end if;
+      for Index in 0 .. Natural (Header.Count) - 1 loop
+         declare
+            Found : aliased System.Address := System.Null_Address;
+         begin
+            exit when Get_Ace (Acl, C_DWord (Index), Found'Access) = 0;
+            declare
+               Head : constant Ace_Header with Import, Address => Found;
+               Raw  : constant Interfaces.Unsigned_32
+                 with Import, Address => System.Storage_Elements."+" (Found, 4);
+               Mask : constant C_DWord := Specific_Rights (C_DWord (Raw));
+            begin
+               if (Head.Kind = Access_Allowed_Ace or else Head.Kind = Access_Denied_Ace)
+                 and then (Head.Flags and Inherit_Only_Ace) = 0
+                 and then Applies (System.Storage_Elements."+" (Found, 8))
+               then
+                  if Head.Kind = Access_Allowed_Ace then
+                     Granted := Granted or (Mask and not Denied);
+                  else
+                     Denied := Denied or (Mask and not Granted);
+                  end if;
+               end if;
+            end;
+         end;
+      end loop;
+      return Granted;
+   end Evaluated_Rights;
 
    --  The rights an ACE carries for a triplet's bits: taken from an allow
    --  for a class that loses the bits, and from a deny for one that keeps
@@ -1420,9 +1505,13 @@ package body Hostkit.Metadata is
          end if;
          declare
             Owner_Left : constant Natural :=
-              (if Has_Owner then Without (Shown (Triplet_Of (Plain'Address, Owner), Runnable), Owner_Bits) else 0);
+              (if Has_Owner
+               then Without (Shown (Triplet_Of (Plain'Address, Owner, Everyone, Group), Runnable), Owner_Bits)
+               else 0);
             Group_Left : constant Natural :=
-              (if Has_Group then Without (Shown (Triplet_Of (Plain'Address, Group), Runnable), Group_Bits) else 0);
+              (if Has_Group
+               then Without (Shown (Triplet_Of (Plain'Address, Group, Everyone), Runnable), Group_Bits)
+               else 0);
          begin
             if Owner_Left = 0 and then Group_Left = 0 then
                return Plain;

@@ -351,6 +351,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A file no one may read, write or run is still seen, renamed and
+   --  deleted as its folder allows: stat and rename need no right on it.
+   procedure Test_A_Mode_0_Entry_Is_Still_Seen
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  A file someone holds without sharing writes is synced once they let
    --  go: Windows' Sync_File waits a sharing violation out.
    procedure Test_A_Held_File_Is_Synced_Once_Let_Go
@@ -763,6 +769,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Volume_Places_Are_The_Hosts'Access,
          "mounts : the volume places are the host's folders, or its drives' roots");
+      Register_Routine
+        (T, Test_A_Mode_0_Entry_Is_Still_Seen'Access,
+         "metadata : a mode-0 file is still looked at, renamed and deleted as its folder allows");
       Register_Routine
         (T, Test_Read_Only_File_Syncs_Promptly'Access,
          "durability : a read-only file syncs at once, without waiting out write retries");
