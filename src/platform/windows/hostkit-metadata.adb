@@ -811,6 +811,10 @@ package body Hostkit.Metadata is
          return (others => <>);
    end Volume_Capacity_Of;
 
+   function Triplet_Of
+     (Acl, Sid, Everyone : System.Address;
+      Member_Of          : System.Address := System.Null_Address) return Natural;
+
    function File_Permission_Bits
      (Path      : String;
       Available : out Boolean) return Natural
@@ -825,29 +829,6 @@ package body Hostkit.Metadata is
 
       Status : C_DWord;
       Mode   : Natural := 0;
-
-      function Rights_For (Sid : System.Address) return Natural;
-
-      function Rights_For (Sid : System.Address) return Natural is
-         Trustee : aliased Trustee_Record;
-         Rights  : aliased C_DWord := 0;
-      begin
-         if Sid = System.Null_Address or else Dacl = System.Null_Address then
-            return 0;
-         end if;
-
-         Build_Trustee_With_Sid (Trustee'Access, Sid);
-         Trustee.Form := Trustee_Is_Sid;
-         Trustee.Kind := Trustee_Is_Unknown;
-
-         if Get_Effective_Rights_From_Acl
-              (Dacl, Trustee'Access, Rights'Access) /= Success
-         then
-            return 0;
-         end if;
-
-         return Rights_To_Triplet (Rights);
-      end Rights_For;
 
       Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
       Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
@@ -878,14 +859,16 @@ package body Hostkit.Metadata is
       Remember (Owner, Identity_Of (Owner));
       Remember (Group, Identity_Of (Group));
 
-      Mode := Rights_For (Owner) * 64 + Rights_For (Group) * 8;
-
-      if Create_Well_Known_Sid
-           (Win_World_Sid, System.Null_Address,
-            Everyone (1)'Address, Everyone_Size'Access) /= 0
-      then
-         Mode := Mode + Rights_For (Everyone (1)'Address);
-      end if;
+      declare
+         World : constant System.Address :=
+           (if Create_Well_Known_Sid
+                 (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) /= 0
+            then Everyone (1)'Address
+            else System.Null_Address);
+      begin
+         Mode := Triplet_Of (Dacl, Owner, World, Group) * 64 + Triplet_Of (Dacl, Group, World) * 8
+           + Triplet_Of (Dacl, World, World);
+      end;
 
       Free_Descriptor;
 

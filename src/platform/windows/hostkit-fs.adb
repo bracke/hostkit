@@ -1163,15 +1163,17 @@ package body Hostkit.Fs is
       --  Drop the read-only attribute of the entry held as Held, keeping
       --  the others: False where it has none or it cannot be dropped.
       function Drop_Read_Only (Held : System.Address; Info : Handle_Info) return Boolean is
+         --  FILE_BASIC_INFO: 40 bytes, its DWORD padded to the next 8.
          type Basic_Info is record
             Creation, Last_Access, Last_Write, Change : Interfaces.Integer_64;
             Attributes : C_DWord;
+            Padding    : C_DWord := 0;
          end record with Convention => C;
          Read_Only_Attribute : constant C_DWord := 16#0000_0001#;
          Normal_Attribute    : constant C_DWord := 16#0000_0080#;
          File_Basic_Info     : constant Interfaces.C.int := 0;
          --  Zero times leave each time as it is.
-         Basic : aliased Basic_Info := (0, 0, 0, 0, Info.Attributes and not Read_Only_Attribute);
+         Basic : aliased Basic_Info := (0, 0, 0, 0, Info.Attributes and not Read_Only_Attribute, 0);
       begin
          if (Info.Attributes and Read_Only_Attribute) = 0 then
             return False;
