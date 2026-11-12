@@ -195,7 +195,8 @@ begin
          Assert (Back.Success, "the original access record is put back");
          Assert
            (To_String (Back.Applied_Access) = Original,
-            "the DACL is the original, inheritance and all, SDDL for SDDL: " & To_String (Back.Applied_Access));
+            "the DACL is the original, inheritance and all, SDDL for SDDL: " & To_String (Back.Applied_Access)
+            & " for " & Original);
          Assert
            (Hostkit.Metadata.File_Permission_Bits (Inner, Available) = Inherits,
             "and so is the mode read from it");

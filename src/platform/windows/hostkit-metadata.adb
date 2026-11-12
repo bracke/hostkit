@@ -1581,6 +1581,11 @@ package body Hostkit.Metadata is
       end;
    end Dacl_Text_Of;
 
+   Dacl_Auto_Inherit_Req : constant Interfaces.C.unsigned_short := 16#0100#;
+   Dacl_Auto_Inherited   : constant Interfaces.C.unsigned_short := 16#0400#;
+
+   procedure Ignore_Result (Value : C_Int) is null;
+
    --  Put the DACL Text describes (Dacl_Text) back on the entry open as
    --  File exactly: its ACEs, inherited ones as they were, and whether it
    --  is protected. The entry alone, as Set_Own_Dacl.
@@ -1597,6 +1602,17 @@ package body Hostkit.Metadata is
       then
          Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
+      end if;
+      --  An auto-inherited DACL ("D:AI...") keeps that mark only when the
+      --  write asks for it; without, the restored DACL read back plainer
+      --  than the one recorded.
+      if Ada.Strings.Fixed.Index (Text, "D:AI") = Text'First
+        or else Ada.Strings.Fixed.Index (Text, "D:PAI") = Text'First
+      then
+         Ignore_Result
+           (Set_Security_Descriptor_Control
+              (Descriptor, Dacl_Auto_Inherit_Req or Dacl_Auto_Inherited,
+               Dacl_Auto_Inherit_Req or Dacl_Auto_Inherited));
       end if;
       Applied := Set_Kernel_Object_Security (File, Dacl_Information, Descriptor) /= 0;
       if not Applied then
