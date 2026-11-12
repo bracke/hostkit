@@ -222,8 +222,60 @@ recently enough to matter to somebody pinning it; the history before that is in
   what the program left running ends when it does, and when the caller dies,
   as on Linux.
 
+- **`Fs.Delete_Tree_No_Follow` stays on its own mount (POSIX).** An entry
+  on another mount than its folder is refused with `EXDEV`, the tree's own
+  root included, rather than emptied: a filesystem mounted inside a tree is
+  no longer deleted with it. On Linux 5.8 and later statx's mount ids say
+  which mount, so a bind mount of the same device is caught while a btrfs
+  subvolume or an overlayfs file with its lower layer's device is not
+  mistaken for one; before that, and on macOS, another device is another
+  mount.
+- **`Fs.Delete_Empty_Directory` refuses a link to a folder on Windows** with
+  `ENOTDIR`, as `rmdir` does; `RemoveDirectoryW` used to remove a directory
+  symbolic link or junction. `Delete_Link` removes a link.
+- **ELOOP for a refused link on Windows.** `Windows_Errors.Errno_Of` reads
+  `ERROR_STOPPED_ON_SYMLINK` as `ELOOP` (114 in the UCRT), not `EINVAL`, so a
+  link `Update_Entry_Metadata` or `Regular_Files.Open_Read` refuses says so
+  as on POSIX.
+- **An entry identity no longer needs a birth time (Linux).**
+  `Metadata.Entry_Identity_Of` and `Update_Entry_Metadata` required
+  `STATX_BTIME`, so on a filesystem that keeps none (ext2/3, older tmpfs,
+  many network filesystems) no identity was available and every bound
+  update was refused. The generation is zero there, on every read alike.
+  macOS reads a placeholder (negative) birth time modulo 2**64 rather than
+  giving up on the identity.
+
 ### Fixed
 
+- **A failed `Fs.Delete_Tree_No_Follow` keeps its errno (POSIX).** A folder
+  the walk could not open was then asked for its statx through the -1
+  descriptor, turning the open's `EACCES` into `EBADF`; each failing call's
+  errno is now kept over the clean-up.
+- **`Metadata.Update_Entry_Metadata` says why it refused on every host:**
+  `ELOOP` for a link, `ENOENT` for another entry than the one expected,
+  `EINVAL` for an id out of range (Linux and macOS set none).
+- **Linux: `Fs.Special_File_Info_Of` reports a device file's own device**
+  (`stx_rdev`), not the volume its node is on (`stx_dev`). Every Linux body
+  now reads statx through `Linux_Abi.Statx_Record`, whose names say which
+  pair is which; the local copies had them the other way round.
+- **Windows: a reparse point that is no link reads as a regular file.**
+  `Regular_Files.Open_Read` refused every reparse point; it now refuses
+  only a symbolic link or junction (one tag check, `Hostkit.Win32.Is_Held_Link`,
+  shared with `Update_Entry_Metadata` and the tree delete), and sets errno on
+  every refusal: `ELOOP`, `EISDIR`, `EINVAL`.
+- **Windows: an NT or long name reads as Win32 text by one rule.**
+  `Windows_Paths.Win32_Form` drops `\??\` or `\\?\` only before a drive or
+  `UNC\`; a link's substitute name `\??\Volume{GUID}\` used to come back as the
+  relative `Volume{GUID}\`, and `Fs.Real_Path` stripped a volume path's prefix
+  the same way. `Read_Link_Target`, `Real_Path`, `Device_Id` and the Recycle
+  Bin's `$I` record all use it.
+- **Windows: the tree delete puts a read-only attribute back** when the entry
+  still will not go once it is dropped, sets errno when a folder cannot be
+  listed or a child is not the one listed, and reads its listing from an
+  8-byte-aligned buffer.
+- **Windows: `Metadata.Device_Id` of a dangling link is unavailable**, as
+  POSIX's stat finds nothing to follow to; and its text-hash fallback starts
+  from the whole 64-bit FNV-1a offset basis (the value is never stored).
 - **Windows: a OneDrive placeholder's permissions can be edited.**
   `Metadata.Update_Entry_Metadata` refused every reparse point; it now reads
   the reparse tag and refuses only a symbolic link or junction, as

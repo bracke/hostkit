@@ -19,8 +19,10 @@ package Hostkit.Windows_Errors is
    --
    --  A sharing or lock violation is EBUSY (someone else holds the file), a
    --  refusal by the ACL is EACCES, a write-protected medium is EROFS, a
-   --  missing privilege is EPERM. A code without a closer meaning is EINVAL,
-   --  as the runtime's own _dosmaperr reads one.
+   --  missing privilege is EPERM, a link refused rather than followed
+   --  (ERROR_STOPPED_ON_SYMLINK) is ELOOP, as O_NOFOLLOW's refusal is on
+   --  POSIX. A code without a closer meaning is EINVAL, as the runtime's
+   --  own _dosmaperr reads one.
    --
    --  @param Code A value GetLastError returned.
    --  @return The errno for Code; zero for ERROR_SUCCESS.

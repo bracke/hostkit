@@ -76,6 +76,37 @@ package body Hostkit.Windows_Paths is
       end;
    end Native_Form;
 
+   function Win32_Form (Path : String) return String is
+      Nt_Prefix   : constant String := "\??\";
+      Long_Prefix : constant String := "\\?\";
+      First       : constant Natural := Path'First + Nt_Prefix'Length;
+   begin
+      if Path'Length < Nt_Prefix'Length
+        or else (Path (Path'First .. First - 1) /= Nt_Prefix
+                 and then Path (Path'First .. First - 1) /= Long_Prefix)
+      then
+         return Path;
+      end if;
+      declare
+         Rest : constant String := Path (First .. Path'Last);
+      begin
+         if Rest'Length >= 2
+           and then Rest (Rest'First) in 'A' .. 'Z' | 'a' .. 'z'
+           and then Rest (Rest'First + 1) = ':'
+         then
+            return Rest;
+         elsif Rest'Length >= 4
+           and then Rest (Rest'First) in 'U' | 'u'
+           and then Rest (Rest'First + 1) in 'N' | 'n'
+           and then Rest (Rest'First + 2) in 'C' | 'c'
+           and then Rest (Rest'First + 3) = '\'
+         then
+            return "\\" & Rest (Rest'First + 4 .. Rest'Last);
+         end if;
+         return Long_Prefix & Rest;
+      end;
+   end Win32_Form;
+
    function Native (Path : String) return Wide_String is
      (From_UTF_8
         (if Path'Length < Long_Path_Threshold then Path

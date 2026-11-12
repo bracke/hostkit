@@ -22,7 +22,9 @@ package body Hostkit.Regular_Files is
    Flag_Sequential         : constant C_DWord := 16#0800_0000#;
    Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
    Attribute_Directory     : constant C_DWord := 16#10#;
-   Attribute_Reparse_Point : constant C_DWord := 16#400#;
+   --  The UCRT's errno values for a refusal no Win32 call reported.
+   E_Is_Dir                : constant := 21;
+   E_Inval                 : constant := 22;
    File_Type_Disk          : constant C_DWord := 1;
    Open_Binary             : constant C_Int := 16#8000#;
    Fsctl_Set_Sparse        : constant C_DWord := 16#0009_00C4#;
@@ -95,14 +97,40 @@ package body Hostkit.Regular_Files is
             Hostkit.Errors.Set_Errno_From_Last_Error;
             return GNAT.OS_Lib.Invalid_FD;
          end if;
-         if Get_File_Information (Handle, Info'Access) = 0
-           or else Get_File_Type (Handle) /= File_Type_Disk
-           or else (Info.Attributes and (Attribute_Directory + Attribute_Reparse_Point)) /= 0
-         then
-            Ignored := Close_Handle (Handle);
-            Handle := Invalid_Handle_Value;
-            return GNAT.OS_Lib.Invalid_FD;
-         end if;
+         --  Each refusal says why through errno, read before the handle is
+         --  closed: a link (only a symbolic link or a junction, as
+         --  Hostkit.Win32.Is_Held_Link reads the tag; a OneDrive placeholder
+         --  or a deduplicated file is a regular file to read) is ELOOP, as
+         --  O_NOFOLLOW's refusal is; a folder EISDIR; a device or a pipe
+         --  EINVAL. Following links, the handle holds the target, which
+         --  is refused the same way only when it is itself still a link.
+         declare
+            Refusal : C_DWord := 0;
+            Cause   : Integer := E_Inval;
+            Refused : Boolean := True;
+         begin
+            if Get_File_Information (Handle, Info'Access) = 0 then
+               Refusal := Get_Last_Error;
+            elsif Get_File_Type (Handle) /= File_Type_Disk then
+               null;
+            elsif Is_Held_Link (Handle, Info.Attributes, Refusal) then
+               null;
+            elsif (Info.Attributes and Attribute_Directory) /= 0 then
+               Cause := E_Is_Dir;
+            else
+               Refused := False;
+            end if;
+            if Refused then
+               Ignored := Close_Handle (Handle);
+               Handle := Invalid_Handle_Value;
+               if Refusal /= 0 then
+                  Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Refusal));
+               else
+                  GNAT.OS_Lib.Set_Errno (Cause);
+               end if;
+               return GNAT.OS_Lib.Invalid_FD;
+            end if;
+         end;
          Descriptor := Open_Os_Handle
            (C_Intptr (System.Storage_Elements.To_Integer (Handle)), Open_Binary);
          if Descriptor < 0 then

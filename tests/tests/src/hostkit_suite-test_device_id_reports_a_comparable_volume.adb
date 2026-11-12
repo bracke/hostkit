@@ -6,6 +6,7 @@ is
    First            : constant String := Ada.Directories.Compose (Scratch, "hk-device-first");
    Second           : constant String := Ada.Directories.Compose (Scratch, "hk-device-second");
    Missing          : constant String := Ada.Directories.Compose (Scratch, "hk-device-missing");
+   Dangling         : constant String := Ada.Directories.Compose (Scratch, "hk-device-dangling");
    First_Available  : Boolean;
    Second_Available : Boolean;
    Missing_Available : Boolean;
@@ -33,6 +34,25 @@ begin
    Missing_Device := Hostkit.Metadata.Device_Id (Missing, Missing_Available);
 
    Assert (not Missing_Available, "a missing file has no device id to report");
+
+   --  A link to nothing has no device either: the device is the target's,
+   --  as stat follows to it, and Windows sees the link itself exist.
+   if Hostkit.Fs.Is_Link (Dangling) then
+      Assert (Hostkit.Fs.Delete_Link (Dangling), "a leftover link is removed");
+   end if;
+   if Hostkit.Fs.Create_Link (Missing, Dangling) then
+      declare
+         Dangling_Available : Boolean;
+         Dangling_Device    : constant Long_Long_Integer :=
+           Hostkit.Metadata.Device_Id (Dangling, Dangling_Available);
+         pragma Unreferenced (Dangling_Device);
+      begin
+         Assert (not Dangling_Available, "a dangling link has no device id to report");
+      end;
+      Assert (Hostkit.Fs.Delete_Link (Dangling), "the dangling link is removed");
+   else
+      Links_Refused ("Device_Id, a dangling link");
+   end if;
 
    if First_Available or else Second_Available then
       Assert (First_Available, "device id availability is stable for sibling files");

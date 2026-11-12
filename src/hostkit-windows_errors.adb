@@ -20,6 +20,8 @@ package body Hostkit.Windows_Errors is
    E_Name_Too_Long : constant := 38;
    E_No_Sys        : constant := 40;
    E_Not_Empty     : constant := 41;
+   --  The UCRT's POSIX supplement: ELOOP is 114 there, not Linux's 40.
+   E_Loop          : constant := 114;
 
    function Errno_Of (Code : Interfaces.Unsigned_32) return Integer is
    begin
@@ -65,6 +67,8 @@ package body Hostkit.Windows_Errors is
             return E_Name_Too_Long;
          when 267 =>                       --  DIRECTORY (the name is no folder)
             return E_Not_Dir;
+         when 681 =>                       --  STOPPED_ON_SYMLINK: a link, not followed
+            return E_Loop;
          when others =>                    --  INVALID_NAME, INVALID_PARAMETER and the rest
             return E_Inval;
       end case;

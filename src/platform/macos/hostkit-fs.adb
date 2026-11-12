@@ -842,6 +842,7 @@ package body Hostkit.Fs is
       At_Symlink_Nofollow : constant C_Int := 16#20#;
       At_Removedir : constant C_Int := 16#80#;
       Directory_Type : constant C_U16 := 8#040000#;
+      E_Xdev : constant C_Int := 18;
 
       type Dirent is record
          Inode, Seek_Offset : Interfaces.C.unsigned_long;
@@ -895,10 +896,14 @@ package body Hostkit.Fs is
       begin
          return Value;
       end Errno;
-      procedure Clear_Errno is
+      procedure Set_Errno (Code : C_Int) is
          Value : C_Int with Import, Address => Errno_Location;
       begin
-         Value := 0;
+         Value := Code;
+      end Set_Errno;
+      procedure Clear_Errno is
+      begin
+         Set_Errno (0);
       end Clear_Errno;
       procedure Close (Fd : in out C_Int) is
          Ignored : C_Int;
@@ -923,11 +928,17 @@ package body Hostkit.Fs is
          Ok := Fd >= 0 and then C_Fstat (Fd, Info'Access) = 0;
          return To_Identity (Info, Ok);
       end Info_Of;
+      --  The entry Name in Fd, not followed. Nothing is asked of a
+      --  descriptor an open did not give.
       function Info_At (Fd : C_Int; Name : String) return Identity is
-         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
+         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
          Info : aliased Stat_Record;
          Ok : Boolean;
       begin
+         if Fd < 0 then
+            return (others => <>);
+         end if;
+         C_Name := Interfaces.C.Strings.New_String (Name);
          Ok := C_Fstatat (Fd, C_Name, Info'Access, At_Symlink_Nofollow) = 0;
          Free (C_Name);
          return To_Identity (Info, Ok);
@@ -941,6 +952,11 @@ package body Hostkit.Fs is
          and then Left.Inode = Right.Inode);
       function Is_Directory (Item : Identity) return Boolean is
         (Item.Available and then (Item.Mode and File_Type_Mask) = Directory_Type);
+      --  Whether Child, seen in the held folder Parent, is on another device.
+      --  The walk stops there with EXDEV: a filesystem mounted inside the
+      --  tree is not the tree's to empty, nor its mount point to remove.
+      function Crosses_Mount (Parent, Child : Identity) return Boolean is
+        (Parent.Device /= Child.Device);
 
       function C_Lseek (Fd : C_Int; Offset : Interfaces.C.long; Whence : C_Int) return Interfaces.C.long
         with Import, Convention => C, External_Name => "lseek";
@@ -1011,6 +1027,11 @@ package body Hostkit.Fs is
             return False;
       end Read_Names;
 
+      --  Empty the held folder Held, seen as Held_Info, then remove it from
+      --  its parent and hold that parent instead. On a failure Held is
+      --  closed and errno says why: each failing call's errno is kept from
+      --  before the clean-up, and nothing is asked of a descriptor an open
+      --  did not give, which would answer EBADF over the open's EACCES.
       function Delete_Held
         (Held : in out C_Int; Held_Info : Identity; Own_Name : String;
          Expected_Parent : Identity; Depth : Natural) return Boolean
@@ -1026,41 +1047,63 @@ package body Hostkit.Fs is
          while Full loop
             Names.Clear;
             if not Read_Names (Held, Names, Full) then
-               Close (Held);
+               declare
+                  Error : constant C_Int := Errno;
+               begin
+                  Close (Held);
+                  Set_Errno (Error);
+               end;
                return False;
             end if;
             for Name of Names loop
                declare
                   Observed : constant Identity := Info_At (Held, Name);
+                  Error : C_Int := (if Observed.Available then 0 else Errno);
                   C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
                   Child : C_Int := -1;
                begin
                   if not Observed.Available then
                      Ok := False;
+                  elsif Crosses_Mount (Held_Info, Observed) then
+                     Ok := False;
+                     Error := E_Xdev;
                   elsif not Is_Directory (Observed) then
                      Ok := C_Unlinkat (Held, C_Name, 0) = 0;
+                     if not Ok then
+                        Error := Errno;
+                     end if;
                   else
                      Child := C_Openat (Held, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
-                     declare
-                        Child_Info : constant Identity := Info_Of (Child);
-                     begin
-                        Ok := Child >= 0 and then Is_Directory (Child_Info)
-                          and then Same (Observed, Child_Info);
-                        if Ok then
-                           Close (Held);
-                           Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
-                           Held := Child;
+                     if Child < 0 then
+                        Ok := False;
+                        Error := Errno;
+                     else
+                        declare
+                           Child_Info : constant Identity := Info_Of (Child);
+                        begin
+                           Ok := Is_Directory (Child_Info) and then Same (Observed, Child_Info);
                            if Ok then
-                              Ok := Same (Held_Info, Info_Of (Held));
+                              Close (Held);
+                              Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
+                              if not Ok then
+                                 Error := Errno;
+                              end if;
+                              Held := Child;
+                              if Ok then
+                                 Ok := Same (Held_Info, Info_Of (Held));
+                              end if;
+                           else
+                              Close (Child);
                            end if;
-                        else
-                           Close (Child);
-                        end if;
-                     end;
+                        end;
+                     end if;
                   end if;
                   Free (C_Name);
                   if not Ok then
                      Close (Held);
+                     if Error /= 0 then
+                        Set_Errno (Error);
+                     end if;
                      return False;
                   end if;
                exception
@@ -1075,6 +1118,7 @@ package body Hostkit.Fs is
          declare
             Dotdot : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String ("..");
             Parent : C_Int := C_Openat (Held, Dotdot, O_Rdonly + O_Directory + O_Cloexec);
+            Error : C_Int := (if Parent < 0 then Errno else 0);
             Current : constant Identity := Info_At (Parent, Own_Name);
             C_Own : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Own_Name);
          begin
@@ -1084,10 +1128,16 @@ package body Hostkit.Fs is
             Close (Held);
             if Ok then
                Ok := C_Unlinkat (Parent, C_Own, At_Removedir) = 0;
+               if not Ok then
+                  Error := Errno;
+               end if;
             end if;
             Free (C_Own);
             if not Ok then
                Close (Parent);
+               if Error /= 0 then
+                  Set_Errno (Error);
+               end if;
                return False;
             end if;
             Held := Parent;
@@ -1102,35 +1152,55 @@ package body Hostkit.Fs is
          end;
       end Delete_Held;
 
+      --  Delete Name in the held folder Parent, which is closed after. The
+      --  tree's own root is held to the same rule as each entry under it: on
+      --  another mount than its folder, it is refused with EXDEV.
       function Delete_At (Parent : in out C_Int; Name : String) return Boolean is
+         Parent_Info : constant Identity := Info_Of (Parent);
          Observed : constant Identity := Info_At (Parent, Name);
+         Error : C_Int := (if Observed.Available and then Parent_Info.Available then 0 else Errno);
          C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
          Child : C_Int := -1;
          Ok : Boolean;
       begin
-         if not Observed.Available then
+         if not Observed.Available or else not Parent_Info.Available then
             Ok := False;
+         elsif Crosses_Mount (Parent_Info, Observed) then
+            Ok := False;
+            Error := E_Xdev;
          elsif not Is_Directory (Observed) then
             Ok := C_Unlinkat (Parent, C_Name, 0) = 0;
+            if not Ok then
+               Error := Errno;
+            end if;
          else
             Child := C_Openat (Parent, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
-            declare
-               Child_Info : constant Identity := Info_Of (Child);
-               Parent_Info : constant Identity := Info_Of (Parent);
-            begin
-               Ok := Child >= 0 and then Is_Directory (Child_Info)
-                 and then Same (Observed, Child_Info) and then Parent_Info.Available;
-               if Ok then
-                  Close (Parent);
-                  Ok := Delete_Held (Child, Child_Info, Name, Parent_Info, 0);
-                  Parent := Child;
-               else
-                  Close (Child);
-               end if;
-            end;
+            if Child < 0 then
+               Ok := False;
+               Error := Errno;
+            else
+               declare
+                  Child_Info : constant Identity := Info_Of (Child);
+               begin
+                  Ok := Is_Directory (Child_Info) and then Same (Observed, Child_Info);
+                  if Ok then
+                     Close (Parent);
+                     Ok := Delete_Held (Child, Child_Info, Name, Parent_Info, 0);
+                     if not Ok then
+                        Error := Errno;
+                     end if;
+                     Parent := Child;
+                  else
+                     Close (Child);
+                  end if;
+               end;
+            end if;
          end if;
          Free (C_Name);
          Close (Parent);
+         if not Ok and then Error /= 0 then
+            Set_Errno (Error);
+         end if;
          return Ok;
       exception
          when others =>

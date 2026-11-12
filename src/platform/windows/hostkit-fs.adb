@@ -48,9 +48,6 @@ package body Hostkit.Fs is
       return System.Address
      with Import => True, Convention => Stdcall, External_Name => "FindFirstFileW";
 
-   Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
-   Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
-
    function Create_Symbolic_Link
      (Link   : System.Address;
       Target : System.Address;
@@ -134,7 +131,7 @@ package body Hostkit.Fs is
         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (38)), 8)
         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (39)), 16)
         or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (40)), 24);
-      return Tag = Io_Reparse_Tag_Symlink or else Tag = Io_Reparse_Tag_Mount_Point;
+      return Is_Link_Tag (Tag);
    exception
       when others =>
          return False;
@@ -805,25 +802,6 @@ package body Hostkit.Fs is
       Error     : C_DWord;
       Ignored   : Interfaces.C.int;
 
-      --  Text, a name as the reparse data holds it, as Win32 writes it: an
-      --  NT \??\ name (a substitute name) without the prefix, and its UNC
-      --  form as \\server\share.
-      function Win32_Form (Text : Wide_String) return Wide_String is
-         Nt_Prefix  : constant Wide_String := "\??\";
-         Unc_Prefix : constant Wide_String := "\??\UNC\";
-      begin
-         if Text'Length >= Unc_Prefix'Length
-           and then Text (Text'First .. Text'First + Unc_Prefix'Length - 1) = Unc_Prefix
-         then
-            return "\\" & Text (Text'First + Unc_Prefix'Length .. Text'Last);
-         elsif Text'Length >= Nt_Prefix'Length
-           and then Text (Text'First .. Text'First + Nt_Prefix'Length - 1) = Nt_Prefix
-         then
-            return Text (Text'First + Nt_Prefix'Length .. Text'Last);
-         end if;
-         return Text;
-      end Win32_Form;
-
       function U16 (At_Index : Natural) return Natural is
         (Natural (Buffer (At_Index)) + Natural (Buffer (At_Index + 1)) * 256);
 
@@ -900,8 +878,11 @@ package body Hostkit.Fs is
                Wide_T (Index + 1) :=
                  Wide_Character'Val (U16 (Start + Index * 2));
             end loop;
+            --  A substitute name is an NT \??\ name, which Win32 text
+            --  never carries: Windows_Paths.Win32_Form reads it as C:\x,
+            --  \\server\share, or -- a volume mount point -- \\?\Volume{...}\.
             Target := Ada.Strings.Unbounded.To_Unbounded_String
-              (Hostkit.Windows_Paths.To_UTF_8 (Win32_Form (Wide_T)));
+              (Hostkit.Windows_Paths.Win32_Form (Hostkit.Windows_Paths.To_UTF_8 (Wide_T)));
          end;
       end;
       return True;
@@ -999,24 +980,9 @@ package body Hostkit.Fs is
             return "";
          end if;
 
-         declare
-            Resolved : constant String :=
-              Hostkit.Windows_Paths.To_UTF_8
-                (Wide_Buf (1 .. Natural (Length)));
-         begin
-            --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir.
-            if Resolved'Length >= 8
-              and then Resolved (Resolved'First .. Resolved'First + 7) = "\\?\UNC\"
-            then
-               return "\\" & Resolved (Resolved'First + 8 .. Resolved'Last);
-            elsif Resolved'Length >= 4
-              and then Resolved (Resolved'First .. Resolved'First + 3) = "\\?\"
-            then
-               return Resolved (Resolved'First + 4 .. Resolved'Last);
-            else
-               return Resolved;
-            end if;
-         end;
+         --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir; a
+         --  volume with no drive letter keeps its \\?\Volume{...}\ form.
+         return Hostkit.Windows_Paths.Win32_Form (Hostkit.Windows_Paths.To_UTF_8 (Wide_Buf (1 .. Natural (Length))));
       end Resolve;
 
       --  Index of the last path separator in S, or 0 if there is none.
@@ -1476,12 +1442,24 @@ package body Hostkit.Fs is
       function Remove_Directory (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "RemoveDirectoryW";
       Read_Only  : constant C_DWord := 16#0001#;
+      --  The UCRT's ENOTDIR.
+      E_Not_Dir  : constant := 20;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
       Cleared    : constant Boolean :=
         Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0;
       Ignored    : Interfaces.C.int;
    begin
+      --  A symbolic link to a folder or a junction is no directory to remove,
+      --  as rmdir refuses one with ENOTDIR on POSIX; RemoveDirectoryW would
+      --  take the link away. Delete_Link removes a link.
+      if Attributes /= Invalid_File_Attributes
+        and then (Attributes and File_Attribute_Reparse_Point) /= 0
+        and then Is_Link (Path)
+      then
+         GNAT.OS_Lib.Set_Errno (E_Not_Dir);
+         return False;
+      end if;
       if Cleared then
          Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
       end if;

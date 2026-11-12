@@ -5,6 +5,8 @@ with Interfaces.C;
 
 with Interfaces.C.Strings;
 
+with GNAT.OS_Lib;
+
 with Hostkit.Host;
 with Hostkit.Linux_Abi;
 with Hostkit.Metadata.Natural_Ids;
@@ -18,6 +20,7 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Integer_64;
    use type Interfaces.Unsigned_64;
 
    subtype C_Int is Interfaces.C.int;
@@ -38,49 +41,15 @@ package body Hostkit.Metadata is
    Statx_Atime : constant C_Unsigned := 16#20#;
    Statvfs_Read_Only : constant C_ULong := 1;
 
-   type U16_Array is array (Positive range <>) of C_U16
-     with Convention => C;
-
    type U64_Array is array (Positive range <>) of C_U64
      with Convention => C;
 
-   type Statx_Timestamp is record
-      Seconds     : C_S64;
-      Nanoseconds : C_U32;
-      Reserved    : C_U32;
-   end record
-     with Convention => C;
-
-   type Statx_Record is record
-      Mask            : C_U32;
-      Block_Size      : C_U32;
-      Attributes      : C_U64;
-      Link_Count      : C_U32;
-      User_Id         : C_U32;
-      Group_Id        : C_U32;
-      Mode            : C_U16;
-      Spare_0         : U16_Array (1 .. 1);
-      Inode           : C_U64;
-      Size            : C_U64;
-      Blocks          : C_U64;
-      Attributes_Mask : C_U64;
-      Access_Time     : Statx_Timestamp;
-      Birth_Time      : Statx_Timestamp;
-      Change_Time     : Statx_Timestamp;
-      Modified_Time   : Statx_Timestamp;
-      --  stx_rdev_*: the device a device-special file stands for (0 for
-      --  files and folders). stx_dev_*: the device that holds the file --
-      --  the one to compare for "same file" or "same volume".
-      Device_Major    : C_U32;
-      Device_Minor    : C_U32;
-      File_Major      : C_U32;
-      File_Minor      : C_U32;
-      Mount_Id        : C_U64;
-      Direct_Io_Memory_Align : C_U32;
-      Direct_Io_Offset_Align : C_U32;
-      Spare_3         : U64_Array (1 .. 12);
-   end record
-     with Convention => C;
+   --  struct statx, one layout for every Linux body (Hostkit.Linux_Abi):
+   --  Device_* there is stx_dev, the device that holds the entry -- the one
+   --  to compare for "same file" or "same volume".
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
+   subtype Statx_S64 is Hostkit.Linux_Abi.C_S64;
+   subtype Statx_U64 is Hostkit.Linux_Abi.C_U64;
 
    type Statvfs_Record is record
       Block_Size             : C_ULong;
@@ -479,9 +448,9 @@ package body Hostkit.Metadata is
          return "";
       end if;
       Available := True;
-      return C_S64'Image (Info.Modified_Time.Seconds) & "." & C_U32'Image (Info.Modified_Time.Nanoseconds)
-        & C_S64'Image (Info.Change_Time.Seconds) & "." & C_U32'Image (Info.Change_Time.Nanoseconds)
-        & C_U64'Image (Info.Size) & C_U64'Image (Info.Inode);
+      return Statx_S64'Image (Info.Modified_Time.Seconds) & "." & C_U32'Image (Info.Modified_Time.Nanoseconds)
+        & Statx_S64'Image (Info.Change_Time.Seconds) & "." & C_U32'Image (Info.Change_Time.Nanoseconds)
+        & Statx_U64'Image (Info.Size) & Statx_U64'Image (Info.Inode);
    exception
       when others =>
          Safe_Free (C_Path);
@@ -489,24 +458,34 @@ package body Hostkit.Metadata is
          return "";
    end Change_Stamp;
 
+   --  An entry's identity from its statx: the holding device and the inode,
+   --  told apart from a reuse of that inode by the birth time where the
+   --  filesystem keeps one. Where it does not (STATX_BTIME absent: ext2/3,
+   --  older tmpfs, many network filesystems) the generation is zero on
+   --  every read of every entry there, so two reads of one entry still
+   --  compare equal; only the inode-reuse guard is lost on such a volume.
+   function Identity_Of (Info : Statx_Record) return Entry_Identity is
+     (Available       => True,
+      Volume          => Interfaces.Shift_Left (Identity_Field (Info.Device_Major), 32)
+        or Identity_Field (Info.Device_Minor),
+      File_Number     => Identity_Field (Info.Inode),
+      Generation_High =>
+        (if (Info.Mask and Statx_Btime) /= 0 then Identity_Field'Mod (Info.Birth_Time.Seconds) else 0),
+      Generation_Low  =>
+        (if (Info.Mask and Statx_Btime) /= 0 then Identity_Field (Info.Birth_Time.Nanoseconds) else 0));
+
    function Entry_Identity_Of (Path : String) return Entry_Identity is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Info   : aliased Statx_Record;
-      Wanted : constant C_Unsigned := Statx_Ino or Statx_Btime;
       Status : C_Int;
    begin
-      Status := Statx (At_FDCWD, C_Path, At_Symlink_Nofollow, Wanted, Info'Access);
+      --  The birth time is asked for, not required.
+      Status := Statx (At_FDCWD, C_Path, At_Symlink_Nofollow, Statx_Ino or Statx_Btime, Info'Access);
       Interfaces.C.Strings.Free (C_Path);
-      if Status /= 0 or else (Info.Mask and Wanted) /= Wanted then
+      if Status /= 0 or else (Info.Mask and Statx_Ino) /= Statx_Ino then
          return (others => <>);
       end if;
-      return
-        (Available       => True,
-         Volume          => Interfaces.Shift_Left (Identity_Field (Info.File_Major), 32)
-           or Identity_Field (Info.File_Minor),
-         File_Number     => Identity_Field (Info.Inode),
-         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
-         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+      return Identity_Of (Info);
    exception
       when others =>
          Safe_Free (C_Path);
@@ -533,8 +512,14 @@ package body Hostkit.Metadata is
       At_Empty_Path : constant C_Int := 16#1000#;
       File_Type     : constant C_U16 := 16#F000#;
       Link_Type     : constant C_U16 := 16#A000#;
+      E_Noent       : constant := 2;
+      E_Inval       : constant := 22;
+      E_Loop        : constant := 40;
+      E_Opnotsupp   : constant := 95;
+      --  What the update needs; the birth time is asked for besides, for the
+      --  identity, and is not required (Identity_Of).
       Wanted        : constant C_Unsigned :=
-        Statx_Ino or Statx_Btime or Statx_Mode or Statx_Uid or Statx_Gid;
+        Statx_Ino or Statx_Mode or Statx_Uid or Statx_Gid;
       C_Path        : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Path);
       Empty         : Interfaces.C.Strings.chars_ptr :=
@@ -551,32 +536,46 @@ package body Hostkit.Metadata is
             Fd := -1;
          end if;
       end Close;
+
+      --  Let the entry go, errno then Error: the reason, kept over the close.
+      procedure Refuse (Error : Integer) is
+      begin
+         Close;
+         GNAT.OS_Lib.Set_Errno (Error);
+      end Refuse;
    begin
+      --  Each refusal says why through errno, as the open's and the statx's
+      --  failures do: a link is ELOOP, as O_NOFOLLOW refuses one; another
+      --  entry than Expected is ENOENT, the one asked about being gone from
+      --  the path (Windows says the same); an id out of range is EINVAL.
       Fd := C_Open (C_Path, O_Path + O_Nofollow + O_Cloexec);
       Interfaces.C.Strings.Free (C_Path);
       if Fd < 0
         or else Statx
           (Fd, Empty, C_Unsigned (At_Empty_Path) or At_Symlink_Nofollow,
-           Wanted, Info'Access) /= 0
-        or else (Info.Mask and Wanted) /= Wanted
-        or else (Info.Mode and File_Type) = Link_Type
+           Wanted or Statx_Btime, Info'Access) /= 0
       then
+         declare
+            Error : constant Integer := GNAT.OS_Lib.Errno;
+         begin
+            Interfaces.C.Strings.Free (Empty);
+            Refuse (Error);
+         end;
+         return Answer;
+      elsif (Info.Mask and Wanted) /= Wanted then
          Interfaces.C.Strings.Free (Empty);
-         Close;
+         Refuse (E_Opnotsupp);
+         return Answer;
+      elsif (Info.Mode and File_Type) = Link_Type then
+         Interfaces.C.Strings.Free (Empty);
+         Refuse (E_Loop);
          return Answer;
       end if;
 
-      Answer.Identity :=
-        (Available       => True,
-         Volume          => Interfaces.Shift_Left
-           (Identity_Field (Info.File_Major), 32)
-           or Identity_Field (Info.File_Minor),
-         File_Number     => Identity_Field (Info.Inode),
-         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
-         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+      Answer.Identity := Identity_Of (Info);
       if Check_Expected and then Answer.Identity /= Expected then
          Interfaces.C.Strings.Free (Empty);
-         Close;
+         Refuse (E_Noent);
          return Answer;
       end if;
 
@@ -589,7 +588,7 @@ package body Hostkit.Metadata is
            or else Answer.Previous_Group > Max_Previous
          then
             Interfaces.C.Strings.Free (Empty);
-            Close;
+            Refuse (E_Inval);
             return Answer;
          end if;
          Answer.Success := C_Fchownat
@@ -666,8 +665,8 @@ package body Hostkit.Metadata is
 
       return L_Status = 0 and then R_Status = 0
         and then L_Info.Inode = R_Info.Inode
-        and then L_Info.File_Major = R_Info.File_Major
-        and then L_Info.File_Minor = R_Info.File_Minor;
+        and then L_Info.Device_Major = R_Info.Device_Major
+        and then L_Info.Device_Minor = R_Info.Device_Minor;
    exception
       when others =>
          Safe_Free (L_Path);
@@ -692,8 +691,8 @@ package body Hostkit.Metadata is
       end if;
 
       Available := True;
-      return Long_Long_Integer (Info.File_Major) * 4_294_967_296
-        + Long_Long_Integer (Info.File_Minor);
+      return Long_Long_Integer (Info.Device_Major) * 4_294_967_296
+        + Long_Long_Integer (Info.Device_Minor);
    exception
       when others =>
          Safe_Free (C_Path);

@@ -81,6 +81,27 @@ private package Hostkit.Win32 is
    Se_File_Object     : constant Interfaces.C.int := 1;
    --  FileIdInfo, for GetFileInformationByHandleEx.
    File_Id_Info_Class : constant Interfaces.C.int := 18;
+   --  FileAttributeTagInfo, for GetFileInformationByHandleEx.
+   File_Attribute_Tag_Info_Class : constant Interfaces.C.int := 9;
+
+   --  Reparse tags and the error a refused link gives.
+
+   --  IO_REPARSE_TAG_MOUNT_POINT: a junction (or a volume mount point).
+   Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
+   --  IO_REPARSE_TAG_SYMLINK.
+   Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
+   --  ERROR_STOPPED_ON_SYMLINK: Hostkit.Windows_Errors reads it as ELOOP.
+   Error_Stopped_On_Symlink   : constant DWORD := 681;
+
+   --  Whether a reparse tag is a link: only the symbolic-link and junction
+   --  tags are. A OneDrive placeholder, a deduplicated file or an
+   --  app-execution alias is a reparse point too, and an ordinary entry to
+   --  the user, opened and listed like any other.
+   --
+   --  @param Tag A reparse tag.
+   --  @return True for IO_REPARSE_TAG_SYMLINK and IO_REPARSE_TAG_MOUNT_POINT.
+   function Is_Link_Tag (Tag : Interfaces.Unsigned_32) return Boolean is
+     (Interfaces."=" (Tag, Io_Reparse_Tag_Symlink) or else Interfaces."=" (Tag, Io_Reparse_Tag_Mount_Point));
 
    --  A FILETIME: 100-nanosecond intervals since 1601, in two halves.
    type Filetime is record
@@ -104,6 +125,13 @@ private package Hostkit.Win32 is
    end record
      with Convention => C;
 
+   --  FILE_ATTRIBUTE_TAG_INFO.
+   type Attribute_Tag_Info is record
+      Attributes  : DWORD := 0;
+      Reparse_Tag : Interfaces.Unsigned_32 := 0;
+   end record
+     with Convention => C;
+
    --  Getting a layout wrong here does not fail loudly; it reads the wrong
    --  field and reports plausible nonsense. Pin the sizes, so the compiler
    --  catches any drift on any host.
@@ -112,6 +140,9 @@ private package Hostkit.Win32 is
    pragma Compile_Time_Error
      (By_Handle_File_Information'Size /= 52 * 8,
       "Win32 BY_HANDLE_FILE_INFORMATION must be 52 bytes");
+   pragma Compile_Time_Error
+     (Attribute_Tag_Info'Size /= 8 * 8,
+      "Win32 FILE_ATTRIBUTE_TAG_INFO must be 8 bytes");
 
    --  The calling thread's last error code.
    --
@@ -186,6 +217,22 @@ private package Hostkit.Win32 is
       Size   : DWORD)
       return BOOL
      with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandleEx";
+
+   --  Whether the entry open as Object, whose attributes are Attributes, is
+   --  a link -- a symbolic link or a junction, read from its reparse tag
+   --  (FILE_ATTRIBUTE_TAG_INFO) -- rather than an ordinary entry. Any other
+   --  reparse point is ordinary (Is_Link_Tag). One whose tag cannot be read
+   --  is taken for a link, which is never followed.
+   --
+   --  @param Object The handle, opened with FILE_FLAG_OPEN_REPARSE_POINT or
+   --    not; either way it is the entry the handle holds that is asked about.
+   --  @param Attributes The handle's attributes, as GetFileInformationByHandle
+   --    gave them.
+   --  @param Error Zero when not a link; else the Windows error that says why
+   --    it was refused: Error_Stopped_On_Symlink for a link, the failing
+   --    call's own when the tag could not be read.
+   --  @return True when the handle holds a link.
+   function Is_Held_Link (Object : HANDLE; Attributes : DWORD; Error : out DWORD) return Boolean;
 
    --  GetFinalPathNameByHandleW.
    --

@@ -2,6 +2,8 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 
+with Hostkit.Linux_Abi;
+
 package body Hostkit.Metadata_Copy is
    use Ada.Strings.Unbounded;
    use type Interfaces.C.int;
@@ -16,32 +18,13 @@ package body Hostkit.Metadata_Copy is
    subtype C_Long is Interfaces.C.long;
    subtype C_U16 is Interfaces.C.unsigned_short;
    subtype C_U32 is Interfaces.C.unsigned;
-   subtype C_U64 is Interfaces.C.unsigned_long;
    subtype C_S64 is Interfaces.C.long;
 
-   type U16_Array is array (Positive range <>) of C_U16 with Convention => C;
-   type U64_Array is array (Positive range <>) of C_U64 with Convention => C;
    type Byte_Array is array (Natural range <>) of aliased Interfaces.Unsigned_8
      with Convention => C;
 
-   type Statx_Timestamp is record
-      Seconds : C_S64;
-      Nanoseconds, Reserved : C_U32;
-   end record with Convention => C;
-
-   type Statx_Record is record
-      Mask, Block_Size : C_U32;
-      Attributes : C_U64;
-      Link_Count, User_Id, Group_Id : C_U32;
-      Mode : C_U16;
-      Spare_0 : U16_Array (1 .. 1);
-      Inode, Size, Blocks, Attributes_Mask : C_U64;
-      Access_Time, Birth_Time, Change_Time, Modified_Time : Statx_Timestamp;
-      Device_Major, Device_Minor, File_Major, File_Minor : C_U32;
-      Mount_Id : C_U64;
-      Direct_Io_Memory_Align, Direct_Io_Offset_Align : C_U32;
-      Spare_3 : U64_Array (1 .. 12);
-   end record with Convention => C;
+   --  struct statx, one layout for every Linux body (Hostkit.Linux_Abi).
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
 
    type Timespec is record
       Seconds, Nanoseconds : C_S64;

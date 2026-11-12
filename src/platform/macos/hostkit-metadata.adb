@@ -1,5 +1,4 @@
 with Ada.Calendar.Formatting;
-with Ada.Strings.Unbounded;
 with Ada.Strings.Fixed;
 with GNAT.OS_Lib;
 
@@ -9,7 +8,6 @@ with Hostkit.Darwin_Symbols;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
-   use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
    use type Interfaces.C.int;
    use type Interfaces.C.long;
@@ -508,6 +506,18 @@ package body Hostkit.Metadata is
          return "";
    end Change_Stamp;
 
+   --  An entry's identity from its stat: the device, the inode and the
+   --  birth time. stat always carries a birth time; a filesystem that keeps
+   --  none reports the same placeholder for every read (zero, or -1 before
+   --  the epoch), which is taken modulo 2**64 rather than refused, so such an
+   --  entry still has an identity and two reads of it still compare equal.
+   function Identity_Of (Info : Stat_Record) return Entry_Identity is
+     (Available       => True,
+      Volume          => Identity_Field'Mod (Info.Device),
+      File_Number     => Identity_Field (Info.Inode),
+      Generation_High => Identity_Field'Mod (Info.Birth_Time.Seconds),
+      Generation_Low  => Identity_Field'Mod (Info.Birth_Time.Nanoseconds));
+
    function Entry_Identity_Of (Path : String) return Entry_Identity is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Info   : aliased Stat_Record;
@@ -518,12 +528,7 @@ package body Hostkit.Metadata is
       if Status /= 0 then
          return (others => <>);
       end if;
-      return
-        (Available       => True,
-         Volume          => Identity_Field (Info.Device),
-         File_Number     => Identity_Field (Info.Inode),
-         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
-         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+      return Identity_Of (Info);
    exception
       when others =>
          Safe_Free (C_Path);
@@ -553,13 +558,12 @@ package body Hostkit.Metadata is
       At_Nofollow : constant C_Int := 16#20#;
       File_Type   : constant C_U16 := 16#F000#;
       Link_Type   : constant C_U16 := 16#A000#;
-
-      function Identity_Of (Info : Stat_Record) return Entry_Identity is
-        (Available       => True,
-         Volume          => Identity_Field (Info.Device),
-         File_Number     => Identity_Field (Info.Inode),
-         Generation_High => Identity_Field (Info.Birth_Time.Seconds),
-         Generation_Low  => Identity_Field (Info.Birth_Time.Nanoseconds));
+      --  Each refusal says why through errno, as Linux's and Windows' do: a
+      --  link is ELOOP, as O_NOFOLLOW refuses one; another entry than
+      --  Expected is ENOENT; an id out of range is EINVAL.
+      E_Noent     : constant := 2;
+      E_Inval     : constant := 22;
+      E_Loop      : constant := 62;
 
       function Link_Fallback
         (Fallback_Expected : Entry_Identity;
@@ -618,14 +622,23 @@ package body Hostkit.Metadata is
          if not Linked
            or else C_Fstatat
              (Directory, C_Inode, Info'Access, At_Nofollow) /= 0
-           or else (Info.Mode and File_Type) = Link_Type
          then
+            declare
+               Error : constant Integer := GNAT.OS_Lib.Errno;
+            begin
+               Clean;
+               GNAT.OS_Lib.Set_Errno (Error);
+            end;
+            return Answer;
+         elsif (Info.Mode and File_Type) = Link_Type then
             Clean;
+            GNAT.OS_Lib.Set_Errno (E_Loop);
             return Answer;
          end if;
          Answer.Identity := Identity_Of (Info);
          if Must_Match and then Answer.Identity /= Fallback_Expected then
             Clean;
+            GNAT.OS_Lib.Set_Errno (E_Noent);
             return Answer;
          end if;
          Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);
@@ -662,15 +675,23 @@ package body Hostkit.Metadata is
          end if;
          return Answer;
       end if;
-      if C_Fstat (Fd, Info'Access) /= 0
-        or else (Info.Mode and File_Type) = Link_Type
-      then
+      if C_Fstat (Fd, Info'Access) /= 0 then
+         declare
+            Error : constant Integer := GNAT.OS_Lib.Errno;
+         begin
+            Close;
+            GNAT.OS_Lib.Set_Errno (Error);
+         end;
+         return Answer;
+      elsif (Info.Mode and File_Type) = Link_Type then
          Close;
+         GNAT.OS_Lib.Set_Errno (E_Loop);
          return Answer;
       end if;
       Answer.Identity := Identity_Of (Info);
       if Check_Expected and then Answer.Identity /= Expected then
          Close;
+         GNAT.OS_Lib.Set_Errno (E_Noent);
          return Answer;
       end if;
 
@@ -684,6 +705,8 @@ package body Hostkit.Metadata is
          then
             Answer.Success := C_Fchown
               (Fd, C_U32 (Value), C_U32 (Group)) = 0;
+         else
+            GNAT.OS_Lib.Set_Errno (E_Inval);
          end if;
       else
          Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);

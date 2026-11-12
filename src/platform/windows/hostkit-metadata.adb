@@ -76,24 +76,15 @@ package body Hostkit.Metadata is
    Read_Only_Volume : constant C_DWord := 16#0008_0000#;
    File_Share_Delete     : constant C_DWord := 16#0000_0004#;
    File_Basic_Info_Class : constant C_Int := 0;
-   File_Attribute_Tag_Info_Class : constant C_Int := 9;
-
-   --  The two reparse tags that are links (IO_REPARSE_TAG_SYMLINK and
-   --  IO_REPARSE_TAG_MOUNT_POINT, a junction), as Hostkit.Fs.Is_Link reads
-   --  them. Every other reparse point -- a OneDrive placeholder, a
-   --  deduplicated file, an app-execution alias -- is an ordinary entry.
-   Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
-   Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
 
    --  Windows system error codes for a refusal no Win32 call reported, put
    --  into errno through Hostkit.Windows_Errors.Set_Errno_From:
    --  ERROR_FILE_NOT_FOUND (ENOENT; the CRT has no ESTALE) for an entry no
    --  longer the one asked about, ERROR_INVALID_PARAMETER (EINVAL) for a
-   --  value out of range, ERROR_STOPPED_ON_SYMLINK (EINVAL) for a link
-   --  refused.
+   --  value out of range. A link refused is Hostkit.Win32's
+   --  Error_Stopped_On_Symlink (ELOOP), which Is_Held_Link gives.
    Error_File_Not_Found     : constant Interfaces.Unsigned_32 := 2;
    Error_Invalid_Parameter  : constant Interfaces.Unsigned_32 := 87;
-   Error_Stopped_On_Symlink : constant Interfaces.Unsigned_32 := 681;
 
    type Trustee_Record is record
       Multiple_Trustee : System.Address := System.Null_Address;
@@ -137,13 +128,6 @@ package body Hostkit.Metadata is
    end record
      with Convention => C;
 
-   --  FILE_ATTRIBUTE_TAG_INFO.
-   type Attribute_Tag_Info is record
-      Attributes  : C_DWord := 0;
-      Reparse_Tag : Interfaces.Unsigned_32 := 0;
-   end record
-     with Convention => C;
-
    type File_Basic_Info is record
       Creation_Time : Interfaces.Integer_64 := 0;
       Access_Time   : Interfaces.Integer_64 := 0;
@@ -165,9 +149,6 @@ package body Hostkit.Metadata is
    pragma Compile_Time_Error
      (Attribute_Data'Size /= 36 * 8,
       "Win32 WIN32_FILE_ATTRIBUTE_DATA must be 36 bytes");
-   pragma Compile_Time_Error
-     (Attribute_Tag_Info'Size /= 8 * 8,
-      "Win32 FILE_ATTRIBUTE_TAG_INFO must be 8 bytes");
 
    function Get_Named_Security_Info
      (Object_Name : System.Address;
@@ -2029,37 +2010,6 @@ package body Hostkit.Metadata is
          return (others => <>);
    end Entry_Identity_Of;
 
-   --  Whether the entry open as File, whose attributes are Attributes, is a
-   --  link Update_Entry_Metadata refuses: a symbolic link or a junction,
-   --  read from its reparse tag (FILE_ATTRIBUTE_TAG_INFO), as Hostkit.Fs's
-   --  Is_Held_Link reads it. Any other reparse point is an ordinary entry;
-   --  one whose tag cannot be read is taken for a link, which is never
-   --  followed, with Error the Windows error code that says why.
-   function Is_Held_Link
-     (File       : System.Address;
-      Attributes : C_DWord;
-      Error      : out Interfaces.Unsigned_32) return Boolean
-   is
-      use type Interfaces.Unsigned_32;
-      Tag_Info : aliased Attribute_Tag_Info;
-   begin
-      Error := 0;
-      if (Attributes and File_Attribute_Reparse_Point) = 0 then
-         return False;
-      elsif Get_File_Information_Ex
-              (File, File_Attribute_Tag_Info_Class, Tag_Info'Address, C_DWord (Attribute_Tag_Info'Size / 8)) = 0
-      then
-         Error := Interfaces.Unsigned_32 (Get_Last_Error);
-         return True;
-      elsif Tag_Info.Reparse_Tag = Io_Reparse_Tag_Symlink
-        or else Tag_Info.Reparse_Tag = Io_Reparse_Tag_Mount_Point
-      then
-         Error := Error_Stopped_On_Symlink;
-         return True;
-      end if;
-      return False;
-   end Is_Held_Link;
-
    --  The SID of the account Name, into Sid, by LookupAccountNameW: asked
    --  first how much room the SID takes -- the call "fails" with
    --  ERROR_INSUFFICIENT_BUFFER and says, or fails for the reason there is
@@ -2276,6 +2226,12 @@ package body Hostkit.Metadata is
          return 0;
       elsif Followed_Information (Path, Info'Access) then
          return Long_Long_Integer (Info.Volume_Serial);
+      elsif Hostkit.Fs.Is_Link (Path) then
+         --  A link that leads nowhere (dangling, or a loop): Kind_Of sees
+         --  the link itself, but the device is the target's, as POSIX's
+         --  stat follows to it -- and there is none.
+         Available := False;
+         return 0;
       end if;
 
       declare
@@ -2299,15 +2255,13 @@ package body Hostkit.Metadata is
          --  characters, and in the form a caller writes rather than the long
          --  one, so a path given either way hashes alike.
          Absolute : constant String := Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory);
-         Plain    : constant String :=
-           (if Absolute'Length >= 8 and then Absolute (Absolute'First .. Absolute'First + 7) = "\\?\UNC\"
-            then "\\" & Absolute (Absolute'First + 8 .. Absolute'Last)
-            elsif Absolute'Length >= 4 and then Absolute (Absolute'First .. Absolute'First + 3) = "\\?\"
-            then Absolute (Absolute'First + 4 .. Absolute'Last)
-            else Absolute);
+         Plain    : constant String := Hostkit.Windows_Paths.Win32_Form (Absolute);
          Full     : constant String := Ada.Characters.Handling.To_Lower (Plain);
          Last : Natural := Full'First - 1;
-         Hash : C_U64 := 14_695_981_039_346_656;
+         --  The 64-bit FNV-1a offset basis. The value only ever meets another
+         --  read in the same process (no caller keeps it), so it was free to
+         --  be corrected from a copy missing its last three digits.
+         Hash : C_U64 := 14_695_981_039_346_656_037;
       begin
          if Full'Length >= 3
            and then Full (Full'First + 1) = ':'

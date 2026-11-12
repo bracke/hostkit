@@ -356,7 +356,9 @@ package Hostkit.Fs is
    --  Remove the empty directory at Path, never anything in it. On Windows a
    --  read-only directory (a customised folder, or one a copy kept the
    --  attribute of) is refused by RemoveDirectoryW: its attribute is cleared
-   --  first. A directory that is not empty is refused everywhere.
+   --  first. A directory that is not empty is refused everywhere, and so is
+   --  a symbolic link to one or a junction, with ENOTDIR, as rmdir refuses
+   --  one: Delete_Link removes a link.
    --
    --  @return True when the directory is gone.
    function Delete_Empty_Directory (Path : String) return Boolean;
@@ -483,7 +485,13 @@ package Hostkit.Fs is
    --  Remove Path and everything below it without ever following a symbolic
    --  link or reparse point. Traversal is anchored to open directory handles
    --  and entry identities so replacing a child during deletion cannot redirect
-   --  the operation outside the requested tree.
+   --  the operation outside the requested tree. On POSIX hosts the walk never
+   --  crosses into another mounted filesystem: an entry on another mount than
+   --  its folder -- Path itself included -- is refused with EXDEV, rather than
+   --  emptying what is mounted there (Linux tells mounts by statx's mount id
+   --  where the kernel gives one, Linux_Abi.Crosses_Mount; otherwise, and on
+   --  macOS, by device). A failure leaves errno saying why, as the failing
+   --  call set it.
    function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome;
 
    --  Resolve Path to its canonical absolute form, following symbolic links and

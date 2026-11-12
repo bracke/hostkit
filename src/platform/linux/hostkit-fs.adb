@@ -27,53 +27,14 @@ package body Hostkit.Fs is
    subtype C_U16 is Interfaces.C.unsigned_short;
    subtype C_U32 is Interfaces.C.unsigned;
    subtype C_U64 is Interfaces.C.unsigned_long;
-   subtype C_S64 is Interfaces.C.long;
 
    --  O_DIRECTORY and O_NOFOLLOW differ on arm, powerpc and m68k; the x86
    --  values there are O_DIRECT and O_LARGEFILE, and a final link is followed.
    Machine_O_Directory : constant C_Int := Hostkit.Linux_Abi.O_Directory (Hostkit.Host.Machine_Name);
    Machine_O_Nofollow  : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
 
-   type U16_Array is array (Positive range <>) of C_U16
-     with Convention => C;
-
-   type U64_Array is array (Positive range <>) of C_U64
-     with Convention => C;
-
-   type Statx_Timestamp is record
-      Seconds     : C_S64;
-      Nanoseconds : C_U32;
-      Reserved    : C_U32;
-   end record
-     with Convention => C;
-
-   type Statx_Record is record
-      Mask            : C_U32;
-      Block_Size      : C_U32;
-      Attributes      : C_U64;
-      Link_Count      : C_U32;
-      User_Id         : C_U32;
-      Group_Id        : C_U32;
-      Mode            : C_U16;
-      Spare_0         : U16_Array (1 .. 1);
-      Inode           : C_U64;
-      Size            : C_U64;
-      Blocks          : C_U64;
-      Attributes_Mask : C_U64;
-      Access_Time     : Statx_Timestamp;
-      Birth_Time      : Statx_Timestamp;
-      Change_Time     : Statx_Timestamp;
-      Modified_Time   : Statx_Timestamp;
-      Device_Major    : C_U32;
-      Device_Minor    : C_U32;
-      File_Major      : C_U32;
-      File_Minor      : C_U32;
-      Mount_Id        : C_U64;
-      Direct_Io_Memory_Align : C_U32;
-      Direct_Io_Offset_Align : C_U32;
-      Spare_3         : U64_Array (1 .. 12);
-   end record
-     with Convention => C;
+   --  struct statx, one layout for every Linux body (Hostkit.Linux_Abi).
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
 
    function Statx
      (Directory_Fd : C_Int;
@@ -295,13 +256,13 @@ package body Hostkit.Fs is
          return
            (Available => True,
             Kind      => Special_File_Kind'(Character_Device),
-            Device    => Linux_Device_Number (Info.File_Major, Info.File_Minor),
+            Device    => Linux_Device_Number (Info.Special_Device_Major, Info.Special_Device_Minor),
             Mode      => Natural (Info.Mode and Permission_Mask));
       elsif Mode = S_IFBLK then
          return
            (Available => True,
             Kind      => Special_File_Kind'(Block_Device),
-            Device    => Linux_Device_Number (Info.File_Major, Info.File_Minor),
+            Device    => Linux_Device_Number (Info.Special_Device_Major, Info.Special_Device_Minor),
             Mode      => Natural (Info.Mode and Permission_Mask));
       elsif Mode = S_IFSOCK then
          return
@@ -817,6 +778,7 @@ package body Hostkit.Fs is
    function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
       use Ada.Strings.Unbounded;
       use type Interfaces.C.Strings.chars_ptr;
+      use type Interfaces.Unsigned_64;
       use type System.Address;
 
       Max_Depth : constant := 2_048;
@@ -833,30 +795,21 @@ package body Hostkit.Fs is
       File_Type_Mask : constant C_U16 := 8#170000#;
       Directory_Type : constant C_U16 := 8#040000#;
 
-      type U16_Array is array (Positive range <>) of C_U16 with Convention => C;
-      type U64_Array is array (Positive range <>) of C_U64 with Convention => C;
-      type Statx_Timestamp is record
-         Seconds : Interfaces.C.long;
-         Nanoseconds, Reserved : C_U32;
-      end record with Convention => C;
-      type Statx_Record is record
-         Mask, Block_Size : C_U32;
-         Attributes : C_U64;
-         Link_Count, User_Id, Group_Id : C_U32;
-         Mode : C_U16;
-         Spare_0 : U16_Array (1 .. 1);
-         Inode, Size, Blocks, Attributes_Mask : C_U64;
-         Access_Time, Birth_Time, Change_Time, Modified_Time : Statx_Timestamp;
-         Device_Major, Device_Minor, File_Major, File_Minor : C_U32;
-         Mount_Id : C_U64;
-         Direct_Io_Memory_Align, Direct_Io_Offset_Align : C_U32;
-         Spare_3 : U64_Array (1 .. 12);
-      end record with Convention => C;
+      Statx_Wanted : constant C_U32 := Statx_Type_Inode or Hostkit.Linux_Abi.Statx_Mnt_Id;
+      E_Xdev : constant C_Int := 18;
+
+      --  What an entry was seen to be: its statx, when Available.
+      --  Only what the walk compares, not the whole 256-byte statx: several
+      --  are held in each level's frame, and the walk recurses up to
+      --  Max_Depth levels on the caller's stack (1 MiB on a Windows-sized one).
       type Identity is record
-         Major, Minor : C_U32 := 0;
-         Inode : C_U64 := 0;
-         Mode : C_U16 := 0;
-         Available : Boolean := False;
+         Mask         : C_U32 := 0;
+         Mode         : C_U16 := 0;
+         Inode        : Hostkit.Linux_Abi.C_U64 := 0;
+         Device_Major : C_U32 := 0;
+         Device_Minor : C_U32 := 0;
+         Mount_Id     : Hostkit.Linux_Abi.C_U64 := 0;
+         Available    : Boolean := False;
       end record;
       type Dirent is record
          Inode : C_U64;
@@ -899,10 +852,14 @@ package body Hostkit.Fs is
       begin
          return Value;
       end Errno;
-      procedure Clear_Errno is
+      procedure Set_Errno (Code : C_Int) is
          Value : C_Int with Import, Address => Errno_Location;
       begin
-         Value := 0;
+         Value := Code;
+      end Set_Errno;
+      procedure Clear_Errno is
+      begin
+         Set_Errno (0);
       end Clear_Errno;
       procedure Close (Fd : in out C_Int) is
          Ignored : C_Int;
@@ -919,31 +876,59 @@ package body Hostkit.Fs is
          end if;
       end Free;
 
+      --  The entry Name in Fd ("" with At_Empty_Path: Fd itself), not
+      --  followed. Nothing is asked of a descriptor an open did not give.
       function Info_At (Fd : C_Int; Name : String; Flags : C_U32) return Identity is
-         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
-         Info : aliased Statx_Record;
+         C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
+         Info   : aliased Statx_Record;
          Result : Identity;
       begin
-         if C_Statx (Fd, C_Name, Flags, Statx_Type_Inode, Info'Access) = 0
+         if Fd < 0 then
+            return Result;
+         end if;
+         C_Name := Interfaces.C.Strings.New_String (Name);
+         if C_Statx (Fd, C_Name, Flags, Statx_Wanted, Info'Access) = 0
            and then (Info.Mask and Statx_Type_Inode) = Statx_Type_Inode
          then
-            Result := (Info.File_Major, Info.File_Minor, Info.Inode, Info.Mode, True);
+            Result :=
+              (Mask         => Info.Mask,
+               Mode         => Info.Mode,
+               Inode        => Info.Inode,
+               Device_Major => Info.Device_Major,
+               Device_Minor => Info.Device_Minor,
+               Mount_Id     => Info.Mount_Id,
+               Available    => True);
          end if;
          Free (C_Name);
          return Result;
       exception
          when others =>
             Free (C_Name);
-            return Result;
+            return (others => <>);
       end Info_At;
       function Info_Of (Fd : C_Int) return Identity is
         (Info_At (Fd, "", At_Empty_Path));
       function Same (Left, Right : Identity) return Boolean is
         (Left.Available and then Right.Available
-         and then Left.Major = Right.Major and then Left.Minor = Right.Minor
+         and then Left.Device_Major = Right.Device_Major
+         and then Left.Device_Minor = Right.Device_Minor
          and then Left.Inode = Right.Inode);
       function Is_Directory (Item : Identity) return Boolean is
         (Item.Available and then (Item.Mode and File_Type_Mask) = Directory_Type);
+      --  Whether Child, seen in the held folder Parent, is on another mount.
+      --  The walk stops there with EXDEV: a filesystem mounted inside the
+      --  tree is not the tree's to empty, nor its mount point to remove.
+      function Crosses_Mount (Parent, Child : Identity) return Boolean is
+         function Record_Of (Item : Identity) return Statx_Record is
+           (Statx_Record'
+              (Mask         => Item.Mask,
+               Device_Major => Item.Device_Major,
+               Device_Minor => Item.Device_Minor,
+               Mount_Id     => Item.Mount_Id,
+               others       => <>));
+      begin
+         return Hostkit.Linux_Abi.Crosses_Mount (Record_Of (Parent), Record_Of (Child));
+      end Crosses_Mount;
 
       function C_Lseek (Fd : C_Int; Offset : Interfaces.C.long; Whence : C_Int) return Interfaces.C.long
         with Import, Convention => C, External_Name => "lseek";
@@ -1014,6 +999,11 @@ package body Hostkit.Fs is
             return False;
       end Read_Names;
 
+      --  Empty the held folder Held, seen as Held_Info, then remove it from
+      --  its parent and hold that parent instead. On a failure Held is
+      --  closed and errno says why: each failing call's errno is kept from
+      --  before the clean-up, and nothing is asked of a descriptor an open
+      --  did not give, which would answer EBADF over the open's EACCES.
       function Delete_Held
         (Held : in out C_Int; Held_Info : Identity; Own_Name : String;
          Expected_Parent : Identity; Depth : Natural) return Boolean
@@ -1029,40 +1019,63 @@ package body Hostkit.Fs is
          while Full loop
             Names.Clear;
             if not Read_Names (Held, Names, Full) then
-               Close (Held);
+               declare
+                  Error : constant C_Int := Errno;
+               begin
+                  Close (Held);
+                  Set_Errno (Error);
+               end;
                return False;
             end if;
             for Name of Names loop
                declare
                   Observed : constant Identity := Info_At (Held, Name, At_Symlink_Nofollow);
+                  Error : C_Int := (if Observed.Available then 0 else Errno);
                   C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
                   Child : C_Int := -1;
                begin
                   if not Observed.Available then
                      Ok := False;
+                  elsif Crosses_Mount (Held_Info, Observed) then
+                     Ok := False;
+                     Error := E_Xdev;
                   elsif not Is_Directory (Observed) then
                      Ok := C_Unlinkat (Held, C_Name, 0) = 0;
+                     if not Ok then
+                        Error := Errno;
+                     end if;
                   else
                      Child := C_Openat (Held, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
-                     declare
-                        Child_Info : constant Identity := Info_Of (Child);
-                     begin
-                        Ok := Child >= 0 and then Is_Directory (Child_Info) and then Same (Observed, Child_Info);
-                        if Ok then
-                           Close (Held);
-                           Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
-                           Held := Child;
+                     if Child < 0 then
+                        Ok := False;
+                        Error := Errno;
+                     else
+                        declare
+                           Child_Info : constant Identity := Info_Of (Child);
+                        begin
+                           Ok := Is_Directory (Child_Info) and then Same (Observed, Child_Info);
                            if Ok then
-                              Ok := Same (Held_Info, Info_Of (Held));
+                              Close (Held);
+                              Ok := Delete_Held (Child, Child_Info, Name, Held_Info, Depth + 1);
+                              if not Ok then
+                                 Error := Errno;
+                              end if;
+                              Held := Child;
+                              if Ok then
+                                 Ok := Same (Held_Info, Info_Of (Held));
+                              end if;
+                           else
+                              Close (Child);
                            end if;
-                        else
-                           Close (Child);
-                        end if;
-                     end;
+                        end;
+                     end if;
                   end if;
                   Free (C_Name);
                   if not Ok then
                      Close (Held);
+                     if Error /= 0 then
+                        Set_Errno (Error);
+                     end if;
                      return False;
                   end if;
                exception
@@ -1077,6 +1090,7 @@ package body Hostkit.Fs is
          declare
             Dotdot : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String ("..");
             Parent : C_Int := C_Openat (Held, Dotdot, O_Rdonly + O_Directory + O_Cloexec);
+            Error : C_Int := (if Parent < 0 then Errno else 0);
             Current : constant Identity := Info_At (Parent, Own_Name, At_Symlink_Nofollow);
             C_Own : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Own_Name);
          begin
@@ -1086,10 +1100,16 @@ package body Hostkit.Fs is
             Close (Held);
             if Ok then
                Ok := C_Unlinkat (Parent, C_Own, At_Removedir) = 0;
+               if not Ok then
+                  Error := Errno;
+               end if;
             end if;
             Free (C_Own);
             if not Ok then
                Close (Parent);
+               if Error /= 0 then
+                  Set_Errno (Error);
+               end if;
                return False;
             end if;
             Held := Parent;
@@ -1104,35 +1124,55 @@ package body Hostkit.Fs is
          end;
       end Delete_Held;
 
+      --  Delete Name in the held folder Parent, which is closed after. The
+      --  tree's own root is held to the same rule as each entry under it: on
+      --  another mount than its folder, it is refused with EXDEV.
       function Delete_At (Parent : in out C_Int; Name : String) return Boolean is
+         Parent_Info : constant Identity := Info_Of (Parent);
          Observed : constant Identity := Info_At (Parent, Name, At_Symlink_Nofollow);
+         Error : C_Int := (if Observed.Available and then Parent_Info.Available then 0 else Errno);
          C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
          Child : C_Int := -1;
          Ok : Boolean;
       begin
-         if not Observed.Available then
+         if not Observed.Available or else not Parent_Info.Available then
             Ok := False;
+         elsif Crosses_Mount (Parent_Info, Observed) then
+            Ok := False;
+            Error := E_Xdev;
          elsif not Is_Directory (Observed) then
             Ok := C_Unlinkat (Parent, C_Name, 0) = 0;
+            if not Ok then
+               Error := Errno;
+            end if;
          else
             Child := C_Openat (Parent, C_Name, O_Rdonly + O_Directory + O_Nofollow + O_Cloexec);
-            declare
-               Child_Info : constant Identity := Info_Of (Child);
-               Parent_Info : constant Identity := Info_Of (Parent);
-            begin
-               Ok := Child >= 0 and then Is_Directory (Child_Info)
-                 and then Same (Observed, Child_Info) and then Parent_Info.Available;
-               if Ok then
-                  Close (Parent);
-                  Ok := Delete_Held (Child, Child_Info, Name, Parent_Info, 0);
-                  Parent := Child;
-               else
-                  Close (Child);
-               end if;
-            end;
+            if Child < 0 then
+               Ok := False;
+               Error := Errno;
+            else
+               declare
+                  Child_Info : constant Identity := Info_Of (Child);
+               begin
+                  Ok := Is_Directory (Child_Info) and then Same (Observed, Child_Info);
+                  if Ok then
+                     Close (Parent);
+                     Ok := Delete_Held (Child, Child_Info, Name, Parent_Info, 0);
+                     if not Ok then
+                        Error := Errno;
+                     end if;
+                     Parent := Child;
+                  else
+                     Close (Child);
+                  end if;
+               end;
+            end if;
          end if;
          Free (C_Name);
          Close (Parent);
+         if not Ok and then Error /= 0 then
+            Set_Errno (Error);
+         end if;
          return Ok;
       exception
          when others =>

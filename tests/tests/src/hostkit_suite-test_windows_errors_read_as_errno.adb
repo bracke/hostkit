@@ -28,6 +28,7 @@ begin
    Assert (Errno_Of (145) = 41, "ERROR_DIR_NOT_EMPTY is ENOTEMPTY");
    Assert (Errno_Of (17) = 18, "ERROR_NOT_SAME_DEVICE is EXDEV");
    Assert (Errno_Of (1314) = 1, "ERROR_PRIVILEGE_NOT_HELD is EPERM");
+   Assert (Errno_Of (681) = 114, "ERROR_STOPPED_ON_SYMLINK is ELOOP, the UCRT's 114");
    Assert (Errno_Of (123) = 22, "ERROR_INVALID_NAME is EINVAL");
    Assert (Errno_Of (99_999) = 22, "an unknown code is EINVAL, as _dosmaperr reads one");
 

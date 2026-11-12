@@ -118,6 +118,15 @@ package body Hostkit_Suite is
          What & ": links are needed here and the host refused one");
    end Links_Refused;
 
+   --  ELOOP, a link refused rather than followed: errno.h's own number on
+   --  each host (the Windows runtime's POSIX supplement on Windows).
+   function E_Loop return Integer is
+     (case Hostkit.Host.Current is
+         when Hostkit.Host.Linux   => 40,
+         when Hostkit.Host.MacOS   => 62,
+         when Hostkit.Host.Windows => 114,
+         when Hostkit.Host.Unsupported => 0);
+
    procedure Delete_Tree_If_Present (Path : String) is
    begin
       if Path /= "" and then Ada.Directories.Exists (Path) then
@@ -277,6 +286,34 @@ package body Hostkit_Suite is
    is separate;
 
    procedure Test_Delete_Empty_Directory
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  The walk of Delete_Tree_No_Follow stays on its own mount, and a
+   --  refusal reaches the caller as the call that refused set errno: a
+   --  folder the walk may not open is EACCES, not the EBADF of asking a
+   --  descriptor that open never gave.
+   procedure Test_Delete_Tree_Stays_On_Its_Mount
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  An NT (\??\) or long (\\?\) name read back from Windows is put in
+   --  the form Win32 text carries -- without the prefix only before a drive
+   --  or UNC\ -- one rule for links, real paths, devices and the Recycle Bin.
+   procedure Test_Windows_Nt_Names_Read_As_Win32
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A refused metadata update says why through errno on every host: a
+   --  link is ELOOP, another entry than the one asked about ENOENT, an id
+   --  out of range EINVAL.
+   procedure Test_A_Refused_Update_Says_Why
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A character device reports the device it stands for (stx_rdev), not
+   --  the volume its node is on (stx_dev).
+   procedure Test_A_Device_File_Names_Its_Own_Device
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -753,6 +790,18 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Delete_Empty_Directory'Access,
          "fs : only an empty directory is deleted, and a refusal is an answer");
+      Register_Routine
+        (T, Test_Delete_Tree_Stays_On_Its_Mount'Access,
+         "fs : a tree delete stays on its own mount, and a refusal keeps its errno");
+      Register_Routine
+        (T, Test_Windows_Nt_Names_Read_As_Win32'Access,
+         "fs : an NT or long Windows name reads as Win32 text, a volume keeping its prefix");
+      Register_Routine
+        (T, Test_A_Refused_Update_Says_Why'Access,
+         "metadata : a refused update says why: ELOOP for a link, ENOENT for another entry, EINVAL");
+      Register_Routine
+        (T, Test_A_Device_File_Names_Its_Own_Device'Access,
+         "fs : a device file reports the device it stands for, not its volume");
       Register_Routine
         (T, Test_Hard_Link_To_A_Long_Path'Access,
          "fs : a hard link reaches a file past the Windows path limit");

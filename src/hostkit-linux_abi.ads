@@ -3,13 +3,17 @@ with Interfaces.C;
 
 --  Pieces of the Linux kernel ABI that more than one Linux body needs: the
 --  statx(2) record, and the open(2) flags whose values depend on the machine.
+--  Every Linux body reads statx through this one record: in struct statx the
+--  stx_rdev pair (the device a device file stands for) comes before the
+--  stx_dev pair (the device holding the entry), and local copies had named
+--  them the other way round.
 --
 --  In the shared source rather than src/platform/linux for two reasons. Two
 --  bodies need the same layout, and each had grown its own copy -- one of them
 --  with C long for the 64-bit fields, which is 32 bits on 32-bit Linux and
 --  shifts every field after the first. And the choice of flag values is pure
 --  logic over a machine name, which a test on any host can feed "aarch64".
---  Nothing here is called on another host; it only declares.
+--  Nothing here makes a system call; what it computes is pure.
 package Hostkit.Linux_Abi is
 
    subtype C_Int is Interfaces.C.int;
@@ -59,6 +63,24 @@ package Hostkit.Linux_Abi is
    At_Empty_Path : constant C_Int := 16#1000#;
    Statx_Mode    : constant C_U32 := 16#2#;
    Statx_Uid     : constant C_U32 := 16#8#;
+   Statx_Ino     : constant C_U32 := 16#100#;
+   Statx_Btime   : constant C_U32 := 16#800#;
+   --  STATX_MNT_ID, since Linux 5.8; an older kernel leaves it out of Mask.
+   Statx_Mnt_Id  : constant C_U32 := 16#1000#;
+
+   --  Whether Child, an entry read in the folder Parent, is on another mount.
+   --  Where the kernel gave both mount ids (STATX_MNT_ID, Linux 5.8 on) they
+   --  say it: a bind mount of the same device is another mount, while a
+   --  btrfs subvolume, or a file overlayfs reports with its lower layer's
+   --  device, is on its folder's mount. Without them it is another device
+   --  (stx_dev, the device that holds the entry -- never stx_rdev, the one a
+   --  device file stands for). A delete that walks a tree stops there rather
+   --  than empty a filesystem that only happens to be mounted inside it.
+   --
+   --  @param Parent The folder's statx.
+   --  @param Child The entry's statx, not following a link.
+   --  @return True when Child is on another device or mount than Parent.
+   function Crosses_Mount (Parent, Child : Statx_Record) return Boolean;
 
    --  Flags with one value on every Linux machine.
    O_Nonblock : constant C_Int := 16#800#;

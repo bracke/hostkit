@@ -99,6 +99,7 @@ package Hostkit.Trash.Recycle_Bin_Format is
 
    --  Path without a \\?\ prefix: \\?\C:\x is C:\x and \\?\UNC\s\x is \\s\x.
    --  A volume GUID path (\\?\Volume{...}\x) has no other form and is kept.
+   --  The rule is Hostkit.Windows_Paths.Win32_Form's, which this is.
    --
    --  @param Path Any path.
    --  @return Path in the form the shell and a $I file use.

@@ -15,48 +15,9 @@ package body Hostkit.Private_Paths is
    subtype C_Int is Interfaces.C.int;
    subtype C_U16 is Interfaces.C.unsigned_short;
    subtype C_U32 is Interfaces.C.unsigned;
-   subtype C_U64 is Interfaces.C.unsigned_long;
-   subtype C_S64 is Interfaces.C.long;
 
-   type U16_Array is array (Positive range <>) of C_U16
-     with Convention => C;
-   type U64_Array is array (Positive range <>) of C_U64
-     with Convention => C;
-
-   type Statx_Timestamp is record
-      Seconds     : C_S64;
-      Nanoseconds : C_U32;
-      Reserved    : C_U32;
-   end record
-     with Convention => C;
-
-   type Statx_Record is record
-      Mask            : C_U32;
-      Block_Size      : C_U32;
-      Attributes      : C_U64;
-      Link_Count      : C_U32;
-      User_Id         : C_U32;
-      Group_Id        : C_U32;
-      Mode            : C_U16;
-      Spare_0         : U16_Array (1 .. 1);
-      Inode           : C_U64;
-      Size            : C_U64;
-      Blocks          : C_U64;
-      Attributes_Mask : C_U64;
-      Access_Time     : Statx_Timestamp;
-      Birth_Time      : Statx_Timestamp;
-      Change_Time     : Statx_Timestamp;
-      Modified_Time   : Statx_Timestamp;
-      Device_Major    : C_U32;
-      Device_Minor    : C_U32;
-      File_Major      : C_U32;
-      File_Minor      : C_U32;
-      Mount_Id        : C_U64;
-      Direct_Io_Memory_Align : C_U32;
-      Direct_Io_Offset_Align : C_U32;
-      Spare_3         : U64_Array (1 .. 12);
-   end record
-     with Convention => C;
+   --  struct statx, one layout for every Linux body (Hostkit.Linux_Abi).
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
 
    O_Path      : constant C_Int := 8#10000000#;
    --  Per machine: arm, powerpc and m68k have their own (Hostkit.Linux_Abi).

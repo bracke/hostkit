@@ -21,26 +21,8 @@ package body Hostkit.Lease_Files is
    subtype C_U64 is Interfaces.C.unsigned_long;
    subtype C_S64 is Interfaces.C.long;
 
-   type U16_Array is array (Positive range <>) of C_U16 with Convention => C;
-   type U64_Array is array (Positive range <>) of C_U64 with Convention => C;
-   type Timestamp is record
-      Seconds : C_S64;
-      Nanoseconds : C_U32;
-      Reserved : C_U32;
-   end record with Convention => C;
-   type Statx_Record is record
-      Mask, Block_Size : C_U32;
-      Attributes : C_U64;
-      Link_Count, User_Id, Group_Id : C_U32;
-      Mode : C_U16;
-      Spare_0 : U16_Array (1 .. 1);
-      Inode, File_Size, Blocks, Attributes_Mask : C_U64;
-      Access_Time, Birth_Time, Change_Time, Modified_Time : Timestamp;
-      Device_Major, Device_Minor, File_Major, File_Minor : C_U32;
-      Mount_Id : C_U64;
-      Direct_Io_Memory_Align, Direct_Io_Offset_Align : C_U32;
-      Spare_3 : U64_Array (1 .. 12);
-   end record with Convention => C;
+   --  struct statx, one layout for every Linux body (Hostkit.Linux_Abi).
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
 
    O_Rdonly : constant C_Int := 0;
    O_Rdwr : constant C_Int := 2;
@@ -348,11 +330,11 @@ package body Hostkit.Lease_Files is
       Info : aliased Statx_Record;
    begin
       if not Item.Held or else not Info_Of (C_Int (Item.Handle), Info'Access)
-        or else Info.File_Size > C_U64 (Long_Long_Integer'Last)
+        or else Info.Size > Interfaces.Unsigned_64 (Long_Long_Integer'Last)
       then
          return -1;
       end if;
-      return Long_Long_Integer (Info.File_Size);
+      return Long_Long_Integer (Info.Size);
    exception
       when others => return -1;
    end Size;
@@ -365,7 +347,7 @@ package body Hostkit.Lease_Files is
       end if;
       return
         (Available => True,
-         Volume => Device_Number (Info.File_Major, Info.File_Minor),
+         Volume => Device_Number (Info.Device_Major, Info.Device_Minor),
          Low => Interfaces.Unsigned_64 (Info.Inode), High => 0);
    exception
       when others => return (others => <>);
@@ -396,7 +378,7 @@ package body Hostkit.Lease_Files is
       Left := Identity (Item);
       Right :=
         (Available => True,
-         Volume => Device_Number (Info.File_Major, Info.File_Minor),
+         Volume => Device_Number (Info.Device_Major, Info.Device_Minor),
          Low => Interfaces.Unsigned_64 (Info.Inode), High => 0);
       Ignored := C_Close (Fd);
       return Left.Available and then Right.Available

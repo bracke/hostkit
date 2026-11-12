@@ -73,12 +73,16 @@ is
    --  one asked about. Answer.Identity is the identity read; a refusal says
    --  why through errno, as the open's does.
    function Held_Entry_Refused return Boolean is
-      Error   : Interfaces.Unsigned_32;
-      Refused : Boolean := True;
+      Error      : Interfaces.Unsigned_32;
+      Link_Error : C_DWord;
+      Refused    : Boolean := True;
    begin
       Answer.Identity := Identity_From_Handle (File, Info'Access, Error);
-      if not Answer.Identity.Available or else Is_Held_Link (File, Info.Attributes, Error) then
+      if not Answer.Identity.Available then
          null;
+      elsif Is_Held_Link (File, Info.Attributes, Link_Error) then
+         --  ERROR_STOPPED_ON_SYMLINK, ELOOP as POSIX's O_NOFOLLOW gives.
+         Error := Interfaces.Unsigned_32 (Link_Error);
       elsif Check_Expected and then Answer.Identity /= Expected then
          --  Path names another entry now than the one asked about.
          Error := Error_File_Not_Found;

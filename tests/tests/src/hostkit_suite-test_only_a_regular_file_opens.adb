@@ -26,8 +26,12 @@ begin
       Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a folder is not a regular file");
 
       if Hostkit.Fs.Create_Link (File, Link) then
+         GNAT.OS_Lib.Set_Errno (0);
          Fd := Hostkit.Regular_Files.Open_Read (Link, False, Supported);
          Assert (Fd = GNAT.OS_Lib.Invalid_FD, "a link is refused when links are not followed");
+         Assert
+           (GNAT.OS_Lib.Errno = E_Loop,
+            "and the refusal is ELOOP, as O_NOFOLLOW's is:" & Integer'Image (GNAT.OS_Lib.Errno));
          Fd := Hostkit.Regular_Files.Open_Read (Link, True, Supported);
          Assert (Fd /= GNAT.OS_Lib.Invalid_FD, "and opens its regular target when they are");
          GNAT.OS_Lib.Close (Fd);

@@ -36,6 +36,18 @@ package Hostkit.Windows_Paths is
    --  take the prefix too: Windows resolves ".." in the text, not through a
    --  link, so the two read the same. A short path is left as it is.
 
+   function Win32_Form (Path : String) return String;
+   --  Path, a name as Windows hands one back in an NT (\??\) or long
+   --  (\\?\) form -- a link's substitute name, GetFinalPathNameByHandleW's
+   --  answer -- in the form Win32 text carries. The prefix is dropped only
+   --  where a plain path names the same entry: before a drive (\??\C:\x and
+   --  \\?\C:\x are C:\x) and before UNC\ (\??\UNC\server\share and
+   --  \\?\UNC\server\share are \\server\share). Anything else behind the
+   --  prefix -- Volume{GUID}\, GLOBALROOT\ -- has no plain form, and comes
+   --  back in the \\?\ form a Win32 call opens as it is, never as the
+   --  relative "Volume{...}\" that stripping the prefix would leave. Text
+   --  with neither prefix is returned as it is.
+
    function Native (Path : String) return Wide_String;
    --  Native_Form (Path, Fs.Current_Directory) as UTF-16 (From_UTF_8) with a
    --  terminating NUL, ready to pass by address to a wide file API.

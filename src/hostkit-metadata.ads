@@ -65,8 +65,11 @@ package Hostkit.Metadata is
 
    --  A no-follow identity for one directory entry. The generation fields
    --  carry birth time on POSIX and the upper half of a 128-bit file ID on
-   --  Windows. Available is False rather than returning an inode alone when
-   --  the host cannot distinguish reuse of that inode.
+   --  Windows. A filesystem that keeps no birth time (statx without
+   --  STATX_BTIME on Linux) still gives an identity, its generation zero:
+   --  two reads of one entry compare equal, and only a reuse of the inode
+   --  on that volume goes unseen. Available is False only when the entry
+   --  could not be read or the host gives no file number.
    type Entry_Identity is record
       Available       : Boolean := False;
       Volume          : Identity_Field := 0;
@@ -114,7 +117,9 @@ package Hostkit.Metadata is
    end record;
 
    --  Change metadata through a handle that pins Path to one filesystem entry.
-   --  Symbolic links are refused. When Check_Expected is True, the mutation is
+   --  Symbolic links are refused. A refusal says why through errno, as a
+   --  failing call does: a link is ELOOP, another entry than Expected is
+   --  ENOENT, an id out of range EINVAL. When Check_Expected is True, the mutation is
    --  performed only when the held entry has Expected's identity. Previous
    --  values and the identity are captured from that same held entry, so a
    --  pathname replacement cannot redirect a history or undo operation.

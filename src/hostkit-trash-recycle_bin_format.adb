@@ -215,21 +215,8 @@ package body Hostkit.Trash.Recycle_Bin_Format is
       return "$R" & Suffix & Original_Leaf (Dot .. Original_Leaf'Last);
    end Recycled_Name_For;
 
-   function Without_Long_Prefix (Path : String) return String is
-   begin
-      if Path'Length >= 8 and then Path (Path'First .. Path'First + 3) = "\\?\"
-        and then Ada.Characters.Handling.To_Upper (Path (Path'First + 4 .. Path'First + 7)) = "UNC\"
-      then
-         return "\\" & Path (Path'First + 8 .. Path'Last);
-      elsif Path'Length >= 6 and then Path (Path'First .. Path'First + 3) = "\\?\"
-        and then Ada.Characters.Handling.Is_Letter (Path (Path'First + 4))
-        and then Path (Path'First + 5) = ':'
-      then
-         return Path (Path'First + 4 .. Path'Last);
-      end if;
-      --  \\?\Volume{...}\ and the like have no other form.
-      return Path;
-   end Without_Long_Prefix;
+   --  \\?\Volume{...}\ and the like have no other form, and keep the prefix.
+   function Without_Long_Prefix (Path : String) return String renames Hostkit.Windows_Paths.Win32_Form;
 
    function Inside_Recycle_Bin (Path : String) return Boolean is
       Part_First : Positive := Path'First;

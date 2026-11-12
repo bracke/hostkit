@@ -32,10 +32,6 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
    type Disposition_Info_Ex is record
       Flags : C_DWord;
    end record with Convention => C;
-   type Attribute_Tag_Info is record
-      Attributes : C_DWord;
-      Reparse_Tag : Interfaces.Unsigned_32;
-   end record with Convention => C;
    type Child (Length : Natural) is record
       Name : U16_Array (1 .. Length);
       Id   : Interfaces.Unsigned_64;
@@ -54,13 +50,17 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
    Id_Both_Directory_Info : constant Interfaces.C.int := 10;
    Id_Both_Directory_Restart_Info : constant Interfaces.C.int := 11;
    File_Disposition_Info : constant Interfaces.C.int := 4;
-   File_Attribute_Tag_Info : constant Interfaces.C.int := 9;
    File_Disposition_Info_Ex : constant Interfaces.C.int := 21;
    --  FILE_DISPOSITION_FLAG_DELETE, _POSIX_SEMANTICS and
    --  _IGNORE_READONLY_ATTRIBUTE: a read-only file (git marks its objects
    --  so) is deleted like any other, as it is on POSIX hosts.
    Disposition_Delete_Flags : constant C_DWord := 16#1# + 16#2# + 16#10#;
    Error_No_More_Files : constant C_DWord := 18;
+   --  Errors for a refusal no Win32 call reported, put into errno through
+   --  Hostkit.Windows_Errors: the entry opened is not the one listed
+   --  (ENOENT), a listing that does not parse (EIO).
+   Error_File_Not_Found : constant Interfaces.Unsigned_32 := 2;
+   Error_Io_Device : constant Interfaces.Unsigned_32 := 1117;
 
    function Set_File_Information
      (Handle : System.Address; Kind : Interfaces.C.int;
@@ -98,29 +98,33 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
       return Handle;
    end Open_For_Delete;
 
-   --  Drop the read-only attribute of the entry held as Held, keeping
-   --  the others: False where it has none or it cannot be dropped.
-   function Drop_Read_Only (Held : System.Address; Info : By_Handle_File_Information) return Boolean is
+   Read_Only_Attribute : constant C_DWord := 16#0000_0001#;
+
+   --  Set the attributes of the entry held as Held, leaving its times as
+   --  they are: False where they cannot be set.
+   function Set_Attributes (Held : System.Address; Attributes : C_DWord) return Boolean is
       --  FILE_BASIC_INFO: 40 bytes, its DWORD padded to the next 8.
       type Basic_Info is record
          Creation, Last_Access, Last_Write, Change : Interfaces.Integer_64;
          Attributes : C_DWord;
          Padding    : C_DWord := 0;
       end record with Convention => C;
-      Read_Only_Attribute : constant C_DWord := 16#0000_0001#;
+      pragma Compile_Time_Error (Basic_Info'Size /= 40 * 8, "Win32 FILE_BASIC_INFO must be 40 bytes");
       Normal_Attribute    : constant C_DWord := 16#0000_0080#;
       File_Basic_Info     : constant Interfaces.C.int := 0;
-      --  Zero times leave each time as it is.
-      Basic : aliased Basic_Info := (0, 0, 0, 0, Info.Attributes and not Read_Only_Attribute, 0);
+      --  Zero times leave each time as it is; no attributes at all is
+      --  FILE_ATTRIBUTE_NORMAL, as zero would leave them unchanged.
+      Basic : aliased Basic_Info :=
+        (0, 0, 0, 0, (if Attributes = 0 then Normal_Attribute else Attributes), 0);
    begin
-      if (Info.Attributes and Read_Only_Attribute) = 0 then
-         return False;
-      end if;
-      if Basic.Attributes = 0 then
-         Basic.Attributes := Normal_Attribute;
-      end if;
       return Set_File_Information (Held, File_Basic_Info, Basic'Address, C_DWord (Basic_Info'Size / 8)) /= 0;
-   end Drop_Read_Only;
+   end Set_Attributes;
+
+   --  Drop the read-only attribute of the entry held as Held, keeping
+   --  the others: False where it has none or it cannot be dropped.
+   function Drop_Read_Only (Held : System.Address; Info : By_Handle_File_Information) return Boolean is
+     ((Info.Attributes and Read_Only_Attribute) /= 0
+      and then Set_Attributes (Held, Info.Attributes and not Read_Only_Attribute));
 
    function File_Index (Info : By_Handle_File_Information) return Interfaces.Unsigned_64 is
      (Interfaces.Unsigned_64 (Info.File_Index_High) * 2 ** 32
@@ -133,7 +137,10 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
      (Directory : System.Address; Items : in out Child_Vectors.Vector; Full : out Boolean)
       return Boolean
    is
-      Buffer : aliased Byte_Array (0 .. 65_535);
+      --  FILE_ID_BOTH_DIR_INFO holds LARGE_INTEGERs, and each record is
+      --  read in place through Directory_Header: the buffer is aligned for
+      --  them, as the records in it are by their offsets.
+      Buffer : aliased Byte_Array (0 .. 65_535) with Alignment => 8;
       Kind : Interfaces.C.int := Id_Both_Directory_Restart_Info;
       Name_Bytes : Natural := 0;
    begin
@@ -142,7 +149,15 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
          if Get_File_Information_Ex
            (Directory, Kind, Buffer'Address, C_DWord (Buffer'Length)) = 0
          then
-            return Get_Last_Error = Error_No_More_Files;
+            declare
+               Error : constant C_DWord := Get_Last_Error;
+            begin
+               if Error = Error_No_More_Files then
+                  return True;
+               end if;
+               Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
+               return False;
+            end;
          end if;
          Kind := Id_Both_Directory_Info;
          declare
@@ -157,6 +172,7 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
                   Dot : Boolean := False;
                begin
                   if Offset + 104 + Natural (Header.Name_Length) > Buffer'Length then
+                     Hostkit.Windows_Errors.Set_Errno_From (Error_Io_Device);
                      return False;
                   end if;
                   for Index in 1 .. Length loop
@@ -183,6 +199,7 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
                   end if;
                   exit when Header.Next_Offset = 0;
                   if Natural (Header.Next_Offset) > Buffer'Length - Offset then
+                     Hostkit.Windows_Errors.Set_Errno_From (Error_Io_Device);
                      return False;
                   end if;
                   Offset := Offset + Natural (Header.Next_Offset);
@@ -192,6 +209,7 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
       end loop;
    exception
       when others =>
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Io_Device);
          return False;
    end Read_Children;
 
@@ -225,23 +243,15 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
    end Child_Path;
 
    --  Whether the held entry is a link to leave alone rather than a
-   --  folder to empty: only the symbolic-link and junction tags are, as
-   --  in Is_Link. A OneDrive placeholder folder is a reparse point too,
-   --  and its contents are the user's. An unreadable tag counts as a link.
-   function Is_Held_Link (Held : System.Address; Info : By_Handle_File_Information) return Boolean is
-      Tag_Info : aliased Attribute_Tag_Info;
+   --  folder to empty: only the symbolic-link and junction tags are
+   --  (Hostkit.Win32.Is_Held_Link). A OneDrive placeholder folder is a
+   --  reparse point too, and its contents are the user's. An unreadable tag
+   --  counts as a link: the link itself is deleted, never what it names.
+   function Holds_Link (Held : System.Address; Info : By_Handle_File_Information) return Boolean is
+      Ignored : C_DWord;
    begin
-      if (Info.Attributes and File_Attribute_Reparse_Point) = 0 then
-         return False;
-      end if;
-      if Get_File_Information_Ex
-        (Held, File_Attribute_Tag_Info, Tag_Info'Address, C_DWord (Attribute_Tag_Info'Size / 8)) = 0
-      then
-         return True;
-      end if;
-      return Tag_Info.Reparse_Tag = Io_Reparse_Tag_Symlink
-        or else Tag_Info.Reparse_Tag = Io_Reparse_Tag_Mount_Point;
-   end Is_Held_Link;
+      return Is_Held_Link (Held, Info.Attributes, Ignored);
+   end Holds_Link;
 
    function Delete_Held (Held : System.Address; Depth : Natural) return Boolean is
       Info : aliased By_Handle_File_Information;
@@ -251,8 +261,11 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
       Full : Boolean := True;
       Ignored : Interfaces.C.int;
    begin
+      if not Ok and then Depth <= Max_Depth then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+      end if;
       if Ok and then (Info.Attributes and File_Attribute_Directory) /= 0
-        and then not Is_Held_Link (Held, Info)
+        and then not Holds_Link (Held, Info)
       then
          while Ok and then Full loop
             Items.Clear;
@@ -269,9 +282,17 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
                      Hostkit.Errors.Set_Errno_From_Last_Error;
                   end if;
                   Ok := Child_Handle /= Invalid_Handle_Value
-                    and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
-                    and then Child_Info.Volume_Serial = Info.Volume_Serial
-                    and then File_Index (Child_Info) = Item.Id;
+                    and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0;
+                  if not Ok and then Child_Handle /= Invalid_Handle_Value then
+                     Hostkit.Errors.Set_Errno_From_Last_Error;
+                  elsif Ok
+                    and then (Child_Info.Volume_Serial /= Info.Volume_Serial
+                              or else File_Index (Child_Info) /= Item.Id)
+                  then
+                     --  Another entry than the one listed is at the name now.
+                     Ok := False;
+                     Hostkit.Windows_Errors.Set_Errno_From (Error_File_Not_Found);
+                  end if;
                   if Ok then
                      Ok := Delete_Held (Child_Handle, Depth + 1);
                      Child_Handle := Invalid_Handle_Value;
@@ -286,6 +307,7 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
          declare
             Disposition_Ex : aliased Disposition_Info_Ex := (Flags => Disposition_Delete_Flags);
             Disposition : aliased Disposition_Info := (Delete_File => 1);
+            Error : C_DWord := 0;
          begin
             --  The extended form needs Windows 10 1809 and NTFS; elsewhere
             --  the plain one still deletes what is not read-only.
@@ -294,15 +316,29 @@ function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
                C_DWord (Disposition_Info_Ex'Size / 8)) /= 0
               or else Set_File_Information
                 (Held, File_Disposition_Info, Disposition'Address,
-                 C_DWord (Disposition_Info'Size / 8)) /= 0
-              or else (Drop_Read_Only (Held, Info)
-                       and then Set_File_Information
-                         (Held, File_Disposition_Info, Disposition'Address,
-                          C_DWord (Disposition_Info'Size / 8)) /= 0);
+                 C_DWord (Disposition_Info'Size / 8)) /= 0;
             if not Ok then
                --  Why the plain form refused: a folder not empty, a file
                --  held open without delete sharing, a refused right.
-               Hostkit.Errors.Set_Errno_From_Last_Error;
+               Error := Get_Last_Error;
+               --  A read-only entry on a volume without the extended form
+               --  (FAT, exFAT) goes once the attribute is dropped. If it
+               --  still will not go, the attribute is put back: an entry
+               --  that stays is left as it was found.
+               if Drop_Read_Only (Held, Info) then
+                  Ok := Set_File_Information
+                    (Held, File_Disposition_Info, Disposition'Address,
+                     C_DWord (Disposition_Info'Size / 8)) /= 0;
+                  if not Ok then
+                     Error := Get_Last_Error;
+                     if not Set_Attributes (Held, Info.Attributes) then
+                        null;
+                     end if;
+                  end if;
+               end if;
+               if not Ok then
+                  Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
+               end if;
             end if;
          end;
       end if;
