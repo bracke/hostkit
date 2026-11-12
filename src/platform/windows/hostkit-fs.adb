@@ -1085,6 +1085,7 @@ package body Hostkit.Fs is
       Delete_Access : constant C_DWord := 16#0001_0000#;
       File_List_Directory : constant C_DWord := 1;
       File_Read_Attributes : constant C_DWord := 16#80#;
+      File_Write_Attributes : constant C_DWord := 16#100#;
       Share_All : constant C_DWord := 7;
       Open_Existing : constant C_DWord := 3;
       Backup_Semantics : constant C_DWord := 16#0200_0000#;
@@ -1134,13 +1135,22 @@ package body Hostkit.Fs is
       --  reading (a mode-0 file) is opened again without it, since deleting
       --  needs no read: its folder's FILE_DELETE_CHILD grants the DELETE,
       --  as a POSIX folder's write bit lets an unreadable file go.
+      --  Writing the attributes is asked for too, where granted, so that a
+      --  read-only file can be let go on a volume without
+      --  FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE (FAT, exFAT).
       function Open_For_Delete (Name : System.Address) return System.Address is
          Error_Access_Denied : constant C_DWord := 5;
          Handle : System.Address := Create_File_W
-           (Name, Delete_Access + File_Read_Attributes + File_List_Directory,
+           (Name, Delete_Access + File_Read_Attributes + File_Write_Attributes + File_List_Directory,
             Share_All, System.Null_Address, Open_Existing,
             Backup_Semantics + Open_Reparse_Point, System.Null_Address);
       begin
+         if Handle = Invalid_Handle and then Get_Last_Error = Error_Access_Denied then
+            Handle := Create_File_W
+              (Name, Delete_Access + File_Read_Attributes + File_List_Directory,
+               Share_All, System.Null_Address, Open_Existing,
+               Backup_Semantics + Open_Reparse_Point, System.Null_Address);
+         end if;
          if Handle = Invalid_Handle and then Get_Last_Error = Error_Access_Denied then
             Handle := Create_File_W
               (Name, Delete_Access + File_Read_Attributes,
@@ -1149,6 +1159,28 @@ package body Hostkit.Fs is
          end if;
          return Handle;
       end Open_For_Delete;
+
+      --  Drop the read-only attribute of the entry held as Held, keeping
+      --  the others: False where it has none or it cannot be dropped.
+      function Drop_Read_Only (Held : System.Address; Info : Handle_Info) return Boolean is
+         type Basic_Info is record
+            Creation, Last_Access, Last_Write, Change : Interfaces.Integer_64;
+            Attributes : C_DWord;
+         end record with Convention => C;
+         Read_Only_Attribute : constant C_DWord := 16#0000_0001#;
+         Normal_Attribute    : constant C_DWord := 16#0000_0080#;
+         File_Basic_Info     : constant Interfaces.C.int := 0;
+         --  Zero times leave each time as it is.
+         Basic : aliased Basic_Info := (0, 0, 0, 0, Info.Attributes and not Read_Only_Attribute);
+      begin
+         if (Info.Attributes and Read_Only_Attribute) = 0 then
+            return False;
+         end if;
+         if Basic.Attributes = 0 then
+            Basic.Attributes := Normal_Attribute;
+         end if;
+         return Set_File_Information (Held, File_Basic_Info, Basic'Address, C_DWord (Basic_Info'Size / 8)) /= 0;
+      end Drop_Read_Only;
 
       function File_Index (Info : Handle_Info) return Interfaces.Unsigned_64 is
         (Interfaces.Unsigned_64 (Info.Index_High) * 2 ** 32
@@ -1322,7 +1354,11 @@ package body Hostkit.Fs is
                   C_DWord (Disposition_Info_Ex'Size / 8)) /= 0
                  or else Set_File_Information
                    (Held, File_Disposition_Info, Disposition'Address,
-                    C_DWord (Disposition_Info'Size / 8)) /= 0;
+                    C_DWord (Disposition_Info'Size / 8)) /= 0
+                 or else (Drop_Read_Only (Held, Info)
+                          and then Set_File_Information
+                            (Held, File_Disposition_Info, Disposition'Address,
+                             C_DWord (Disposition_Info'Size / 8)) /= 0);
                if not Ok then
                   --  Why the plain form refused: a folder not empty, a file
                   --  held open without delete sharing, a refused right.
