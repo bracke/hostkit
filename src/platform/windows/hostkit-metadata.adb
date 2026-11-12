@@ -905,9 +905,8 @@ package body Hostkit.Metadata is
 
    --  A permission edit, the minimal kind: see Set_Permissions in the spec.
 
-   Set_Access    : constant C_Int := 2;
-   Deny_Access   : constant C_Int := 3;
-   Revoke_Access : constant C_Int := 4;
+   Set_Access  : constant C_Int := 2;
+   Deny_Access : constant C_Int := 3;
 
    File_Append_Data         : constant C_DWord := 16#0000_0004#;
    File_Attribute_Directory : constant C_DWord := 16#0000_0010#;
@@ -1075,8 +1074,11 @@ package body Hostkit.Metadata is
                Build_Trustee_With_Sid (Entries (Count).Trustee'Access, Sids (Index));
                Entries (Count).Permissions := Triplet_To_Rights (New_Bits);
                --  SET_ACCESS replaces the trustee's explicit allow and deny
-               --  ACEs; with no bits left, REVOKE_ACCESS just removes them.
-               Entries (Count).Mode := (if New_Bits = 0 then Revoke_Access else Set_Access);
+               --  ACEs. With no bits left it still grants what a stat needs
+               --  (Triplet_To_Rights): REVOKE_ACCESS would leave a mode-0
+               --  entry no ACE at all, which its owner could then not even
+               --  rename or delete.
+               Entries (Count).Mode := Set_Access;
                Entries (Count).Inheritance := No_Inheritance;
                Entries (Count).Trustee.Form := Trustee_Is_Sid;
                Entries (Count).Trustee.Kind := Trustee_Is_Unknown;
@@ -1444,7 +1446,8 @@ package body Hostkit.Metadata is
          if Has_Owner and then Owner_Deny /= 0 then
             Append (Access_Denied_Ace, 0, Owner_Deny, Owner);
          end if;
-         if Has_Owner and then Owner_Bits /= 0 then
+         --  The owner's ACE even with no bits: it grants what a stat needs.
+         if Has_Owner then
             Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Owner_Bits), Owner);
          end if;
          if Has_Group and then Group_Deny /= 0 then
