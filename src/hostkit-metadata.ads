@@ -269,17 +269,21 @@ package Hostkit.Metadata is
    --
    --  A file made in a private staging folder and then renamed into place
    --  keeps what the stage handed it: on Windows a rename within a volume
-   --  carries a file's inherited ACEs along unchanged, so a copy published
-   --  from an owner-only stage would stay owner-only. Windows drops the
-   --  ACEs Path inherited, keeps those set on it explicitly, and inherits
-   --  afresh from the new parent (SetNamedSecurityInfoW with an unprotected
-   --  DACL), which carries on down to everything a directory holds. That
-   --  writes the change time of each entry it reaches. A volume without ACLs
-   --  (FAT, exFAT) has nothing to recompute, and a link is left alone (the
+   --  carries a file's ACEs along unchanged, so a copy published from an
+   --  owner-only stage would stay owner-only. Windows gives Path and
+   --  everything in it exactly what the new parent hands down: Path loses
+   --  every ACE and inherits afresh (SetNamedSecurityInfoW with an empty,
+   --  unprotected DACL, which carries on down to everything a directory
+   --  holds), and each entry inside then loses the ACEs set on it -- the
+   --  stage's, which an entry made in a folder created with an explicit
+   --  descriptor takes as its own rather than as inherited. That writes the
+   --  change time of each entry it reaches. A volume without ACLs (FAT,
+   --  exFAT) has nothing to recompute, and a link is left alone (the
    --  security calls would reach its target). POSIX hosts decide access by
    --  mode bits a rename does not touch, so there this does nothing.
    --
-   --  @param Path Entry whose inherited access is recomputed.
+   --  @param Path A new entry, published from a stage, whose access is
+   --  recomputed.
    --  @return True when it was, or there was nothing to do.
    function Inherit_From_Parent (Path : String) return Boolean;
 

@@ -357,6 +357,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Giving an entry the owner and group it has needs no right to change
+   --  them, which its owner need not hold (Windows' WRITE_OWNER).
+   procedure Test_An_Unchanged_Ownership_Needs_No_Right
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  A file someone holds without sharing writes is synced once they let
    --  go: Windows' Sync_File waits a sharing violation out.
    procedure Test_A_Held_File_Is_Synced_Once_Let_Go
@@ -772,6 +778,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_A_Mode_0_Entry_Is_Still_Seen'Access,
          "metadata : a mode-0 file is still looked at, renamed and deleted as its folder allows");
+      Register_Routine
+        (T, Test_An_Unchanged_Ownership_Needs_No_Right'Access,
+         "metadata : giving a file the owner and group it has needs no right to change them");
       Register_Routine
         (T, Test_Read_Only_File_Syncs_Promptly'Access,
          "durability : a read-only file syncs at once, without waiting out write retries");

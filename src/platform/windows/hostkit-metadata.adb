@@ -5,6 +5,7 @@ with Ada.Strings.Unbounded;
 with Ada.Strings.UTF_Encoding;
 with Ada.Containers.Vectors;
 
+with Hostkit.Directory_Listing;
 with Hostkit.Errors;
 with Hostkit.Fs;
 with Hostkit.Path_Text;
@@ -672,6 +673,11 @@ package body Hostkit.Metadata is
       return Result;
    end Triplet_To_Rights;
 
+   --  What the owner's ACE grants whatever its bits: WRITE_OWNER, so that the
+   --  owner can still give the entry another group, as chgrp lets a POSIX
+   --  owner. (Changing the DACL, chmod, is the owner's without an ACE.)
+   Owner_Only_Rights : constant C_DWord := Write_Owner;
+
    function File_Creation_Time
      (Path      : String;
       Available : out Boolean) return Ada.Calendar.Time
@@ -1072,7 +1078,8 @@ package body Hostkit.Metadata is
             then
                Count := Count + 1;
                Build_Trustee_With_Sid (Entries (Count).Trustee'Access, Sids (Index));
-               Entries (Count).Permissions := Triplet_To_Rights (New_Bits);
+               Entries (Count).Permissions :=
+                 Triplet_To_Rights (New_Bits) or (if Index = 1 then Owner_Only_Rights else 0);
                --  SET_ACCESS replaces the trustee's explicit allow and deny
                --  ACEs. With no bits left it still grants what a stat needs
                --  (Triplet_To_Rights): REVOKE_ACCESS would leave a mode-0
@@ -1448,7 +1455,7 @@ package body Hostkit.Metadata is
          end if;
          --  The owner's ACE even with no bits: it grants what a stat needs.
          if Has_Owner then
-            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Owner_Bits), Owner);
+            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Owner_Bits) or Owner_Only_Rights, Owner);
          end if;
          if Has_Group and then Group_Deny /= 0 then
             Append (Access_Denied_Ace, 0, Group_Deny, Group);
@@ -1525,7 +1532,8 @@ package body Hostkit.Metadata is
       Result := System.Null_Address;
       for Index in Entries'Range loop
          Build_Trustee_With_Sid (Entries (Index).Trustee'Access, Sids (Index));
-         Entries (Index).Permissions := Triplet_To_Rights ((Mode / Shifts (Index)) mod 8);
+         Entries (Index).Permissions :=
+           Triplet_To_Rights ((Mode / Shifts (Index)) mod 8) or (if Index = 1 then Owner_Only_Rights else 0);
          Entries (Index).Mode := Grant_Access;
          Entries (Index).Inheritance := No_Inheritance;
          Entries (Index).Trustee.Form := Trustee_Is_Sid;
@@ -1849,16 +1857,22 @@ package body Hostkit.Metadata is
       Unprotected_Dacl_Information : constant C_DWord := 16#2000_0000#;
       Append_At_End : constant C_DWord := 16#FFFF_FFFF#;
       Acl_Header_Size : constant := 8;
+      Acl_Revision    : constant := 2;
 
-      C_Path     : aliased Wide_String := Wide (Path);
-      Owner      : aliased System.Address := System.Null_Address;
-      Group      : aliased System.Address := System.Null_Address;
-      Dacl       : aliased System.Address := System.Null_Address;
-      Sacl       : aliased System.Address := System.Null_Address;
-      Descriptor : aliased System.Address := System.Null_Address;
-      Status     : C_DWord;
+      --  Item's DACL, through Dacl and the Descriptor holding it (for the
+      --  caller to free); False, with errno set, when it cannot be read.
+      function Read_Dacl (Item : Wide_String; Dacl, Descriptor : access System.Address) return Boolean is
+         Owner, Group, Sacl : aliased System.Address := System.Null_Address;
+         Status : constant C_DWord :=
+           Get_Named_Security_Info
+             (Item'Address, Se_File_Object, Dacl_Information,
+              Owner'Access, Group'Access, Dacl, Sacl'Access, Descriptor);
+      begin
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+         return Status = Success;
+      end Read_Dacl;
 
-      procedure Free_Descriptor is
+      procedure Free (Descriptor : in out System.Address) is
          Freed : System.Address;
          pragma Unreferenced (Freed);
       begin
@@ -1866,89 +1880,149 @@ package body Hostkit.Metadata is
             Freed := Local_Free (Descriptor);
             Descriptor := System.Null_Address;
          end if;
-      end Free_Descriptor;
+      end Free;
 
-      --  Whether ACE Index of Dacl was set on Path itself; its address and
-      --  size when so.
-      function Explicit_Ace
-        (Index : Natural; Ace : out System.Address; Size : out Natural) return Boolean
-      is
-         Found : aliased System.Address := System.Null_Address;
+      --  Item, inside the tree, left with the ACEs it inherits and none set
+      --  on it: the stage's, which a file made there takes as its own. The
+      --  object alone (Set_Own_Dacl): its folder's ACEs have been handed down
+      --  to it already.
+      function Drop_Own_Aces (Item : String) return Boolean is
+         C_Item     : aliased Wide_String := Wide (Item);
+         Dacl       : aliased System.Address := System.Null_Address;
+         Descriptor : aliased System.Address := System.Null_Address;
+         Ok         : Boolean;
       begin
-         Ace := System.Null_Address;
-         Size := 0;
-         if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
-            raise Program_Error;
+         if not Read_Dacl (C_Item, Dacl'Access, Descriptor'Access) then
+            return False;
+         elsif Dacl = System.Null_Address then
+            Free (Descriptor);
+            return True;
          end if;
          declare
-            Header : constant Ace_Header with Import, Address => Found;
+            Header : constant Acl_Header with Import, Address => Dacl;
+            Needed : Natural := Acl_Header_Size;
+            Own    : Boolean := False;
+
+            function Ace_At (Index : Natural) return System.Address is
+               Found : aliased System.Address := System.Null_Address;
+            begin
+               if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
+                  raise Program_Error;
+               end if;
+               return Found;
+            end Ace_At;
          begin
-            Ace := Found;
-            Size := Natural (Header.Size);
-            return (Header.Flags and Inherited_Ace) = 0;
+            for Index in 0 .. Natural (Header.Count) - 1 loop
+               declare
+                  Ace : constant Ace_Header with Import, Address => Ace_At (Index);
+               begin
+                  if (Ace.Flags and Inherited_Ace) /= 0 then
+                     Needed := Needed + Natural (Ace.Size);
+                  else
+                     Own := True;
+                  end if;
+               end;
+            end loop;
+            --  Nothing of its own to drop; or nothing handed down to keep (a
+            --  protected entry the folder's ACEs did not reach), which with
+            --  its own ACEs gone could be opened by no one.
+            if not Own or else Needed = Acl_Header_Size then
+               Free (Descriptor);
+               return True;
+            end if;
+            declare
+               --  An ACL is DWORD-aligned.
+               Kept : aliased array (1 .. (Needed + 3) / 4) of Interfaces.Unsigned_32 := [others => 0];
+            begin
+               Ok := Initialize_Acl (Kept'Address, C_DWord (Needed), C_DWord (Header.Revision)) /= 0;
+               for Index in 0 .. Natural (Header.Count) - 1 loop
+                  exit when not Ok;
+                  declare
+                     Found : constant System.Address := Ace_At (Index);
+                     Ace   : constant Ace_Header with Import, Address => Found;
+                  begin
+                     if (Ace.Flags and Inherited_Ace) /= 0 then
+                        Ok := Add_Ace
+                          (Kept'Address, C_DWord (Header.Revision), Append_At_End, Found, C_DWord (Ace.Size)) /= 0;
+                     end if;
+                  end;
+               end loop;
+               if not Ok then
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
+               end if;
+               Free (Descriptor);
+               return Ok
+                 and then Set_Own_Dacl (C_Item'Address, System.Null_Address, Kept'Address, Se_Dacl_Auto_Inherited);
+            end;
          end;
-      end Explicit_Ace;
+      exception
+         when others =>
+            Free (Descriptor);
+            return False;
+      end Drop_Own_Aces;
+
+      --  Everything Folder holds, as Drop_Own_Aces leaves it. A link is left
+      --  alone: the security calls would reach its target.
+      function Drop_Below (Folder : String) return Boolean is
+         Entries : Hostkit.Directory_Listing.Entry_Vectors.Vector;
+         Ok      : Boolean := True;
+      begin
+         if not Hostkit.Directory_Listing.List (Folder, Entries) then
+            return False;
+         end if;
+         for Listed of Entries loop
+            declare
+               Child : constant String := Hostkit.Fs.Join (Folder, Listed.Name);
+            begin
+               if not Hostkit.Fs.Is_Link (Child) then
+                  Ok := Drop_Own_Aces (Child) and then Ok;
+                  if Hostkit.Fs.Kind_Of (Child) = Hostkit.Fs.Directory_Entry then
+                     Ok := Drop_Below (Child) and then Ok;
+                  end if;
+               end if;
+            end;
+         end loop;
+         return Ok;
+      end Drop_Below;
+
+      C_Path     : aliased Wide_String := Wide (Path);
+      Dacl       : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+      Keeps_Acls : Boolean;
+      Empty      : aliased array (1 .. Acl_Header_Size / 4) of Interfaces.Unsigned_32 := [others => 0];
+      Status     : C_DWord;
    begin
       --  The security calls follow a link: its target is not what moved.
       if Hostkit.Fs.Is_Link (Path) then
          return True;
-      end if;
-      Status :=
-        Get_Named_Security_Info
-          (C_Path'Address, Se_File_Object, Dacl_Information,
-           Owner'Access, Group'Access, Dacl'Access, Sacl'Access, Descriptor'Access);
-      if Status /= Success then
-         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+      elsif not Read_Dacl (C_Path, Dacl'Access, Descriptor'Access) then
          return False;
       end if;
-      if Dacl = System.Null_Address then
-         --  No ACL: a volume that keeps none, or an entry open to all.
-         Free_Descriptor;
+      --  No ACL: a volume that keeps none, or an entry open to all.
+      Keeps_Acls := Dacl /= System.Null_Address;
+      Free (Descriptor);
+      if not Keeps_Acls then
          return True;
       end if;
-      declare
-         Header : constant Acl_Header with Import, Address => Dacl;
-         Ace    : System.Address;
-         Size   : Natural;
-         Needed : Natural := Acl_Header_Size;
-      begin
-         for Index in 0 .. Natural (Header.Count) - 1 loop
-            if Explicit_Ace (Index, Ace, Size) then
-               Needed := Needed + Size;
-            end if;
-         end loop;
-         declare
-            --  An ACL is DWORD-aligned.
-            Kept : aliased array (1 .. (Needed + 3) / 4) of Interfaces.Unsigned_32 := [others => 0];
-         begin
-            if Initialize_Acl (Kept'Address, C_DWord (Needed), C_DWord (Header.Revision)) = 0 then
-               Hostkit.Errors.Set_Errno_From_Last_Error;
-               Free_Descriptor;
-               return False;
-            end if;
-            for Index in 0 .. Natural (Header.Count) - 1 loop
-               if Explicit_Ace (Index, Ace, Size)
-                 and then Add_Ace (Kept'Address, C_DWord (Header.Revision), Append_At_End, Ace, C_DWord (Size)) = 0
-               then
-                  Hostkit.Errors.Set_Errno_From_Last_Error;
-                  Free_Descriptor;
-                  return False;
-               end if;
-            end loop;
-            --  The explicit ACEs, unprotected: Windows adds what the parent
-            --  hands down and carries it on to the children.
-            Status :=
-              Set_Named_Security_Info
-                (C_Path'Address, Se_File_Object, Dacl_Information or Unprotected_Dacl_Information,
-                 System.Null_Address, System.Null_Address, Kept'Address, System.Null_Address);
-         end;
-      end;
-      Free_Descriptor;
+      --  No ACE of its own, unprotected: Windows gives Path what its parent
+      --  hands down and carries that on to everything a folder holds...
+      if Initialize_Acl (Empty'Address, Acl_Header_Size, Acl_Revision) = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      Status :=
+        Set_Named_Security_Info
+          (C_Path'Address, Se_File_Object, Dacl_Information or Unprotected_Dacl_Information,
+           System.Null_Address, System.Null_Address, Empty'Address, System.Null_Address);
       Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
-      return Status = Success;
+      if Status /= Success then
+         return False;
+      end if;
+      --  ...where each entry still holds the ACEs the stage gave it.
+      return Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Directory_Entry or else Drop_Below (Path);
    exception
       when others =>
-         Free_Descriptor;
+         Free (Descriptor);
          return False;
    end Inherit_From_Parent;
 
@@ -2317,7 +2391,15 @@ package body Hostkit.Metadata is
       end Clean;
    begin
       if File = Invalid_Handle_Value then
-         return Answer;
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         --  An ownership left as it is needs no WRITE_OWNER, which an
+         --  entry's owner need not hold: look, and write only what changes.
+         if Kind = Update_Ownership then
+            File := Open_Entry (Path, Read_Control);
+         end if;
+         if File = Invalid_Handle_Value then
+            return Answer;
+         end if;
       end if;
       Answer.Identity := Identity_From_Handle (File, Info'Access);
       if not Answer.Identity.Available
@@ -2361,7 +2443,9 @@ package body Hostkit.Metadata is
                New_Group : constant System.Address :=
                  (if Borrow_Group then Primary_Group else Group_Sid (1)'Address);
             begin
-               if Have_Owner and then Have_Group then
+               if Borrow_Owner and then Borrow_Group then
+                  Answer.Success := True;
+               elsif Have_Owner and then Have_Group then
                   declare
                      Status : constant C_DWord := Set_Security_Info
                        (File, Se_File_Object,
