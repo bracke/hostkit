@@ -394,10 +394,13 @@ package Hostkit.Metadata is
    --  the source it was supposed to be renaming.
    --
    --  POSIX compares device and inode, which also makes two hard links to one
-   --  inode answer True -- correctly: they are the same file. Windows compares the
-   --  normalised path case-insensitively, its filesystem being case-insensitive.
-   --  A host with no way to tell compares the paths exactly, which can only ever
-   --  under-report.
+   --  inode answer True -- correctly: they are the same file. Windows compares
+   --  the same pair, the volume serial number and the file index of what each
+   --  path names through any link, so two hard links are one file there too;
+   --  only where an entry cannot be opened to ask does it fall back to the
+   --  normalised paths compared case-insensitively, its filesystems being
+   --  case-insensitive. A host with no way to tell compares the paths exactly,
+   --  which can only ever under-report.
    --
    --  @param Left First path.
    --  @param Right Second path.
@@ -423,7 +426,10 @@ package Hostkit.Metadata is
    --
    --  POSIX find -xdev needs to compare the device id of a starting point with
    --  each candidate before descending. Available is False where the host cannot
-   --  provide a stable comparable id.
+   --  provide a stable comparable id. The value is only for comparing: stat's
+   --  device on POSIX, the volume serial number on Windows (of what Path names,
+   --  through any link, so a folder a volume is mounted on reads as that
+   --  volume), never negative.
    function Device_Id
      (Path      : String;
       Available : out Boolean)

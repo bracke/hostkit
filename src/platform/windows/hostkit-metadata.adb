@@ -11,6 +11,7 @@ with Hostkit.Fs;
 with Hostkit.Path_Text;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
+with Hostkit.Windows_Programs;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -86,7 +87,25 @@ package body Hostkit.Metadata is
    File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
    File_Attribute_Reparse_Point  : constant C_DWord := 16#0000_0400#;
    File_Basic_Info_Class : constant C_Int := 0;
+   File_Attribute_Tag_Info_Class : constant C_Int := 9;
    File_Id_Info_Class    : constant C_Int := 18;
+
+   --  The two reparse tags that are links (IO_REPARSE_TAG_SYMLINK and
+   --  IO_REPARSE_TAG_MOUNT_POINT, a junction), as Hostkit.Fs.Is_Link reads
+   --  them. Every other reparse point -- a OneDrive placeholder, a
+   --  deduplicated file, an app-execution alias -- is an ordinary entry.
+   Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
+   Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
+
+   --  Windows system error codes for a refusal no Win32 call reported, put
+   --  into errno through Hostkit.Windows_Errors.Set_Errno_From:
+   --  ERROR_FILE_NOT_FOUND (ENOENT; the CRT has no ESTALE) for an entry no
+   --  longer the one asked about, ERROR_INVALID_PARAMETER (EINVAL) for a
+   --  value out of range, ERROR_STOPPED_ON_SYMLINK (EINVAL) for a link
+   --  refused.
+   Error_File_Not_Found     : constant Interfaces.Unsigned_32 := 2;
+   Error_Invalid_Parameter  : constant Interfaces.Unsigned_32 := 87;
+   Error_Stopped_On_Symlink : constant Interfaces.Unsigned_32 := 681;
 
    type Trustee_Record is record
       Multiple_Trustee : System.Address := System.Null_Address;
@@ -150,6 +169,13 @@ package body Hostkit.Metadata is
    end record
      with Convention => C;
 
+   --  FILE_ATTRIBUTE_TAG_INFO.
+   type Attribute_Tag_Info is record
+      Attributes  : C_DWord := 0;
+      Reparse_Tag : Interfaces.Unsigned_32 := 0;
+   end record
+     with Convention => C;
+
    type File_Basic_Info is record
       Creation_Time : Interfaces.Integer_64 := 0;
       Access_Time   : Interfaces.Integer_64 := 0;
@@ -171,6 +197,12 @@ package body Hostkit.Metadata is
    pragma Compile_Time_Error
      (Attribute_Data'Size /= 36 * 8,
       "Win32 WIN32_FILE_ATTRIBUTE_DATA must be 36 bytes");
+   pragma Compile_Time_Error
+     (Attribute_Tag_Info'Size /= 8 * 8,
+      "Win32 FILE_ATTRIBUTE_TAG_INFO must be 8 bytes");
+   pragma Compile_Time_Error
+     (By_Handle_File_Information'Size /= 52 * 8,
+      "Win32 BY_HANDLE_FILE_INFORMATION must be 52 bytes");
 
    function Get_Named_Security_Info
      (Object_Name : System.Address;
@@ -400,6 +432,16 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall,
           External_Name => "GetVolumeInformationW";
 
+   function Get_Volume_Path_Name
+     (Name   : System.Address;
+      Root   : System.Address;
+      Length : C_DWord) return C_Int
+     with Import, Convention => Stdcall,
+          External_Name => "GetVolumePathNameW";
+
+   function Get_Last_Error return C_DWord
+     with Import, Convention => Stdcall, External_Name => "GetLastError";
+
    function Get_Final_Path_Name
      (File   : System.Address;
       Path   : System.Address;
@@ -459,14 +501,79 @@ package body Hostkit.Metadata is
    --  A SID has no small integer identity of its own. Hash the complete SID,
    --  rather than using only its last relative identifier: accounts from two
    --  domains can legitimately have the same RID. The SID itself is kept here
-   --  so the number can be turned back into a name.
-   Seen_Sids : Sid_Vectors.Vector;
+   --  so the number can be turned back into a name. Every task that reads
+   --  an owner shares the list, so it is guarded.
+   protected Seen_Sids is
+
+      --  Is a SID with Id held?
+      --
+      --  @param Id A number Identity_Of minted.
+      --  @return True when Add was given a SID with Id.
+      function Holds (Id : Natural) return Boolean;
+
+      --  Hold Item, unless a SID with its Id is held already.
+      --
+      --  @param Item The SID and its number.
+      procedure Add (Item : Known_Sid);
+
+      --  The SID held with Id.
+      --
+      --  @param Id A number Identity_Of minted.
+      --  @param Into The SID's bytes; all NUL when none is held.
+      --  @param Found Whether one is held.
+      procedure Find (Id : Natural; Into : out Sid_Buffer; Found : out Boolean);
+
+   private
+      Items : Sid_Vectors.Vector;
+   end Seen_Sids;
+
+   protected body Seen_Sids is
+
+      function Holds (Id : Natural) return Boolean is
+      begin
+         for Item of Items loop
+            if Item.Id = Id then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Holds;
+
+      procedure Add (Item : Known_Sid) is
+      begin
+         if not Holds (Item.Id) then
+            Items.Append (Item);
+         end if;
+      end Add;
+
+      procedure Find (Id : Natural; Into : out Sid_Buffer; Found : out Boolean) is
+      begin
+         Into := [others => Interfaces.C.nul];
+         Found := False;
+         for Item of Items loop
+            if Item.Id = Id then
+               Into := Item.Bytes;
+               Found := True;
+               return;
+            end if;
+         end loop;
+      end Find;
+
+   end Seen_Sids;
 
    procedure Remember (Sid : System.Address; Id : Natural);
    function Recall (Id : Natural; Into : out Sid_Buffer) return Boolean;
    function Identity_Of (Sid : System.Address) return Natural;
    function Name_Of (Sid : System.Address) return String;
    function Wide (Value : String) return Wide_String;
+
+   --  Text that names no file -- an account name, SDDL -- as UTF-16 with a
+   --  terminating NUL, to pass by address to a wide API: none of the path
+   --  rules Wide (Windows_Paths.Native) applies, which would read a name
+   --  with a '/' or a "." as a path. Raises Encoding_Error on text that is
+   --  not UTF-8, as From_UTF_8.
+   function Wide_Text (Value : String) return Wide_String is
+     (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
 
    function Identity_Of (Sid : System.Address) return Natural is
       Length : C_DWord;
@@ -501,15 +608,9 @@ package body Hostkit.Metadata is
    procedure Remember (Sid : System.Address; Id : Natural) is
       Length : C_DWord;
    begin
-      if Sid = System.Null_Address or else Id = 0 then
+      if Sid = System.Null_Address or else Id = 0 or else Seen_Sids.Holds (Id) then
          return;
       end if;
-
-      for Item of Seen_Sids loop
-         if Item.Id = Id then
-            return;
-         end if;
-      end loop;
 
       Length := Get_Length_Sid (Sid);
       if Length = 0 or else Natural (Length) > Sid_Buffer'Length then
@@ -524,7 +625,7 @@ package body Hostkit.Metadata is
          Item.Length := Natural (Length);
          Copied := Copy_Sid (Length, Item.Bytes (1)'Address, Sid);
          if Copied /= 0 then
-            Seen_Sids.Append (Item);
+            Seen_Sids.Add (Item);
          end if;
       end;
 
@@ -534,17 +635,10 @@ package body Hostkit.Metadata is
    end Remember;
 
    function Recall (Id : Natural; Into : out Sid_Buffer) return Boolean is
+      Found : Boolean;
    begin
-      Into := [others => Interfaces.C.nul];
-
-      for Item of Seen_Sids loop
-         if Item.Id = Id then
-            Into := Item.Bytes;
-            return True;
-         end if;
-      end loop;
-
-      return False;
+      Seen_Sids.Find (Id, Into, Found);
+      return Found;
    end Recall;
 
    function Name_Of (Sid : System.Address) return String is
@@ -607,31 +701,10 @@ package body Hostkit.Metadata is
 
    --------------------------------------------------------------------------
 
-   function Runs_On_Windows (Path : String) return Boolean;
-
-   function Runs_On_Windows (Path : String) return Boolean is
-      --  Windows does not decide what runs from an ACL. Every ordinary file is
-      --  granted FILE_EXECUTE in its DACL, so folding that bit into the mode said
-      --  that everything is executable -- and the file manager duly classified a
-      --  .tar.gz as a program. What runs here is decided by the extension,
-      --  and tested without allocating one.
-      --
-      --  This was an array of `access constant String` filled with `new
-      --  String'(".exe")` and the rest: six allocations that nothing ever
-      --  frees, made afresh on every call, to hold six literals known at
-      --  compile time. GNAT warns about the anonymous access allocator, and it
-      --  is right to.
-      Dot : constant Natural :=
-        Ada.Strings.Fixed.Index (Path, ".", Ada.Strings.Backward);
-
-      Suffix : constant String :=
-        (if Dot = 0 then ""
-         else Ada.Characters.Handling.To_Lower (Path (Dot .. Path'Last)));
-   begin
-      return Suffix = ".exe" or else Suffix = ".com" or else Suffix = ".bat"
-        or else Suffix = ".cmd" or else Suffix = ".ps1"
-        or else Suffix = ".msi";
-   end Runs_On_Windows;
+   --  Whether Windows runs Path, by its extension: the one list
+   --  Hostkit.Fs.Is_Executable asks too.
+   function Runs_On_Windows (Path : String) return Boolean
+     renames Hostkit.Windows_Programs.Runs_By_Extension;
 
    function Rights_To_Triplet (Rights : C_DWord) return Natural;
 
@@ -678,8 +751,15 @@ package body Hostkit.Metadata is
    --  owner. (Changing the DACL, chmod, is the owner's without an ACE.)
    Owner_Only_Rights : constant C_DWord := Write_Owner;
 
-   function File_Creation_Time
+   --  The two times File_Creation_Time and File_Access_Time read, which
+   --  GetFileAttributesExW hands back together.
+   type Recorded_Time is (Creation, Last_Access);
+
+   --  Which of Path's recorded times, as Ada time; Available False (and a
+   --  time in 1901) when the host would not say or recorded none.
+   function Recorded_Time_Of
      (Path      : String;
+      Which     : Recorded_Time;
       Available : out Boolean) return Ada.Calendar.Time
    is
       C_Path : aliased Wide_String := Wide (Path);
@@ -698,11 +778,13 @@ package body Hostkit.Metadata is
       end if;
 
       declare
+         Stamp : constant Filetime :=
+           (case Which is
+               when Creation    => Data.Creation_Time,
+               when Last_Access => Data.Access_Time);
          --  FILETIME counts 100-nanosecond ticks from 1601; Unix time starts
          --  11644473600 seconds later.
-         Ticks : constant C_U64 :=
-           C_U64 (Data.Creation_Time.High) * 2 ** 32
-           + C_U64 (Data.Creation_Time.Low);
+         Ticks : constant C_U64 := C_U64 (Stamp.High) * 2 ** 32 + C_U64 (Stamp.Low);
          Unix  : constant Long_Long_Integer :=
            Long_Long_Integer (Ticks / 10_000_000) - 11_644_473_600;
       begin
@@ -718,46 +800,20 @@ package body Hostkit.Metadata is
       when others =>
          Available := False;
          return Ada.Calendar.Time_Of (1901, 1, 1);
+   end Recorded_Time_Of;
+
+   function File_Creation_Time
+     (Path      : String;
+      Available : out Boolean) return Ada.Calendar.Time is
+   begin
+      return Recorded_Time_Of (Path, Creation, Available);
    end File_Creation_Time;
 
    function File_Access_Time
      (Path      : String;
-      Available : out Boolean) return Ada.Calendar.Time
-   is
-      C_Path : aliased Wide_String := Wide (Path);
-      Data   : aliased Attribute_Data;
-      Result : C_Int;
-      --  The Unix epoch, in UTC: Ada.Calendar.Time_Of would read it as local
-      --  midnight and shift every time by the zone's 1970 offset.
-      Epoch  : constant Ada.Calendar.Time := Ada.Calendar.Formatting.Time_Of (1970, 1, 1, 0.0, Time_Zone => 0);
+      Available : out Boolean) return Ada.Calendar.Time is
    begin
-      Available := False;
-
-      Result := Get_File_Attributes_Ex (C_Path'Address, 0, Data'Access);
-
-      if Result = 0 then
-         return Ada.Calendar.Time_Of (1901, 1, 1);
-      end if;
-
-      declare
-         Ticks : constant C_U64 :=
-           C_U64 (Data.Access_Time.High) * 2 ** 32
-           + C_U64 (Data.Access_Time.Low);
-         Unix  : constant Long_Long_Integer :=
-           Long_Long_Integer (Ticks / 10_000_000) - 11_644_473_600;
-      begin
-         if Unix <= 0 then
-            return Ada.Calendar.Time_Of (1901, 1, 1);
-         end if;
-
-         Available := True;
-         return Epoch + Duration (Unix);
-      end;
-
-   exception
-      when others =>
-         Available := False;
-         return Ada.Calendar.Time_Of (1901, 1, 1);
+      return Recorded_Time_Of (Path, Last_Access, Available);
    end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
@@ -788,19 +844,21 @@ package body Hostkit.Metadata is
       --  from the volume rather than the file -- and GetVolumeInformation insists
       --  on the volume's ROOT, "C:\", not a directory anywhere inside it. Handed
       --  a path like C:\Users\... it simply fails, and the read-only flag and the
-      --  name limit were reported as unknown for every volume.
+      --  name limit were reported as unknown for every volume. GetVolumePathNameW
+      --  finds that root from the long form, as Fs.On_Network_Volume does: a
+      --  drive's, a share's (\\server\share\) or that of a volume mounted on a
+      --  folder, whose root is the folder, not the drive holding it.
       declare
-         Root : aliased Wide_String :=
-           Wide (if Path'Length >= 2 and then Path (Path'First + 1) = ':'
-                 then Path (Path'First .. Path'First + 1) & "\"
-                 else Path);
+         Root : aliased Wide_String (1 .. 32_768) := [others => Wide_Character'Val (0)];
       begin
          Result :=
-           Get_Volume_Information
-             (Root'Address,
-              System.Null_Address, 0,
-              Serial'Access, Component'Access, Flags'Access,
-              System.Null_Address, 0);
+           (if Get_Volume_Path_Name (C_Path'Address, Root'Address, Root'Length) = 0 then 0
+            else
+              Get_Volume_Information
+                (Root'Address,
+                 System.Null_Address, 0,
+                 Serial'Access, Component'Access, Flags'Access,
+                 System.Null_Address, 0));
       end;
 
       if Result /= 0 then
@@ -816,98 +874,6 @@ package body Hostkit.Metadata is
       when others =>
          return (others => <>);
    end Volume_Capacity_Of;
-
-   function Triplet_Of
-     (Acl, Sid, Everyone : System.Address;
-      Member_Of          : System.Address := System.Null_Address) return Natural;
-
-   function File_Permission_Bits
-     (Path      : String;
-      Available : out Boolean) return Natural
-   is
-      C_Path : aliased Wide_String := Wide (Path);
-
-      Owner      : aliased System.Address := System.Null_Address;
-      Group      : aliased System.Address := System.Null_Address;
-      Dacl       : aliased System.Address := System.Null_Address;
-      Sacl       : aliased System.Address := System.Null_Address;
-      Descriptor : aliased System.Address := System.Null_Address;
-
-      Status : C_DWord;
-      Mode   : Natural := 0;
-
-      Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
-      Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
-
-      procedure Free_Descriptor is
-         Freed : System.Address;
-         pragma Unreferenced (Freed);
-      begin
-         if Descriptor /= System.Null_Address then
-            Freed := Local_Free (Descriptor);
-            Descriptor := System.Null_Address;
-         end if;
-      end Free_Descriptor;
-   begin
-      Available := False;
-
-      Status :=
-        Get_Named_Security_Info
-          (C_Path'Address, Se_File_Object,
-           Owner_Information or Group_Information or Dacl_Information,
-           Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
-           Descriptor'Access);
-
-      if Status /= Success then
-         return 0;
-      end if;
-
-      Remember (Owner, Identity_Of (Owner));
-      Remember (Group, Identity_Of (Group));
-
-      declare
-         World : constant System.Address :=
-           (if Create_Well_Known_Sid
-                 (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) /= 0
-            then Everyone (1)'Address
-            else System.Null_Address);
-      begin
-         Mode := Triplet_Of (Dacl, Owner, World, Group) * 64 + Triplet_Of (Dacl, Group, World) * 8
-           + Triplet_Of (Dacl, World, World);
-      end;
-
-      Free_Descriptor;
-
-      --  Strip the execute bits unless the file is one Windows would actually
-      --  run. A directory keeps them: its execute bit means it can be entered,
-      --  as the DACL grants.
-      if not Runs_On_Windows (Path)
-        and then Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Directory_Entry
-      then
-         declare
-            Owner_Bits : constant Natural := (Mode / 64) mod 8;
-            Group_Bits : constant Natural := (Mode / 8) mod 8;
-            Other_Bits : constant Natural := Mode mod 8;
-
-            function Without_Execute (Triplet : Natural) return Natural is
-              (Triplet - (Triplet mod 2));
-         begin
-            Mode :=
-              Without_Execute (Owner_Bits) * 64
-              + Without_Execute (Group_Bits) * 8
-              + Without_Execute (Other_Bits);
-         end;
-      end if;
-
-      Available := True;
-      return Mode;
-
-   exception
-      when others =>
-         Free_Descriptor;
-         Available := False;
-         return 0;
-   end File_Permission_Bits;
 
    --  A permission edit, the minimal kind: see Set_Permissions in the spec.
 
@@ -970,6 +936,17 @@ package body Hostkit.Metadata is
       Aces : System.Address; Size : C_DWord) return C_Int
      with Import, Convention => Stdcall, External_Name => "AddAce";
 
+   --  ACE Index of Acl. Program_Error when GetAce will not give it: only an
+   --  ACL that does not hold the count its header says does that.
+   function Ace_At (Acl : System.Address; Index : Natural) return System.Address is
+      Found : aliased System.Address := System.Null_Address;
+   begin
+      if Get_Ace (Acl, C_DWord (Index), Found'Access) = 0 then
+         raise Program_Error;
+      end if;
+      return Found;
+   end Ace_At;
+
    --  The rights Acl grants Sid, read the way the access check reads it --
    --  ACE by ACE, a right decided by the first allow or deny that names it --
    --  where an ACE names Sid, Everyone (S-1-1-0) or Member_Of. For the
@@ -1015,6 +992,83 @@ package body Hostkit.Metadata is
      (Shown (Triplet_Of (Dacl, Owner, Everyone, Group), Runnable) * 64
       + Shown (Triplet_Of (Dacl, Group, Everyone), Runnable) * 8
       + Shown (Triplet_Of (Dacl, Everyone, Everyone), Runnable));
+
+   --  Whether execute means something for the entry at Path: a program by
+   --  its extension, or a folder, which can be entered. The one answer
+   --  File_Permission_Bits reads a mode by and Set_Permissions edits one by.
+   function Runnable_At (Path : String) return Boolean is
+     (Runs_On_Windows (Path) or else Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry);
+
+   --  Path's mode as Mode_Of reads it, which is what Apply_Permission_Edit
+   --  checks an edit against: reading it any other way could let the two
+   --  drift, and an edit be judged by a mode the reader never shows.
+   function File_Permission_Bits
+     (Path      : String;
+      Available : out Boolean) return Natural
+   is
+      C_Path : aliased Wide_String := Wide (Path);
+
+      Owner      : aliased System.Address := System.Null_Address;
+      Group      : aliased System.Address := System.Null_Address;
+      Dacl       : aliased System.Address := System.Null_Address;
+      Sacl       : aliased System.Address := System.Null_Address;
+      Descriptor : aliased System.Address := System.Null_Address;
+
+      Status : C_DWord;
+      Mode   : Natural := 0;
+
+      Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
+      Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
+
+      procedure Free_Descriptor is
+         Freed : System.Address;
+         pragma Unreferenced (Freed);
+      begin
+         if Descriptor /= System.Null_Address then
+            Freed := Local_Free (Descriptor);
+            Descriptor := System.Null_Address;
+         end if;
+      end Free_Descriptor;
+   begin
+      Available := False;
+
+      Status :=
+        Get_Named_Security_Info
+          (C_Path'Address, Se_File_Object,
+           Owner_Information or Group_Information or Dacl_Information,
+           Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
+           Descriptor'Access);
+
+      if Status /= Success then
+         return 0;
+      end if;
+
+      Remember (Owner, Identity_Of (Owner));
+      Remember (Group, Identity_Of (Group));
+
+      declare
+         World : constant System.Address :=
+           (if Create_Well_Known_Sid
+                 (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) /= 0
+            then Everyone (1)'Address
+            else System.Null_Address);
+      begin
+         --  Execute bits only where Windows would run the file, or for a
+         --  folder: its execute bit means it can be entered, as the DACL
+         --  grants.
+         Mode := Mode_Of (Dacl, Owner, Group, World, Runnable_At (Path));
+      end;
+
+      Free_Descriptor;
+      Available := True;
+      return Mode;
+
+   exception
+      when others =>
+         Free_Descriptor;
+         Available := False;
+         return 0;
+   end File_Permission_Bits;
 
    --  The bits of triplet Left that triplet Right lacks.
    function Without (Left, Right : Natural) return Natural is
@@ -1324,16 +1378,6 @@ package body Hostkit.Metadata is
       Other_Known  : array (Other_Sid_List'Range) of Boolean := [others => False];
       First_Allow  : Natural := 0;
 
-      --  ACE Index of Dacl.
-      function Ace_At (Index : Natural) return System.Address is
-         Found : aliased System.Address := System.Null_Address;
-      begin
-         if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
-            raise Program_Error;
-         end if;
-         return Found;
-      end Ace_At;
-
       function Class_Of (Sid : System.Address) return Access_Class is
       begin
          if Has_Owner and then Equal_Sid (Sid, Owner) /= 0 then
@@ -1410,7 +1454,7 @@ package body Hostkit.Metadata is
 
          --  Add ACE Index of Dacl, made explicit and edited for its class.
          procedure Carry (Index : Natural) is
-            Source : constant System.Address := Ace_At (Index);
+            Source : constant System.Address := Ace_At (Dacl, Index);
             Head   : constant Ace_Header with Import, Address => Source;
             Raw    : constant Interfaces.Unsigned_32
               with Import, Address => System.Storage_Elements."+" (Source, 4);
@@ -1484,7 +1528,7 @@ package body Hostkit.Metadata is
       --  The explicit denies lead a canonical DACL.
       while First_Allow < Count loop
          declare
-            Head : constant Ace_Header with Import, Address => Ace_At (First_Allow);
+            Head : constant Ace_Header with Import, Address => Ace_At (Dacl, First_Allow);
          begin
             exit when Head.Kind /= Access_Denied_Ace or else (Head.Flags and Ace_Inherited) /= 0;
          end;
@@ -1664,8 +1708,8 @@ package body Hostkit.Metadata is
       end;
    end Dacl_Text_Of;
 
+   --  SE_DACL_AUTO_INHERIT_REQ: a write that keeps SE_DACL_AUTO_INHERITED.
    Dacl_Auto_Inherit_Req : constant Interfaces.C.unsigned_short := 16#0100#;
-   Dacl_Auto_Inherited   : constant Interfaces.C.unsigned_short := 16#0400#;
 
    procedure Ignore_Result (Value : C_Int) is null;
 
@@ -1673,19 +1717,24 @@ package body Hostkit.Metadata is
    --  File exactly: its ACEs, inherited ones as they were, and whether it
    --  is protected. The entry alone, as Set_Own_Dacl.
    function Set_Dacl_Text (File : System.Address; Text : String) return Boolean is
-      Wide_Text  : aliased constant Wide_String := Hostkit.Windows_Paths.From_UTF_8 (Text) & Wide_Character'Val (0);
       Descriptor : aliased System.Address := System.Null_Address;
       Size       : aliased C_DWord := 0;
       Applied    : Boolean;
       Freed      : System.Address;
       pragma Unreferenced (Freed);
    begin
-      if Convert_Text_To_Descriptor (Wide_Text'Address, Sddl_Revision, Descriptor'Access, Size'Access) = 0
-        or else Descriptor = System.Null_Address
-      then
-         Hostkit.Errors.Set_Errno_From_Last_Error;
-         return False;
-      end if;
+      --  Converted here, not as a declaration, so the handler below sees
+      --  text that is not UTF-8.
+      declare
+         Sddl : aliased constant Wide_String := Wide_Text (Text);
+      begin
+         if Convert_Text_To_Descriptor (Sddl'Address, Sddl_Revision, Descriptor'Access, Size'Access) = 0
+           or else Descriptor = System.Null_Address
+         then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+            return False;
+         end if;
+      end;
       --  An auto-inherited DACL ("D:AI...") keeps that mark only when the
       --  write asks for it; without, the restored DACL read back plainer
       --  than the one recorded.
@@ -1694,8 +1743,8 @@ package body Hostkit.Metadata is
       then
          Ignore_Result
            (Set_Security_Descriptor_Control
-              (Descriptor, Dacl_Auto_Inherit_Req or Dacl_Auto_Inherited,
-               Dacl_Auto_Inherit_Req or Dacl_Auto_Inherited));
+              (Descriptor, Dacl_Auto_Inherit_Req or Se_Dacl_Auto_Inherited,
+               Dacl_Auto_Inherit_Req or Se_Dacl_Auto_Inherited));
       end if;
       Applied := Set_Kernel_Object_Security (File, Dacl_Information, Descriptor) /= 0;
       if not Applied then
@@ -1706,6 +1755,7 @@ package body Hostkit.Metadata is
    exception
       when Ada.Strings.UTF_Encoding.Encoding_Error =>
          --  Not text Dacl_Text wrote.
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
          return False;
    end Set_Dacl_Text;
 
@@ -1738,6 +1788,7 @@ package body Hostkit.Metadata is
       end Free_Allocations;
    begin
       if Mode > 8#7777# then
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
          return False;
       end if;
       Status :=
@@ -1759,8 +1810,7 @@ package body Hostkit.Metadata is
          return False;
       end if;
       declare
-         Runnable : constant Boolean :=
-           Runs_On_Windows (Path) or else Hostkit.Fs.Kind_Of (Path) = Hostkit.Fs.Directory_Entry;
+         Runnable : constant Boolean := Runnable_At (Path);
          Applied  : constant Boolean :=
            Apply_Permission_Edit
              (C_Path'Address, System.Null_Address, Dacl, Owner, Group, Everyone (1)'Address, Control,
@@ -1826,6 +1876,7 @@ package body Hostkit.Metadata is
            (Win_World_Sid, System.Null_Address,
             Everyone (1)'Address, Everyone_Size'Access) = 0
       then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          Free_Allocations;
          return False;
       end if;
@@ -1852,10 +1903,8 @@ package body Hostkit.Metadata is
    end Set_Exact_Permissions;
 
    function Inherit_From_Parent (Path : String) return Boolean is
-      Inherited_Ace : constant Interfaces.C.unsigned_char := 16#10#;
       --  UNPROTECTED_DACL_SECURITY_INFORMATION: inherit from the parent.
       Unprotected_Dacl_Information : constant C_DWord := 16#2000_0000#;
-      Append_At_End : constant C_DWord := 16#FFFF_FFFF#;
       Acl_Header_Size : constant := 8;
       Acl_Revision    : constant := 2;
 
@@ -1902,21 +1951,12 @@ package body Hostkit.Metadata is
             Header : constant Acl_Header with Import, Address => Dacl;
             Needed : Natural := Acl_Header_Size;
             Own    : Boolean := False;
-
-            function Ace_At (Index : Natural) return System.Address is
-               Found : aliased System.Address := System.Null_Address;
-            begin
-               if Get_Ace (Dacl, C_DWord (Index), Found'Access) = 0 then
-                  raise Program_Error;
-               end if;
-               return Found;
-            end Ace_At;
          begin
             for Index in 0 .. Natural (Header.Count) - 1 loop
                declare
-                  Ace : constant Ace_Header with Import, Address => Ace_At (Index);
+                  Ace : constant Ace_Header with Import, Address => Ace_At (Dacl, Index);
                begin
-                  if (Ace.Flags and Inherited_Ace) /= 0 then
+                  if (Ace.Flags and Ace_Inherited) /= 0 then
                      Needed := Needed + Natural (Ace.Size);
                   else
                      Own := True;
@@ -1938,12 +1978,12 @@ package body Hostkit.Metadata is
                for Index in 0 .. Natural (Header.Count) - 1 loop
                   exit when not Ok;
                   declare
-                     Found : constant System.Address := Ace_At (Index);
+                     Found : constant System.Address := Ace_At (Dacl, Index);
                      Ace   : constant Ace_Header with Import, Address => Found;
                   begin
-                     if (Ace.Flags and Inherited_Ace) /= 0 then
+                     if (Ace.Flags and Ace_Inherited) /= 0 then
                         Ok := Add_Ace
-                          (Kept'Address, C_DWord (Header.Revision), Append_At_End, Found, C_DWord (Ace.Size)) /= 0;
+                          (Kept'Address, C_DWord (Header.Revision), Ace_Append_At_End, Found, C_DWord (Ace.Size)) /= 0;
                      end if;
                   end;
                end loop;
@@ -2218,49 +2258,65 @@ package body Hostkit.Metadata is
       return Nonzero and Not_All_Ones;
    end Valid_Identifier;
 
-   function Entry_Identity_Of (Path : String) return Entry_Identity is
-      File   : System.Address := Open_Entry (Path, 0);
-      Legacy : aliased By_Handle_File_Information;
+   --  The identity of the entry open as File, with its attributes and the
+   --  rest of BY_HANDLE_FILE_INFORMATION through Info: the 128-bit file id
+   --  where the volume has one, else the 64-bit file index. Not Available,
+   --  with Error the Windows error code that says why, when the host gives
+   --  neither: GetLastError of the failed call, or ERROR_NOT_SUPPORTED for
+   --  a volume that numbers no entry.
+   function Identity_From_Handle
+     (File  : System.Address;
+      Info  : access By_Handle_File_Information;
+      Error : out Interfaces.Unsigned_32) return Entry_Identity
+   is
+      Error_Not_Supported : constant Interfaces.Unsigned_32 := 50;
       Id     : aliased File_Id_Info;
       Number : Identity_Field;
    begin
-      if File = Invalid_Handle_Value or else Get_File_Information (File, Legacy'Access) = 0 then
-         Close_Entry (File);
+      Error := 0;
+      if Get_File_Information (File, Info) = 0 then
+         Error := Interfaces.Unsigned_32 (Get_Last_Error);
          return (others => <>);
       end if;
       if Get_File_Information_Ex
         (File, File_Id_Info_Class, Id'Address, C_DWord (File_Id_Info'Size / 8)) /= 0
         and then Valid_Identifier (Id.Identifier)
       then
-         declare
-            Result : constant Entry_Identity :=
-              (Available       => True,
-               Volume          => Id.Volume_Serial,
-               File_Number     => Identifier_Part (Id.Identifier, 0),
-               Generation_High => Identifier_Part (Id.Identifier, 8),
-               Generation_Low  => 0);
-         begin
-            Close_Entry (File);
-            return Result;
-         end;
+         return
+           (Available       => True,
+            Volume          => Id.Volume_Serial,
+            File_Number     => Identifier_Part (Id.Identifier, 0),
+            Generation_High => Identifier_Part (Id.Identifier, 8),
+            Generation_Low  => 0);
       end if;
-      Number := Interfaces.Shift_Left (Identity_Field (Legacy.File_Index_High), 32)
-        or Identity_Field (Legacy.File_Index_Low);
+      Number := Interfaces.Shift_Left (Identity_Field (Info.File_Index_High), 32)
+        or Identity_Field (Info.File_Index_Low);
       --  Off NTFS (FAT, exFAT) the index names the directory entry: stable
       --  while the entry stays put, as Linux's vfat inode numbers are, and
       --  enough for the checks a copy makes. Refusing it failed every copy
       --  onto a USB stick.
       if Number = 0 or else Number = Identity_Field'Last then
-         Close_Entry (File);
+         Error := Error_Not_Supported;
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Identity_Field (Info.Volume_Serial),
+         File_Number     => Number,
+         Generation_High => 0,
+         Generation_Low  => 0);
+   end Identity_From_Handle;
+
+   function Entry_Identity_Of (Path : String) return Entry_Identity is
+      File          : System.Address := Open_Entry (Path, 0);
+      Info          : aliased By_Handle_File_Information;
+      Ignored_Error : Interfaces.Unsigned_32;
+   begin
+      if File = Invalid_Handle_Value then
          return (others => <>);
       end if;
       declare
-         Result : constant Entry_Identity :=
-           (Available       => True,
-            Volume          => Identity_Field (Legacy.Volume_Serial),
-            File_Number     => Number,
-            Generation_High => 0,
-            Generation_Low  => 0);
+         Result : constant Entry_Identity := Identity_From_Handle (File, Info'Access, Ignored_Error);
       begin
          Close_Entry (File);
          return Result;
@@ -2270,6 +2326,37 @@ package body Hostkit.Metadata is
          Close_Entry (File);
          return (others => <>);
    end Entry_Identity_Of;
+
+   --  Whether the entry open as File, whose attributes are Attributes, is a
+   --  link Update_Entry_Metadata refuses: a symbolic link or a junction,
+   --  read from its reparse tag (FILE_ATTRIBUTE_TAG_INFO), as Hostkit.Fs's
+   --  Is_Held_Link reads it. Any other reparse point is an ordinary entry;
+   --  one whose tag cannot be read is taken for a link, which is never
+   --  followed, with Error the Windows error code that says why.
+   function Is_Held_Link
+     (File       : System.Address;
+      Attributes : C_DWord;
+      Error      : out Interfaces.Unsigned_32) return Boolean
+   is
+      use type Interfaces.Unsigned_32;
+      Tag_Info : aliased Attribute_Tag_Info;
+   begin
+      Error := 0;
+      if (Attributes and File_Attribute_Reparse_Point) = 0 then
+         return False;
+      elsif Get_File_Information_Ex
+              (File, File_Attribute_Tag_Info_Class, Tag_Info'Address, C_DWord (Attribute_Tag_Info'Size / 8)) = 0
+      then
+         Error := Interfaces.Unsigned_32 (Get_Last_Error);
+         return True;
+      elsif Tag_Info.Reparse_Tag = Io_Reparse_Tag_Symlink
+        or else Tag_Info.Reparse_Tag = Io_Reparse_Tag_Mount_Point
+      then
+         Error := Error_Stopped_On_Symlink;
+         return True;
+      end if;
+      return False;
+   end Is_Held_Link;
 
    function Update_Entry_Metadata
      (Path           : String;
@@ -2283,49 +2370,13 @@ package body Hostkit.Metadata is
       Group_Name     : String := "";
       Access_Text    : String := "") return Metadata_Update_Result
    is
-      function Identity_From_Handle
-        (File : System.Address;
-         Info : access By_Handle_File_Information) return Entry_Identity
-      is
-         Id     : aliased File_Id_Info;
-         Number : Identity_Field;
-      begin
-         if Get_File_Information (File, Info) = 0 then
-            return (others => <>);
-         end if;
-         if Get_File_Information_Ex
-           (File, File_Id_Info_Class, Id'Address,
-            C_DWord (File_Id_Info'Size / 8)) /= 0
-           and then Valid_Identifier (Id.Identifier)
-         then
-            return
-              (Available       => True,
-               Volume          => Id.Volume_Serial,
-               File_Number     => Identifier_Part (Id.Identifier, 0),
-               Generation_High => Identifier_Part (Id.Identifier, 8),
-               Generation_Low  => 0);
-         end if;
-         Number := Interfaces.Shift_Left
-           (Identity_Field (Info.File_Index_High), 32)
-           or Identity_Field (Info.File_Index_Low);
-         --  As Entry_Identity_Of: off NTFS the index still names the entry.
-         if Number = 0 or else Number = Identity_Field'Last then
-            return (others => <>);
-         end if;
-         return
-           (Available       => True,
-            Volume          => Identity_Field (Info.Volume_Serial),
-            File_Number     => Number,
-            Generation_High => 0,
-            Generation_Low  => 0);
-      end Identity_From_Handle;
-
+      --  The SID of the account Name, into Sid, when its number is
+      --  Expected_Id; False, with errno set, when there is none.
       function Resolve_Account
-        (Name     : String;
+        (Name        : String;
          Expected_Id : Identity_Field;
-         Sid      : out Sid_Buffer) return Boolean
+         Sid         : out Sid_Buffer) return Boolean
       is
-         Wide_Name   : aliased Wide_String := Wide (Name);
          Sid_Size    : aliased C_DWord := 0;
          Domain_Size : aliased C_DWord := 0;
          Use_Kind    : aliased C_Int := 0;
@@ -2333,33 +2384,49 @@ package body Hostkit.Metadata is
       begin
          Sid := [others => Interfaces.C.nul];
          if Name = "" or else Expected_Id > Identity_Field (Natural'Last) then
-            return False;
-         end if;
-         Ignored := Lookup_Account_Name_Wide
-           (System.Null_Address, Wide_Name'Address,
-            System.Null_Address, Sid_Size'Access,
-            System.Null_Address, Domain_Size'Access, Use_Kind'Access);
-         if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
             return False;
          end if;
          declare
-            Domain : aliased Wide_String
-              (1 .. Natural'Max (1, Natural (Domain_Size))) :=
-                [others => Wide_Character'Val (0)];
-            Actual_Sid_Size : aliased C_DWord := Sid_Size;
-            Actual_Domain_Size : aliased C_DWord := Domain_Size;
+            Wide_Name : aliased constant Wide_String := Wide_Text (Name);
          begin
-            if Lookup_Account_Name_Wide
-              (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
-               Actual_Sid_Size'Access, Domain'Address,
-               Actual_Domain_Size'Access, Use_Kind'Access) = 0
-            then
+            --  Asked first how much room the SID takes: the call "fails"
+            --  with ERROR_INSUFFICIENT_BUFFER and says, or fails for the
+            --  reason there is no such account.
+            Ignored := Lookup_Account_Name_Wide
+              (System.Null_Address, Wide_Name'Address,
+               System.Null_Address, Sid_Size'Access,
+               System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+            if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
+               Hostkit.Errors.Set_Errno_From_Last_Error;
                return False;
             end if;
+            declare
+               Domain : aliased Wide_String
+                 (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+                   [others => Wide_Character'Val (0)];
+               Actual_Sid_Size : aliased C_DWord := Sid_Size;
+               Actual_Domain_Size : aliased C_DWord := Domain_Size;
+            begin
+               if Lookup_Account_Name_Wide
+                 (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
+                  Actual_Sid_Size'Access, Domain'Address,
+                  Actual_Domain_Size'Access, Use_Kind'Access) = 0
+               then
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
+                  return False;
+               end if;
+            end;
          end;
-         return Identity_Field (Identity_Of (Sid (1)'Address)) = Expected_Id;
+         if Identity_Field (Identity_Of (Sid (1)'Address)) /= Expected_Id then
+            --  Name is another account than the number says.
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
+            return False;
+         end if;
+         return True;
       exception
          when others =>
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
             return False;
       end Resolve_Account;
 
@@ -2401,34 +2468,55 @@ package body Hostkit.Metadata is
             return Answer;
          end if;
       end if;
-      Answer.Identity := Identity_From_Handle (File, Info'Access);
-      if not Answer.Identity.Available
-        or else (Info.Attributes and File_Attribute_Reparse_Point) /= 0
-        or else (Check_Expected and then Answer.Identity /= Expected)
-      then
-         Clean;
-         return Answer;
-      end if;
-      if Get_Security_Info
-        (File, Se_File_Object,
-         Owner_Information or Group_Information or Dacl_Information,
-         Owner'Access, Primary_Group'Access, Dacl'Access, Sacl'Access,
-         Descriptor'Access) /= Success
-      then
-         Clean;
-         return Answer;
-      end if;
+      --  Each refusal says why through errno, as the open's does.
+      declare
+         Error   : Interfaces.Unsigned_32;
+         Refused : Boolean := True;
+      begin
+         Answer.Identity := Identity_From_Handle (File, Info'Access, Error);
+         if not Answer.Identity.Available or else Is_Held_Link (File, Info.Attributes, Error) then
+            null;
+         elsif Check_Expected and then Answer.Identity /= Expected then
+            --  Path names another entry now than the one asked about.
+            Error := Error_File_Not_Found;
+         else
+            Refused := False;
+         end if;
+         if Refused then
+            Hostkit.Windows_Errors.Set_Errno_From (Error);
+            Clean;
+            return Answer;
+         end if;
+      end;
+      declare
+         Status : constant C_DWord :=
+           Get_Security_Info
+             (File, Se_File_Object,
+              Owner_Information or Group_Information or Dacl_Information,
+              Owner'Access, Primary_Group'Access, Dacl'Access, Sacl'Access,
+              Descriptor'Access);
+      begin
+         if Status /= Success then
+            Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+            Clean;
+            return Answer;
+         end if;
+      end;
 
       if Kind = Update_Ownership then
          Answer.Previous := Identity_Field (Identity_Of (Owner));
          Answer.Previous_Group := Identity_Field (Identity_Of (Primary_Group));
          Remember (Owner, Natural (Answer.Previous));
          Remember (Primary_Group, Natural (Answer.Previous_Group));
-         if Answer.Previous <= Max_Previous
-           and then Answer.Previous_Group <= Max_Previous
-           and then Value <= Identity_Field (Natural'Last)
-           and then Group <= Identity_Field (Natural'Last)
+         if Answer.Previous > Max_Previous
+           or else Answer.Previous_Group > Max_Previous
+           or else Value > Identity_Field (Natural'Last)
+           or else Group > Identity_Field (Natural'Last)
          then
+            --  An id no SID here was given, or a previous one the caller
+            --  could not keep to undo with.
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
+         else
             declare
                Owner_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
                Group_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
@@ -2485,6 +2573,9 @@ package body Hostkit.Metadata is
                     Apply_Permission_Edit
                       (System.Null_Address, File, Dacl, Owner, Primary_Group, Everyone (1)'Address, Control,
                        Old_Mode, Natural (Value), Runnable);
+               else
+                  --  No mode: more bits than set-id, sticky and rwx.
+                  Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
                end if;
                if Answer.Success then
                   Answer.Applied_Access := To_Unbounded_String (Dacl_Text_Of (File));
@@ -2590,6 +2681,27 @@ package body Hostkit.Metadata is
          return "";
    end Change_Stamp;
 
+   --  BY_HANDLE_FILE_INFORMATION of what Path names, through any link, as
+   --  stat reads an entry: its volume serial number and file index are
+   --  stat's device and inode. False when it cannot be opened.
+   function Followed_Information (Path : String; Info : access By_Handle_File_Information) return Boolean is
+      Wide_Path : aliased Wide_String := Wide (Path);
+      File      : System.Address :=
+        Create_File_Wide
+          (Wide_Path'Address, 0,
+           File_Share_Read or File_Share_Write or File_Share_Delete,
+           System.Null_Address, Open_Existing, File_Flag_Backup_Semantics,
+           System.Null_Address);
+      Found     : Boolean;
+   begin
+      if File = Invalid_Handle_Value then
+         return False;
+      end if;
+      Found := Get_File_Information (File, Info) /= 0;
+      Close_Entry (File);
+      return Found;
+   end Followed_Information;
+
    function Same_File (Left : String; Right : String) return Boolean is
       --  Windows filesystems are case-insensitive, so two paths that normalise
       --  to the same absolute string ignoring case name the same file. Made
@@ -2599,31 +2711,12 @@ package body Hostkit.Metadata is
         (Ada.Characters.Handling.To_Lower
            (Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory)));
 
-      --  The volume and file index of what Path names, through any link, as
-      --  stat's device and inode are elsewhere: they tell two hard links to
-      --  one file apart from two files.
-      function Identify (Path : String; Info : access By_Handle_File_Information) return Boolean is
-         Wide_Path : aliased Wide_String := Wide (Path);
-         File      : System.Address :=
-           Create_File_Wide
-             (Wide_Path'Address, 0,
-              File_Share_Read or File_Share_Write or File_Share_Delete,
-              System.Null_Address, Open_Existing, File_Flag_Backup_Semantics,
-              System.Null_Address);
-         Found     : Boolean;
-      begin
-         if File = Invalid_Handle_Value then
-            return False;
-         end if;
-         Found := Get_File_Information (File, Info) /= 0;
-         Close_Entry (File);
-         return Found;
-      end Identify;
-
       Left_Info  : aliased By_Handle_File_Information;
       Right_Info : aliased By_Handle_File_Information;
    begin
-      if Identify (Left, Left_Info'Access) and then Identify (Right, Right_Info'Access) then
+      --  The volume and file index tell two hard links to one file apart
+      --  from two files.
+      if Followed_Information (Left, Left_Info'Access) and then Followed_Information (Right, Right_Info'Access) then
          return Left_Info.Volume_Serial = Right_Info.Volume_Serial
            and then Left_Info.File_Index_High = Right_Info.File_Index_High
            and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
@@ -2637,58 +2730,86 @@ package body Hostkit.Metadata is
          return False;
    end Same_File;
 
+   --  The serial number of the volume holding what Path names, through any
+   --  link, as stat's device follows one: read from the entry itself, and
+   --  where it cannot be opened, from the root of its volume
+   --  (GetVolumePathNameW), which reports the same number. Only where
+   --  neither answers is the volume's root path hashed instead -- a drive
+   --  letter or a share -- which still tells two volumes apart.
    function Device_Id
      (Path      : String;
       Available : out Boolean)
       return Long_Long_Integer
    is
-      --  Absolute as text, GNAT's Full_Name refusing a path past 260
-      --  characters, and in the form a caller writes rather than the long
-      --  one, so a path given either way hashes alike.
-      Absolute : constant String := Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory);
-      Plain    : constant String :=
-        (if Absolute'Length >= 8 and then Absolute (Absolute'First .. Absolute'First + 7) = "\\?\UNC\"
-         then "\\" & Absolute (Absolute'First + 8 .. Absolute'Last)
-         elsif Absolute'Length >= 4 and then Absolute (Absolute'First .. Absolute'First + 3) = "\\?\"
-         then Absolute (Absolute'First + 4 .. Absolute'Last)
-         else Absolute);
-      Full     : constant String := Ada.Characters.Handling.To_Lower (Plain);
-      Last : Natural := Full'First - 1;
-      Hash : C_U64 := 14_695_981_039_346_656;
+      Info : aliased By_Handle_File_Information;
    begin
       Available := Hostkit.Fs.Kind_Of (Path) /= Hostkit.Fs.Missing_Entry;
       if not Available then
          return 0;
+      elsif Followed_Information (Path, Info'Access) then
+         return Long_Long_Integer (Info.Volume_Serial);
       end if;
 
-      if Full'Length >= 3
-        and then Full (Full'First + 1) = ':'
-        and then Full (Full'First + 2) in '\' | '/'
-      then
-         Last := Full'First + 1;
-      elsif Full'Length >= 5
-        and then Full (Full'First) in '\' | '/'
-        and then Full (Full'First + 1) in '\' | '/'
-      then
-         Last := Full'First + 1;
-         for I in Full'First + 2 .. Full'Last loop
-            Last := I;
-            exit when Full (I) in '\' | '/';
-         end loop;
-         if Last < Full'Last then
-            for I in Last + 1 .. Full'Last loop
+      declare
+         C_Path    : aliased constant Wide_String := Wide (Path);
+         Root      : aliased Wide_String (1 .. 32_768) := [others => Wide_Character'Val (0)];
+         Serial    : aliased C_DWord := 0;
+         Component : aliased C_DWord := 0;
+         Flags     : aliased C_DWord := 0;
+      begin
+         if Get_Volume_Path_Name (C_Path'Address, Root'Address, Root'Length) /= 0
+           and then Get_Volume_Information
+                      (Root'Address, System.Null_Address, 0, Serial'Access, Component'Access, Flags'Access,
+                       System.Null_Address, 0) /= 0
+         then
+            return Long_Long_Integer (Serial);
+         end if;
+      end;
+
+      declare
+         --  Absolute as text, GNAT's Full_Name refusing a path past 260
+         --  characters, and in the form a caller writes rather than the long
+         --  one, so a path given either way hashes alike.
+         Absolute : constant String := Hostkit.Path_Text.Absolute (Path, Hostkit.Fs.Current_Directory);
+         Plain    : constant String :=
+           (if Absolute'Length >= 8 and then Absolute (Absolute'First .. Absolute'First + 7) = "\\?\UNC\"
+            then "\\" & Absolute (Absolute'First + 8 .. Absolute'Last)
+            elsif Absolute'Length >= 4 and then Absolute (Absolute'First .. Absolute'First + 3) = "\\?\"
+            then Absolute (Absolute'First + 4 .. Absolute'Last)
+            else Absolute);
+         Full     : constant String := Ada.Characters.Handling.To_Lower (Plain);
+         Last : Natural := Full'First - 1;
+         Hash : C_U64 := 14_695_981_039_346_656;
+      begin
+         if Full'Length >= 3
+           and then Full (Full'First + 1) = ':'
+           and then Full (Full'First + 2) in '\' | '/'
+         then
+            Last := Full'First + 1;
+         elsif Full'Length >= 5
+           and then Full (Full'First) in '\' | '/'
+           and then Full (Full'First + 1) in '\' | '/'
+         then
+            Last := Full'First + 1;
+            for I in Full'First + 2 .. Full'Last loop
                Last := I;
                exit when Full (I) in '\' | '/';
             end loop;
+            if Last < Full'Last then
+               for I in Last + 1 .. Full'Last loop
+                  Last := I;
+                  exit when Full (I) in '\' | '/';
+               end loop;
+            end if;
+         else
+            Last := Full'Last;
          end if;
-      else
-         Last := Full'Last;
-      end if;
 
-      for I in Full'First .. Last loop
-         Hash := (Hash xor C_U64 (Character'Pos (Full (I)))) * 1_099_511_628_211;
-      end loop;
-      return Long_Long_Integer (Hash mod C_U64 (Long_Long_Integer'Last));
+         for I in Full'First .. Last loop
+            Hash := (Hash xor C_U64 (Character'Pos (Full (I)))) * 1_099_511_628_211;
+         end loop;
+         return Long_Long_Integer (Hash mod C_U64 (Long_Long_Integer'Last));
+      end;
    exception
       when others =>
          Available := False;
@@ -2703,7 +2824,6 @@ package body Hostkit.Metadata is
      (Name  : String;
       Found : out Boolean) return Natural
    is
-      Wide_Name   : aliased Wide_String := Wide (Name);
       Sid         : aliased Sid_Buffer := [others => Interfaces.C.nul];
       Sid_Size    : aliased C_DWord := 0;
       Domain_Size : aliased C_DWord := 0;
@@ -2712,27 +2832,33 @@ package body Hostkit.Metadata is
       Id          : Natural;
    begin
       Found := False;
-      Ignored := Lookup_Account_Name_Wide
-        (System.Null_Address, Wide_Name'Address,
-         System.Null_Address, Sid_Size'Access,
-         System.Null_Address, Domain_Size'Access, Use_Kind'Access);
-      if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
-         return 0;
-      end if;
+      --  Converted here, not as a declaration, so that a name that is not
+      --  UTF-8 is a name not found rather than an exception to the caller.
       declare
-         Domain : aliased Wide_String
-           (1 .. Natural'Max (1, Natural (Domain_Size))) :=
-             [others => Wide_Character'Val (0)];
-         Actual_Sid_Size : aliased C_DWord := Sid_Size;
-         Actual_Domain_Size : aliased C_DWord := Domain_Size;
+         Wide_Name : aliased constant Wide_String := Wide_Text (Name);
       begin
-         if Lookup_Account_Name_Wide
-           (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
-            Actual_Sid_Size'Access, Domain'Address,
-            Actual_Domain_Size'Access, Use_Kind'Access) = 0
-         then
+         Ignored := Lookup_Account_Name_Wide
+           (System.Null_Address, Wide_Name'Address,
+            System.Null_Address, Sid_Size'Access,
+            System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+         if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
             return 0;
          end if;
+         declare
+            Domain : aliased Wide_String
+              (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+                [others => Wide_Character'Val (0)];
+            Actual_Sid_Size : aliased C_DWord := Sid_Size;
+            Actual_Domain_Size : aliased C_DWord := Domain_Size;
+         begin
+            if Lookup_Account_Name_Wide
+              (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
+               Actual_Sid_Size'Access, Domain'Address,
+               Actual_Domain_Size'Access, Use_Kind'Access) = 0
+            then
+               return 0;
+            end if;
+         end;
       end;
       Id := Identity_Of (Sid (1)'Address);
       Remember (Sid (1)'Address, Id);

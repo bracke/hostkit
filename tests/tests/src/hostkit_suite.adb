@@ -43,6 +43,7 @@ with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
+with Hostkit.Windows_Programs;
 with Hostkit.Command_Line;
 
 package body Hostkit_Suite is
@@ -259,6 +260,19 @@ package body Hostkit_Suite is
    --  A Windows system error code is read as the errno a caller asks about,
    --  and a refused create says why through errno on every host.
    procedure Test_Windows_Errors_Read_As_Errno
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  What Windows runs is told by the extension, one list for every
+   --  caller, read the same on every host.
+   procedure Test_Windows_Programs_Are_Known_By_Extension
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A refusal says why through errno: reading the target of what is no
+   --  link, and on Windows a metadata update bound to another entry; and
+   --  Windows reads a volume's root and number from any form of path.
+   procedure Test_A_Refusal_Says_Why
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -730,6 +744,12 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Windows_Errors_Read_As_Errno'Access,
          "errors : a Windows error code is read as errno, and a refused create says why");
+      Register_Routine
+        (T, Test_Windows_Programs_Are_Known_By_Extension'Access,
+         "process : what Windows runs is told by its extension on any host");
+      Register_Routine
+        (T, Test_A_Refusal_Says_Why'Access,
+         "errors : a refused link read or metadata update says why, and a volume is found from any path form");
       Register_Routine
         (T, Test_Delete_Empty_Directory'Access,
          "fs : only an empty directory is deleted, and a refusal is an answer");

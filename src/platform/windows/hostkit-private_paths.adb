@@ -73,7 +73,29 @@ package body Hostkit.Private_Paths is
    Error_Already_Exists : constant C_DWord := 183;
    File_Id_Info_Class : constant C_Int := 18;
 
+   --  Windows system error codes for a refusal no Win32 call reported, put
+   --  into errno through Hostkit.Windows_Errors.Set_Errno_From:
+   --  ERROR_FILE_NOT_FOUND (ENOENT; the CRT has no ESTALE) for a name that
+   --  no longer leads to the entry held, ERROR_DIRECTORY (ENOTDIR) for an
+   --  entry that is no folder, ERROR_INVALID_PARAMETER (EINVAL) for data
+   --  the host handed back unusable, and ERROR_PRIVILEGE_NOT_HELD (EPERM,
+   --  as chmod answers anyone but the owner) for an entry this process
+   --  does not own.
+   Error_File_Not_Found     : constant Interfaces.Unsigned_32 := 2;
+   Error_Invalid_Parameter  : constant Interfaces.Unsigned_32 := 87;
+   Error_Directory          : constant Interfaces.Unsigned_32 := 267;
+   Error_Privilege_Not_Held : constant Interfaces.Unsigned_32 := 1314;
+
+   --  The DACL a private entry is given: its owner alone, with full access,
+   --  handed down to what a folder holds; protected from its parent's.
+   Private_Sddl : constant String := "D:P(A;OICI;FA;;;OW)";
+
    function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
+
+   --  Text that names no file -- SDDL -- as UTF-16 with a terminating NUL:
+   --  none of the path rules Wide (Windows_Paths.Native) applies.
+   function Wide_Text (Value : String) return Wide_String is
+     (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
 
    function Create_Directory_W
      (Name : System.Address;
@@ -185,6 +207,8 @@ package body Hostkit.Private_Paths is
         and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
    end Same_File;
 
+   --  Whether the entry open as Handle is owned by this process's token
+   --  owner. False, with errno set, when it is not or cannot be told.
    function Owned_By_Current_Token (Handle : System.Address) return Boolean is
       Owner, Descriptor, Token : aliased System.Address := System.Null_Address;
       Security_Status : C_DWord;
@@ -200,14 +224,20 @@ package body Hostkit.Private_Paths is
         (Handle, Se_File_Object, Owner_Security_Information,
          Owner'Address, System.Null_Address, System.Null_Address,
          System.Null_Address, Descriptor'Access);
-      Ok := Security_Status = 0
-        and then Open_Process_Token
-          (Get_Current_Process, Token_Query, Token'Access) /= 0;
-      if Ok then
-         Ok := Get_Token_Information
-           (Token, Token_Owner_Class, Buffer'Address,
-            C_DWord (Buffer'Length), Needed'Access) /= 0
-           and then Equal_Sid (Owner, Token_Owner) /= 0;
+      Ok := Security_Status = 0;
+      if not Ok then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Security_Status));
+      else
+         Ok := Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) /= 0
+           and then Get_Token_Information
+             (Token, Token_Owner_Class, Buffer'Address,
+              C_DWord (Buffer'Length), Needed'Access) /= 0;
+         if not Ok then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+         elsif Equal_Sid (Owner, Token_Owner) = 0 then
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Privilege_Not_Held);
+            Ok := False;
+         end if;
       end if;
       if Token /= System.Null_Address then
          Ignored_Int := Close_Handle (Token);
@@ -224,6 +254,7 @@ package body Hostkit.Private_Paths is
          if Descriptor /= System.Null_Address then
             Ignored_Address := Local_Free (Descriptor);
          end if;
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
          return False;
    end Owned_By_Current_Token;
 
@@ -232,7 +263,7 @@ package body Hostkit.Private_Paths is
    --  check: it is as private as that volume lets anything be, as a POSIX
    --  host's vfat mount gives every file the mode its mount options say.
    function Set_Private (Handle : System.Address) return Boolean is
-      Text : aliased Wide_String := Wide ("D:P(A;OICI;FA;;;OW)");
+      Text : aliased constant Wide_String := Wide_Text (Private_Sddl);
       Descriptor, Dacl : aliased System.Address := System.Null_Address;
       Present, Defaulted : aliased C_Int := 0;
       Ok : Boolean;
@@ -241,14 +272,26 @@ package body Hostkit.Private_Paths is
       if not Keeps_Access_Control (Handle) then
          return True;
       end if;
-      Ok := Owned_By_Current_Token (Handle)
-        and then Convert_Sddl
-          (Text'Address, Sddl_Revision_1, Descriptor'Access,
-           System.Null_Address) /= 0;
+      --  Each refusal says why through errno: Owned_By_Current_Token's
+      --  its own, the others the call's that failed.
+      Ok := Owned_By_Current_Token (Handle);
+      if Ok then
+         Ok := Convert_Sddl
+           (Text'Address, Sddl_Revision_1, Descriptor'Access,
+            System.Null_Address) /= 0;
+         if not Ok then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+         end if;
+      end if;
       if Ok then
          Ok := Get_Descriptor_Dacl
-           (Descriptor, Present'Access, Dacl'Access, Defaulted'Access) /= 0
-           and then Present /= 0;
+           (Descriptor, Present'Access, Dacl'Access, Defaulted'Access) /= 0;
+         if not Ok then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+         elsif Present = 0 then
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
+            Ok := False;
+         end if;
       end if;
       if Ok then
          declare
@@ -271,17 +314,21 @@ package body Hostkit.Private_Paths is
          if Descriptor /= System.Null_Address then
             Ignored := Local_Free (Descriptor);
          end if;
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
          return False;
    end Set_Private;
 
+   --  A LocalAlloc'd security descriptor carrying Private_Sddl, for the
+   --  caller to free; null, with errno set, when the host will not build it.
    function Private_Descriptor return System.Address is
-      Text : aliased Wide_String := Wide ("D:P(A;OICI;FA;;;OW)");
+      Text : aliased constant Wide_String := Wide_Text (Private_Sddl);
       Descriptor : aliased System.Address := System.Null_Address;
    begin
       if Convert_Sddl
         (Text'Address, Sddl_Revision_1, Descriptor'Access,
          System.Null_Address) = 0
       then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          return System.Null_Address;
       end if;
       return Descriptor;
@@ -336,13 +383,20 @@ package body Hostkit.Private_Paths is
             System.Null_Address);
          Info : aliased By_Handle_File_Information;
          Opened : constant Boolean := Handle /= Invalid_Handle or else Refused;
-         Ok : constant Boolean := Opened
-           and then Get_File_Information (Handle, Info'Access) /= 0
+         Read : constant Boolean := Opened
+           and then (Get_File_Information (Handle, Info'Access) /= 0 or else Refused);
+         --  A file, or a link or junction where a folder was asked for, is
+         --  no folder this makes private.
+         Folder : constant Boolean := Read
            and then (Info.Attributes and File_Attribute_Directory) /= 0
-           and then (Info.Attributes and File_Attribute_Reparse_Point) = 0
-           and then Set_Private (Handle);
+           and then (Info.Attributes and File_Attribute_Reparse_Point) = 0;
+         Ok : Boolean;
          Ignored : C_Int;
       begin
+         if Read and then not Folder then
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Directory);
+         end if;
+         Ok := Folder and then Set_Private (Handle);
          if Handle /= Invalid_Handle then
             Ignored := Close_Handle (Handle);
          end if;
@@ -357,13 +411,14 @@ package body Hostkit.Private_Paths is
       Original : constant System.Address := Osfhandle (C_Int (Descriptor));
       Count : C_DWord;
    begin
+      --  _get_osfhandle has set errno (EBADF) itself.
       if Original = Invalid_Handle then
          return False;
       end if;
       Count := Get_Final_Path
         (Original, System.Null_Address, 0, 0);
       if Count = 0 then
-         return False;
+         return Refused;
       end if;
       declare
          Name : aliased Wide_String (1 .. Natural (Count) + 1) :=
@@ -374,14 +429,28 @@ package body Hostkit.Private_Paths is
          Ok : Boolean := Actual > 0 and then Actual < C_DWord (Name'Length);
          Ignored : C_Int;
       begin
-         if Ok then
+         --  Each refusal says why through errno: the call's that failed,
+         --  or, for a name that now leads elsewhere, ENOENT.
+         if not Ok then
+            if Actual = 0 then
+               Hostkit.Errors.Set_Errno_From_Last_Error;
+            else
+               --  The name grew longer between the two asks.
+               Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
+            end if;
+         else
             Reopened := Create_File_W
               (Name'Address, Read_Control + Write_Dac + File_Read_Attributes,
                File_Share_All, System.Null_Address, Open_Existing,
                File_Flag_Open_Reparse_Point, System.Null_Address);
-            Ok := Reopened /= Invalid_Handle
-              and then Same_File (Original, Reopened)
-              and then Set_Private (Reopened);
+            if Reopened = Invalid_Handle then
+               Ok := Refused;
+            elsif not Same_File (Original, Reopened) then
+               Hostkit.Windows_Errors.Set_Errno_From (Error_File_Not_Found);
+               Ok := False;
+            else
+               Ok := Set_Private (Reopened);
+            end if;
          end if;
          if Reopened /= Invalid_Handle then
             Ignored := Close_Handle (Reopened);
@@ -390,6 +459,7 @@ package body Hostkit.Private_Paths is
       end;
    exception
       when others =>
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
          return False;
    end Restrict_Open_File;
 

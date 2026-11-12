@@ -106,7 +106,10 @@ package body Hostkit.Durability is
                      Result := Failed;
                   end if;
                end if;
+               --  A file left writable is a failure of its own, said as
+               --  every other one is.
                if Set_File_Attributes_W (Name'Address, Attributes) = 0 then
+                  Hostkit.Errors.Set_Errno_From_Last_Error;
                   Result := Failed;
                end if;
                return Result;

@@ -9,7 +9,9 @@ with GNAT.OS_Lib;
 
 with Hostkit.Errors;
 with Hostkit.Fs.Instants;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
+with Hostkit.Windows_Programs;
 with Interfaces.C;
 with Interfaces.C_Streams;
 
@@ -624,20 +626,6 @@ package body Hostkit.Fs is
    --  a file manager duly classified a .tar.gz as a program. What runs here is decided
    --  by the extension.
    function Is_Executable (Path : String) return Boolean is
-      --  The extensions Windows runs, tested without allocating one.
-      --
-      --  This was an array of `access constant String` filled with `new
-      --  String'(".exe")` and the rest: six allocations that nothing ever
-      --  frees, made afresh on every call, to hold six literals known at
-      --  compile time. GNAT warns about the anonymous access allocator, and it
-      --  is right to.
-      Dot : constant Natural :=
-        Ada.Strings.Fixed.Index (Path, ".", Ada.Strings.Backward);
-
-      Suffix : constant String :=
-        (if Dot = 0 then ""
-         else Ada.Characters.Handling.To_Lower (Path (Dot .. Path'Last)));
-
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
@@ -647,9 +635,7 @@ package body Hostkit.Fs is
          return False;
       end if;
 
-      return Suffix = ".exe" or else Suffix = ".com" or else Suffix = ".bat"
-        or else Suffix = ".cmd" or else Suffix = ".ps1"
-        or else Suffix = ".msi";
+      return Hostkit.Windows_Programs.Runs_By_Extension (Path);
    exception
       when others =>
          return False;
@@ -860,7 +846,10 @@ package body Hostkit.Fs is
 
    --  Windows has no readlink: a link is a reparse point. Open it without following it
    --  (FILE_FLAG_OPEN_REPARSE_POINT) and pull the target out of the reparse data. The
-   --  print name is the human target ("real.txt"); the substitute name is a fallback.
+   --  print name is the human target ("real.txt"); the substitute name is a fallback,
+   --  in the NT form (\??\C:\x, \??\UNC\server\share) that Win32 text never carries,
+   --  so it is read back as C:\x and \\server\share. A failure sets errno, as
+   --  readlink does: EINVAL for an entry that is no symbolic link or junction.
    function Read_Link_Target
      (Path   : String;
       Target : out Ada.Strings.Unbounded.Unbounded_String)
@@ -875,6 +864,10 @@ package body Hostkit.Fs is
       Share_All               : constant C_DWord := 7;
       Tag_Symlink             : constant C_DWord := 16#A000_000C#;
       Tag_Mount_Point         : constant C_DWord := 16#A000_0003#;
+      --  ERROR_NOT_A_REPARSE_POINT, ERROR_INVALID_REPARSE_DATA: no link to
+      --  read here, which errno says as EINVAL.
+      Error_Not_A_Reparse_Point  : constant Interfaces.Unsigned_32 := 4390;
+      Error_Invalid_Reparse_Data : constant Interfaces.Unsigned_32 := 4392;
       Invalid_Handle          : constant System.Address :=
         System.Storage_Elements.To_Address
           (System.Storage_Elements.Integer_Address'Last);
@@ -912,7 +905,27 @@ package body Hostkit.Fs is
       Handle    : System.Address;
       Returned  : aliased C_DWord := 0;
       Outcome   : Interfaces.C.int;
+      Error     : C_DWord;
       Ignored   : Interfaces.C.int;
+
+      --  Text, a name as the reparse data holds it, as Win32 writes it: an
+      --  NT \??\ name (a substitute name) without the prefix, and its UNC
+      --  form as \\server\share.
+      function Win32_Form (Text : Wide_String) return Wide_String is
+         Nt_Prefix  : constant Wide_String := "\??\";
+         Unc_Prefix : constant Wide_String := "\??\UNC\";
+      begin
+         if Text'Length >= Unc_Prefix'Length
+           and then Text (Text'First .. Text'First + Unc_Prefix'Length - 1) = Unc_Prefix
+         then
+            return "\\" & Text (Text'First + Unc_Prefix'Length .. Text'Last);
+         elsif Text'Length >= Nt_Prefix'Length
+           and then Text (Text'First .. Text'First + Nt_Prefix'Length - 1) = Nt_Prefix
+         then
+            return Text (Text'First + Nt_Prefix'Length .. Text'Last);
+         end if;
+         return Text;
+      end Win32_Form;
 
       function U16 (At_Index : Natural) return Natural is
         (Natural (Buffer (At_Index)) + Natural (Buffer (At_Index + 1)) * 256);
@@ -934,6 +947,7 @@ package body Hostkit.Fs is
          Flags      => Flag_Backup_Semantics + Flag_Open_Reparse_Point,
          Template   => System.Null_Address);
       if Handle = Invalid_Handle then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
       end if;
 
@@ -946,8 +960,10 @@ package body Hostkit.Fs is
          Out_Size   => Buffer'Length,
          Returned   => Returned'Access,
          Overlapped => System.Null_Address);
+      Error := Last_Error;
       Ignored := Close_Handle (Handle);
       if Outcome = 0 then
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
          return False;
       end if;
 
@@ -962,6 +978,8 @@ package body Hostkit.Fs is
          elsif Tag = Tag_Mount_Point then
             Path_Buf_Base := 16;
          else
+            --  A cloud placeholder, a deduplicated file: no link.
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Not_A_Reparse_Point);
             return False;
          end if;
 
@@ -972,6 +990,7 @@ package body Hostkit.Fs is
             Name_Len := U16 (10);   --  SubstituteNameLength
          end if;
          if Name_Len = 0 then
+            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Reparse_Data);
             return False;
          end if;
 
@@ -985,12 +1004,15 @@ package body Hostkit.Fs is
                  Wide_Character'Val (U16 (Start + Index * 2));
             end loop;
             Target := Ada.Strings.Unbounded.To_Unbounded_String
-              (Hostkit.Windows_Paths.To_UTF_8 (Wide_T));
+              (Hostkit.Windows_Paths.To_UTF_8 (Win32_Form (Wide_T)));
          end;
       end;
       return True;
    exception
       when others =>
+         --  Reparse data whose offsets point past what was returned.
+         Target := Ada.Strings.Unbounded.Null_Unbounded_String;
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Reparse_Data);
          return False;
    end Read_Link_Target;
 
@@ -2152,13 +2174,20 @@ package body Hostkit.Fs is
       Read_Only  : constant C_DWord := 16#0001#;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+      Cleared    : constant Boolean :=
+        Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0;
       Ignored    : Interfaces.C.int;
    begin
-      if Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0 then
+      if Cleared then
          Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
       end if;
       if Remove_Directory (Wide_Path'Address) = 0 then
+         --  As Delete_File: the reason first, before the attribute is put
+         --  back and the last error with it overwritten.
          Hostkit.Errors.Set_Errno_From_Last_Error;
+         if Cleared then
+            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
+         end if;
          return False;
       end if;
       return True;

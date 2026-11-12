@@ -224,6 +224,41 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **Windows: a OneDrive placeholder's permissions can be edited.**
+  `Metadata.Update_Entry_Metadata` refused every reparse point; it now reads
+  the reparse tag and refuses only a symbolic link or junction, as
+  `Fs.Is_Link` does, so a cloud placeholder, a deduplicated file or an
+  app-execution alias is the ordinary entry it is to the user.
+- **Windows: a volume's name limit and read-only flag are read from any
+  path.** `Metadata.Volume_Capacity_Of` found the volume root only for a
+  `C:` path; it asks `GetVolumePathNameW` of the long form, so `\\?\`,
+  UNC paths and volumes mounted on a folder answer too.
+- **Windows: `Metadata.Device_Id` is the volume serial number** of what the
+  path names, through any link, as stat's device is -- not a hash of the
+  drive or share text, which read a folder-mounted volume as its host
+  drive. The text hash stays only for an entry neither it nor its volume
+  root can be opened to ask.
+- **Windows: `Fs.Read_Link_Target` answers in Win32 form.** A link whose
+  print name is empty was read by its substitute name, in NT form
+  (`\??\C:\x`, `\??\UNC\server\share`); it now reads `C:\x` and
+  `\\server\share`.
+- **Windows: refusals say why.** `Fs.Read_Link_Target`,
+  `Private_Paths.Restrict_Open_File`, `Ensure_Directory` and making an entry
+  private, `Metadata.Set_Exact_Permissions`, `Update_Entry_Metadata` (an
+  entry no longer the one asked about, a link, a value out of range, an
+  unknown account) and `Durability.Sync_File` (a read-only attribute not put
+  back) returned False with errno left as an earlier call had it; each now
+  sets errno, as `Hostkit.Errors` promises. `Fs.Delete_Empty_Directory`
+  puts a cleared read-only attribute back when the removal is refused.
+- **Windows: account names and SDDL are not read as paths.** They went
+  through `Windows_Paths.Native`, whose path rules could rewrite a name
+  with a `/` or a dot; they are now converted as plain text. The SIDs
+  `Metadata` remembers to name an id later are kept in a protected object,
+  safe to read from several tasks.
+- **macOS: a private place on a volume without ACLs.** `Private_Paths`
+  refused when clearing the extended ACL failed with ENOTSUP or EOPNOTSUPP
+  (FAT, exFAT, some shares); there is no ACL to clear there, so that is
+  success, as on Linux.
 - **Sparse copies on Windows stay sparse to the end.** `Finish_Sparse`
   extended the file with `_chsize_s`, which writes zeros and so allocated
   the trailing hole; it now sets the end of file. `Skip_Zeros` issues

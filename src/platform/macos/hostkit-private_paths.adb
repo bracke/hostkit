@@ -58,6 +58,10 @@ package body Hostkit.Private_Paths is
    Directory_Type : constant C_U16 := 8#040000#;
    Regular_Type   : constant C_U16 := 8#100000#;
    E_Exist : constant C_Int := 17;
+   --  ENOTSUP and EOPNOTSUPP, macOS's own numbers: a volume that keeps no
+   --  ACLs (FAT, exFAT, an SMB share without them) refuses to set one.
+   E_Not_Supported           : constant C_Int := 45;
+   E_Operation_Not_Supported : constant C_Int := 102;
    Acl_Type_Extended : constant C_Int := 16#100#;
 
    function C_Mkdir
@@ -103,6 +107,11 @@ package body Hostkit.Private_Paths is
         and then Info.User_Id = C_Geteuid;
    end Is_Owned_Kind;
 
+   --  Clear the extended ACL of the entry open as Fd. A volume that keeps
+   --  no ACLs has none to clear, and refusing there would refuse every
+   --  private place on it: the entry is as private as the volume lets it be
+   --  (as the spec says, and as Linux treats a volume without ACL support),
+   --  so that is success.
    function Remove_Extended_Acl (Fd : C_Int) return Boolean is
       Acl : constant System.Address := C_Acl_Init (0);
       Result : Boolean := False;
@@ -110,6 +119,10 @@ package body Hostkit.Private_Paths is
    begin
       if Acl /= System.Null_Address then
          Result := C_Acl_Set_Fd (Fd, Acl, Acl_Type_Extended) = 0;
+         --  Read before acl_free, which may set errno itself.
+         if not Result then
+            Result := Errno in E_Not_Supported | E_Operation_Not_Supported;
+         end if;
          Ignored := C_Acl_Free (Acl);
       end if;
       return Result;

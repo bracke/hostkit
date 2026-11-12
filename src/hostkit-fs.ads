@@ -328,7 +328,10 @@ package Hostkit.Fs is
    --  that always fails, which made a scanner treat every Windows link as broken.
    --
    --  @return False when Path is not a link or the target cannot be read; Target is then
-   --          empty. On success Target holds the link's own target text.
+   --          empty and errno says why (EINVAL for an entry that is no link). On success
+   --          Target holds the link's own target text, on Windows as Win32 writes a path
+   --          (C:\x, \\server\share), never the NT form (\??\C:\x) a reparse point
+   --          may store.
    function Read_Link_Target
      (Path   : String;
       Target : out Ada.Strings.Unbounded.Unbounded_String)
