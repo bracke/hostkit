@@ -1,5 +1,3 @@
-with Interfaces;
-
 with Hostkit.Metadata;
 
 --  A host with modes and no share modes: nothing can hold a file against
@@ -39,5 +37,7 @@ package body Hostkit_Test_Native is
       Inheritable := False;
       return False;
    end Handle_Inheritance;
+
+   function Drop_Backup_Privileges return Boolean is (True);
 
 end Hostkit_Test_Native;

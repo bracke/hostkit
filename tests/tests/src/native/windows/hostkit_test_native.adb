@@ -115,4 +115,54 @@ package body Hostkit_Test_Native is
       return True;
    end Handle_Inheritance;
 
+   function Drop_Backup_Privileges return Boolean is
+      use type Interfaces.C.int;
+      type Luid_And_Attributes is record
+         Low        : C_DWord;
+         High       : Interfaces.C.long;
+         Attributes : C_DWord;
+      end record
+        with Convention => C;
+      type Privilege_List is array (1 .. 2) of Luid_And_Attributes
+        with Convention => C;
+      type Token_Privileges is record
+         Count      : C_DWord;
+         Privileges : Privilege_List;
+      end record
+        with Convention => C;
+
+      function Get_Current_Process return System.Address
+        with Import, Convention => Stdcall, External_Name => "GetCurrentProcess";
+      function Open_Process_Token
+        (Process : System.Address; Desired : C_DWord; Token : access System.Address) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "OpenProcessToken";
+      function Lookup_Privilege_Value
+        (System_Name : System.Address; Name : System.Address; Luid : System.Address) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "LookupPrivilegeValueW";
+      function Adjust_Token_Privileges
+        (Token : System.Address; Disable_All : Interfaces.C.int; New_State : System.Address;
+         Length : C_DWord; Previous : System.Address; Return_Length : System.Address) return Interfaces.C.int
+        with Import, Convention => Stdcall, External_Name => "AdjustTokenPrivileges";
+
+      Token_Adjust_Privileges : constant C_DWord := 16#0020#;
+      Token_Query             : constant C_DWord := 16#0008#;
+      Backup  : aliased constant Wide_String := "SeBackupPrivilege" & Wide_Character'Val (0);
+      Restore : aliased constant Wide_String := "SeRestorePrivilege" & Wide_Character'Val (0);
+      Token   : aliased System.Address := System.Null_Address;
+      State   : aliased Token_Privileges := (Count => 2, Privileges => [others => (0, 0, 0)]);
+      Ok      : Boolean;
+      Ignored : Interfaces.C.int;
+   begin
+      if Open_Process_Token (Get_Current_Process, Token_Adjust_Privileges + Token_Query, Token'Access) = 0 then
+         return False;
+      end if;
+      --  Attributes 0: disabled.
+      Ok := Lookup_Privilege_Value (System.Null_Address, Backup'Address, State.Privileges (1)'Address) /= 0
+        and then Lookup_Privilege_Value (System.Null_Address, Restore'Address, State.Privileges (2)'Address) /= 0
+        and then Adjust_Token_Privileges
+          (Token, 0, State'Address, 0, System.Null_Address, System.Null_Address) /= 0;
+      Ignored := Close_Handle (Token);
+      return Ok;
+   end Drop_Backup_Privileges;
+
 end Hostkit_Test_Native;

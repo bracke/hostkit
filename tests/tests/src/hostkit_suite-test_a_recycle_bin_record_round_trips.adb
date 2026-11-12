@@ -24,6 +24,8 @@ is
 
    Bytes   : constant Ada.Streams.Stream_Element_Array := Format.Encode (Item);
    Decoded : Format.Info_Record;
+   --  What a refused decode leaves.
+   Ignored : Format.Info_Record;
    Units   : constant Natural := 23;  --  22 characters and the NUL
 begin
    --  The layout Windows 10 writes, byte for byte where it is fixed.
@@ -62,14 +64,14 @@ begin
    end;
 
    --  What is not a record is refused, never guessed at.
-   Assert (not Format.Decode (Bytes (Bytes'First .. Bytes'First + 20), Decoded), "a short header is refused");
-   Assert (not Format.Decode (Bytes (Bytes'First .. Bytes'Last - 2), Decoded), "a cut-off path is refused");
+   Assert (not Format.Decode (Bytes (Bytes'First .. Bytes'First + 20), Ignored), "a short header is refused");
+   Assert (not Format.Decode (Bytes (Bytes'First .. Bytes'Last - 2), Ignored), "a cut-off path is refused");
    declare
       Newer : Ada.Streams.Stream_Element_Array := Bytes;
       Lone  : Ada.Streams.Stream_Element_Array := Bytes;
    begin
       Newer (Newer'First) := 3;
-      Assert (not Format.Decode (Newer, Decoded), "a version this does not know is refused");
+      Assert (not Format.Decode (Newer, Ignored), "a version this does not know is refused");
       Assert (Format.Version_Of (Newer) = 3, "but its version is still read, so a writer can refuse beside it");
       --  A lone high surrogate where the 'C' was: NTFS keeps one in a name,
       --  so a recycled path can hold it. It reads as WTF-8 -- the three bytes
@@ -90,6 +92,7 @@ begin
    declare
       Epoch : constant Ada.Calendar.Time := Ada.Calendar.Formatting.Time_Of (1970, 1, 1, 0.0, Time_Zone => 0);
       Back  : Ada.Calendar.Time;
+      Ignored_Time : Ada.Calendar.Time;
       Now   : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       use type Ada.Calendar.Time;
    begin
@@ -97,7 +100,7 @@ begin
       Assert (Format.To_Time (116_444_736_000_000_000, Back) and then Back = Epoch, "and back");
       Assert (Format.To_Time (Format.To_Filetime (Now), Back) and then abs (Back - Now) < 0.000_001,
               "the time now round-trips to the 100 ns a FILETIME holds");
-      Assert (not Format.To_Time (0, Back), "a zero FILETIME is no time");
+      Assert (not Format.To_Time (0, Ignored_Time), "a zero FILETIME is no time");
    end;
 
    --  Names: $R<suffix> beside $I<suffix>, a file keeping its extension.

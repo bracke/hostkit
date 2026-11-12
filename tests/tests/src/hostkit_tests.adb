@@ -6,6 +6,7 @@ with AUnit.Reporter.Text;
 with AUnit.Run;
 
 with Hostkit_Suite;
+with Hostkit_Test_Native;
 with Hostkit_Test_Skips;
 
 --  Test_Runner exits zero whatever happens, so a failing suite reported success and CI
@@ -16,6 +17,12 @@ procedure Hostkit_Tests is
    function Run is new AUnit.Run.Test_Runner_With_Status (Hostkit_Suite.Suite);
    Reporter : AUnit.Reporter.Text.Text_Reporter;
 begin
+   --  First: every access test must meet the DACLs a user's process meets.
+   if not Hostkit_Test_Native.Drop_Backup_Privileges then
+      Ada.Text_IO.Put_Line ("FAILED: the backup and restore privileges could not be switched off");
+      Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
+      return;
+   end if;
    if Run (Reporter) /= AUnit.Success then
       Ada.Command_Line.Set_Exit_Status (Ada.Command_Line.Failure);
    end if;

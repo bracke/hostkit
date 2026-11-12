@@ -22,6 +22,15 @@ is
          Hostkit.Metadata.Identity_Field (Mode), 0, Hostkit.Metadata.Identity_Field (Natural'Last),
          Access_Text => Access_Text));
 
+   --  Entry's mode, asserting the host reports it.
+   function Mode_Of (Entry_Path : String) return Natural is
+      Known : Boolean;
+      Bits  : constant Natural := Hostkit.Metadata.File_Permission_Bits (Entry_Path, Known);
+   begin
+      Assert (Known, "the mode of " & Entry_Path & " can be read");
+      return Bits;
+   end Mode_Of;
+
    --  The bits of triplet Left that triplet Right lacks.
    function Missing (Left, Right : Natural) return Natural is
      ((if (Left / 4) mod 2 = 1 and then (Right / 4) mod 2 = 0 then 4 else 0)
@@ -93,7 +102,7 @@ begin
    First := Update (Edited);
    Assert (First.Success, "the edit is applied");
    Assert (First.Previous = Hostkit.Metadata.Identity_Field (Before), "and reports the mode it replaced");
-   Assert (Hostkit.Metadata.File_Permission_Bits (Path, Available) = Edited, "the mode is the one asked for");
+   Assert (Mode_Of (Path) = Edited, "the mode is the one asked for");
 
    if Hostkit.Host.Current /= Hostkit.Host.Windows then
       --  The mode is the whole record: nothing else is kept or reported.
@@ -102,7 +111,7 @@ begin
          "a POSIX host reports no access record beside the mode");
       Back := Update (Before, Access_Text => "D:P");
       Assert (Back.Success, "an access record is ignored where the mode is all there is");
-      Assert (Hostkit.Metadata.File_Permission_Bits (Path, Available) = Before, "and the mode is applied");
+      Assert (Mode_Of (Path) = Before, "and the mode is applied");
       Ada.Directories.Delete_File (Path);
       return;
    end if;
@@ -128,14 +137,14 @@ begin
       Assert (To_String (Back.Applied_Access) = Original, "the DACL is the original, SDDL for SDDL: "
               & To_String (Back.Applied_Access));
       Assert
-        (Hostkit.Metadata.File_Permission_Bits (Path, Available) = Before,
+        (Mode_Of (Path) = Before,
          "and so is the mode read from it");
 
       --  An edit by path keeps inheritance too; an update to the mode the
       --  entry has changes nothing and reads its DACL.
       Assert (Hostkit.Metadata.Set_Permissions (Path, Edited), "an edit by path is applied");
-      Assert (Hostkit.Metadata.File_Permission_Bits (Path, Available) = Edited, "and gives the mode asked for");
-      Probe := Update (Hostkit.Metadata.File_Permission_Bits (Path, Available));
+      Assert (Mode_Of (Path) = Edited, "and gives the mode asked for");
+      Probe := Update (Mode_Of (Path));
       Assert (Probe.Success, "the DACL can be read back");
       Assert
         (Inherited (To_String (Probe.Previous_Access)) = Inherited (Original)
@@ -172,7 +181,7 @@ begin
       Assert ((Inherits / 4) mod 2 = 1, "Everyone reads what the folder hands read down to:" & Inherits'Image);
       Probe := Update (Asked, Entry_Path => Inner);
       Assert (Probe.Success, "the edit inheritance contradicts is applied");
-      Read := Hostkit.Metadata.File_Permission_Bits (Inner, Available);
+      Read := Mode_Of (Inner);
       Assert
         (Read = Asked,
          "and takes effect: the group and Everyone no longer read (asked" & Asked'Image & ", read" & Read'Image & ")");
@@ -198,7 +207,7 @@ begin
             "the DACL is the original, inheritance and all, SDDL for SDDL: " & To_String (Back.Applied_Access)
             & " for " & Original);
          Assert
-           (Hostkit.Metadata.File_Permission_Bits (Inner, Available) = Inherits,
+           (Mode_Of (Inner) = Inherits,
             "and so is the mode read from it");
       end;
    end;

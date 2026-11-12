@@ -55,6 +55,16 @@ package Hostkit_Test_Native is
    --    handles (every one but Windows) or when it would not say.
    function Handle_Inheritance (Handle : Interfaces.Integer_64; Inheritable : out Boolean) return Boolean;
 
+   --  Switch off the backup and restore privileges this process holds. An
+   --  administrator's MSYS2 bash -- the one CI runs the suite from -- turns
+   --  them on and its children inherit them, and with them on CreateFileW
+   --  and SetSecurityInfo pass over any DACL: every access test would then
+   --  pass for a reason a user's process never has.
+   --
+   --  @return True when they are off, or on a host without them (every one
+   --    but Windows).
+   function Drop_Backup_Privileges return Boolean;
+
 private
 
    type Exclusive_Hold is limited record
