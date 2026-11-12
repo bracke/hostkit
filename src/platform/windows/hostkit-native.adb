@@ -4,6 +4,7 @@ with Ada.Strings.Wide_Unbounded;
 
 with Hostkit.Fs;
 with Hostkit.Shell_Paths;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -16,6 +17,7 @@ package body Hostkit.Native is
    use type Hostkit.Process.Poll_Hook;
    use type Hostkit.Process.Started_Hook;
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
@@ -23,8 +25,6 @@ package body Hostkit.Native is
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   Infinite     : constant C_DWord := 16#FFFF_FFFF#;
-   Still_Active : constant C_DWord := 259;
    Wait_Failed  : constant C_DWord := 16#FFFF_FFFF#;
    Wait_Timeout : constant C_DWord := 16#0000_0102#;
 
@@ -82,20 +82,11 @@ package body Hostkit.Native is
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
 
-   function Wait_For_Single_Object
-     (Handle       : System.Address;
-      Milliseconds : C_DWord)
-      return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "WaitForSingleObject";
-
    function Get_Exit_Code_Process
      (Process   : System.Address;
       Exit_Code : access C_DWord)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "GetExitCodeProcess";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
    --  Returns > 32 on success. The value is an HINSTANCE for historical reasons only
    --  and means nothing else.
@@ -213,15 +204,8 @@ package body Hostkit.Native is
          return False;
    end Run_Command_Line;
 
-   Generic_Read      : constant C_DWord := 16#8000_0000#;
-   Generic_Write     : constant C_DWord := 16#4000_0000#;
-   File_Share_Read   : constant C_DWord := 16#0000_0001#;
    Create_Always     : constant C_DWord := 2;
-   Open_Existing     : constant C_DWord := 3;
-   File_Attr_Normal  : constant C_DWord := 16#0000_0080#;
    Start_Use_Handles : constant C_DWord := 16#0000_0100#;
-   Invalid_Handle    : constant System.Address :=
-     System.Storage_Elements.To_Address (-1);
 
    type Security_Attributes is record
       Length      : C_DWord := 0;
@@ -235,20 +219,6 @@ package body Hostkit.Native is
    Std_Input_Handle  : constant C_DWord := 16#FFFF_FFF6#;  --  (DWORD) -10
    Std_Output_Handle : constant C_DWord := 16#FFFF_FFF5#;  --  -11
    Std_Error_Handle  : constant C_DWord := 16#FFFF_FFF4#;  --  -12
-
-   function Get_Std_Handle (Which : C_DWord) return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
-
-   function Create_File
-     (Name       : System.Address;
-      Access_Way : C_DWord;
-      Share      : C_DWord;
-      Security   : access Security_Attributes;
-      Creation   : C_DWord;
-      Attributes : C_DWord;
-      Template   : System.Address)
-      return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
 
    function Terminate_Process
      (Process   : System.Address;
@@ -375,7 +345,7 @@ package body Hostkit.Native is
          Security  : aliased Security_Attributes;
       begin
          if Path = "" then
-            return Invalid_Handle;
+            return Invalid_Handle_Value;
          end if;
 
          Security.Length := C_DWord (Security_Attributes'Size / 8);
@@ -385,9 +355,9 @@ package body Hostkit.Native is
                   (Name       => Wide_Path'Address,
                    Access_Way => Generic_Write,
                    Share      => File_Share_Read,
-                   Security   => Security'Access,
+                   Security   => Security'Address,
                    Creation   => Create_Always,
-                   Attributes => File_Attr_Normal,
+                   Flags      => File_Attribute_Normal,
                    Template   => System.Null_Address);
       end Capture;
 
@@ -400,7 +370,7 @@ package body Hostkit.Native is
          Security  : aliased Security_Attributes;
       begin
          if Path = "" then
-            return Invalid_Handle;
+            return Invalid_Handle_Value;
          end if;
 
          Security.Length := C_DWord (Security_Attributes'Size / 8);
@@ -410,9 +380,9 @@ package body Hostkit.Native is
                   (Name       => Wide_Path'Address,
                    Access_Way => Generic_Read,
                    Share      => File_Share_Read,
-                   Security   => Security'Access,
+                   Security   => Security'Address,
                    Creation   => Open_Existing,
-                   Attributes => File_Attr_Normal,
+                   Flags      => File_Attribute_Normal,
                    Template   => System.Null_Address);
       end Feed;
 
@@ -432,7 +402,7 @@ package body Hostkit.Native is
       --  One file for both is one handle: two would each write from their
       --  own place, over each other.
       Err_Handle : System.Address :=
-        (if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then Invalid_Handle
+        (if Stderr_Path /= "" and then Stderr_Path = Stdout_Path then Invalid_Handle_Value
          else Capture (Stderr_Path));
       Shared_Err : constant Boolean := Stderr_Path /= "" and then Stderr_Path = Stdout_Path;
 
@@ -463,19 +433,19 @@ package body Hostkit.Native is
 
       procedure Close_Captures is
       begin
-         if In_Handle /= Invalid_Handle then
+         if In_Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (In_Handle);
-            In_Handle := Invalid_Handle;
+            In_Handle := Invalid_Handle_Value;
          end if;
 
-         if Out_Handle /= Invalid_Handle then
+         if Out_Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (Out_Handle);
-            Out_Handle := Invalid_Handle;
+            Out_Handle := Invalid_Handle_Value;
          end if;
 
-         if Err_Handle /= Invalid_Handle then
+         if Err_Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (Err_Handle);
-            Err_Handle := Invalid_Handle;
+            Err_Handle := Invalid_Handle_Value;
          end if;
       end Close_Captures;
    begin
@@ -486,7 +456,7 @@ package body Hostkit.Native is
 
       --  Told to read a file and unable to open it: the child must not silently
       --  get ours instead. See the note on Stdin_Path in Hostkit.Process.
-      if Stdin_Path /= "" and then In_Handle = Invalid_Handle then
+      if Stdin_Path /= "" and then In_Handle = Invalid_Handle_Value then
          Close_Captures;
          return Result;
       end if;
@@ -502,9 +472,9 @@ package body Hostkit.Native is
          return Result;
       end if;
 
-      if In_Handle /= Invalid_Handle
-        or else Out_Handle /= Invalid_Handle
-        or else Err_Handle /= Invalid_Handle
+      if In_Handle /= Invalid_Handle_Value
+        or else Out_Handle /= Invalid_Handle_Value
+        or else Err_Handle /= Invalid_Handle_Value
       then
          --  STARTF_USESTDHANDLES is all or nothing: the child takes all three
          --  from here, so a stream we were given no file for has to be filled
@@ -514,14 +484,14 @@ package body Hostkit.Native is
          --  writes to nothing.
          Startup.Flags := Start_Use_Handles;
          Startup.Std_Input :=
-           (if In_Handle /= Invalid_Handle then In_Handle
+           (if In_Handle /= Invalid_Handle_Value then In_Handle
             else Get_Std_Handle (Std_Input_Handle));
          Startup.Std_Output :=
-           (if Out_Handle /= Invalid_Handle then Out_Handle
+           (if Out_Handle /= Invalid_Handle_Value then Out_Handle
             else Get_Std_Handle (Std_Output_Handle));
          Startup.Std_Error :=
-           (if Shared_Err and then Out_Handle /= Invalid_Handle then Out_Handle
-            elsif Err_Handle /= Invalid_Handle then Err_Handle
+           (if Shared_Err and then Out_Handle /= Invalid_Handle_Value then Out_Handle
+            elsif Err_Handle /= Invalid_Handle_Value then Err_Handle
             else Get_Std_Handle (Std_Error_Handle));
       end if;
 
@@ -659,7 +629,6 @@ package body Hostkit.Native is
    --  we may not open fails with access denied (5), and is there.
    function Presence_Of (Process_Id : Integer) return Hostkit.Process.Presence is
       Query_Limited_Information : constant C_DWord := 16#1000#;
-      Still_Active              : constant C_DWord := 259;
       Access_Denied             : constant C_DWord := 5;
       Invalid_Parameter         : constant C_DWord := 87;
 
@@ -673,9 +642,6 @@ package body Hostkit.Native is
       function Get_Exit_Code_Process
         (Handle : System.Address; Code : access C_DWord) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "GetExitCodeProcess";
-
-      function Get_Last_Error return C_DWord
-        with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
       Handle  : System.Address;
       Code    : aliased C_DWord := 0;
@@ -713,29 +679,13 @@ package body Hostkit.Native is
       Timeout_MS : Integer)
       return Hostkit.Process.Wait_Outcome
    is
-      function Get_Osfhandle (FD : Interfaces.C.int) return System.Address
-        with Import => True, Convention => C, External_Name => "_get_osfhandle";
-
-      function Peek_Named_Pipe
-        (Pipe             : System.Address;
-         Buffer           : System.Address;
-         Buffer_Size      : C_DWord;
-         Bytes_Read       : access C_DWord;
-         Total_Available  : access C_DWord;
-         Bytes_Left       : access C_DWord)
-         return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "PeekNamedPipe";
-
-      procedure Sleep (Milliseconds : C_DWord)
-        with Import => True, Convention => Stdcall, External_Name => "Sleep";
-
       Handle    : constant System.Address := Get_Osfhandle (Interfaces.C.int (FD));
       Available : aliased C_DWord := 0;
       Waited    : Integer := 0;
       Slice     : constant Integer := 10;  --  ms between peeks
    begin
       if FD < 0
-        or else System.Storage_Elements.To_Integer (Handle) = -1
+        or else Handle = Invalid_Handle_Value
       then
          return Hostkit.Process.Wait_Error;
       end if;

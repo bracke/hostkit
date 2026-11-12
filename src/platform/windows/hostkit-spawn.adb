@@ -1,6 +1,7 @@
 with Ada.Strings.Unbounded;
 
 with Hostkit.Shell_Paths;
+with Hostkit.Win32;
 with Hostkit.Windows_Command_Line;
 with Hostkit.Windows_Paths;
 
@@ -12,6 +13,7 @@ with System;
 package body Hostkit.Spawn is
 
    use Ada.Strings.Unbounded;
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_long_long;
@@ -20,8 +22,6 @@ package body Hostkit.Spawn is
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   Infinite     : constant C_DWord := 16#FFFF_FFFF#;
-   Still_Active : constant C_DWord := 259;
    Wait_Failed  : constant C_DWord := 16#FFFF_FFFF#;
    Wait_Timeout : constant C_DWord := 16#0000_0102#;
 
@@ -152,10 +152,6 @@ package body Hostkit.Spawn is
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
 
-   function Wait_For_Single_Object
-     (Handle : System.Address; Milliseconds : C_DWord) return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "WaitForSingleObject";
-
    --  An exit code as this host gives it, in the range Ada asks for.
    --
    --  Windows exit codes are unsigned and thirty-two bits wide, and the ones
@@ -184,12 +180,6 @@ package body Hostkit.Spawn is
    function Get_Exit_Code_Process
      (Process : System.Address; Exit_Code : access C_DWord) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "GetExitCodeProcess";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
-
-   function Get_Last_Error return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String
    is (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));

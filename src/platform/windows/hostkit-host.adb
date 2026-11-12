@@ -1,5 +1,6 @@
 with Ada.Strings.Unbounded;
 with Hostkit.Environment;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 
 with Interfaces.C;
@@ -7,6 +8,7 @@ with System;
 
 package body Hostkit.Host is
    use Ada.Strings.Unbounded;
+   use Hostkit.Win32;
    use type Interfaces.C.int;
 
    --  The two C types this body compares and divides. A DWord is what every
@@ -99,33 +101,7 @@ package body Hostkit.Host is
 
       subtype C_DWord is Interfaces.C.unsigned_long;
 
-      Token_Query     : constant C_DWord := 16#0008#;
       Token_Elevation : constant Interfaces.C.int := 20;
-
-      function Get_Current_Process return System.Address
-        with Import => True, Convention => Stdcall,
-             External_Name => "GetCurrentProcess";
-
-      function Open_Process_Token
-        (Process : System.Address;
-         Access_Way : C_DWord;
-         Token : access System.Address)
-         return Interfaces.C.int
-        with Import => True, Convention => Stdcall,
-             External_Name => "OpenProcessToken";
-
-      function Get_Token_Information
-        (Token       : System.Address;
-         Class       : Interfaces.C.int;
-         Information : System.Address;
-         Length      : C_DWord;
-         Returned    : access C_DWord)
-         return Interfaces.C.int
-        with Import => True, Convention => Stdcall,
-             External_Name => "GetTokenInformation";
-
-      function Close_Handle (Handle : System.Address) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
       Token     : aliased System.Address := System.Null_Address;
       Elevated  : aliased C_DWord := 0;
@@ -201,22 +177,13 @@ package body Hostkit.Host is
          return "";
    end Executable_Path;
 
-   --  Windows answers through the console API rather than through isatty,
-   --  whose C name is spelled _isatty here. GetConsoleMode succeeds only for
-   --  a handle that really is a console, which is the question being asked.
-   type Handle is new Interfaces.C.ptrdiff_t;
-
-   function Get_Std_Handle (Which : Interfaces.C.unsigned_long) return Handle
-   with Import, Convention => Stdcall, External_Name => "GetStdHandle";
-
-   function Get_Console_Mode
-     (Item : Handle; Mode : access Interfaces.C.unsigned_long)
-      return Interfaces.C.int
-   with Import, Convention => Stdcall, External_Name => "GetConsoleMode";
-
    -----------------
    -- Is_Terminal --
    -----------------
+
+   --  Windows answers through the console API rather than through isatty,
+   --  whose C name is spelled _isatty here. GetConsoleMode succeeds only for
+   --  a handle that really is a console, which is the question being asked.
 
    function Is_Terminal (Stream : Stream_Kind) return Boolean is
       --  STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE.

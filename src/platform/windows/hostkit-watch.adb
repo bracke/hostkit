@@ -1,11 +1,13 @@
 with Ada.Unchecked_Conversion;
 
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with System;
 
 package body Hostkit.Watch is
 
    use Ada.Strings.Unbounded;
+   use Hostkit.Win32;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
 
@@ -15,6 +17,8 @@ package body Hostkit.Watch is
    --  handle is a better fit: it can be waited on with a zero timeout, which
    --  turns it into a poll the render loop can make every frame.
 
+   --  What State.Handle holds when nothing is watched: INVALID_HANDLE_VALUE
+   --  as the integer the state keeps.
    Invalid_Handle : constant Interfaces.C.ptrdiff_t := -1;
 
    --  FILE_NOTIFY_CHANGE_FILE_NAME, _DIR_NAME, _ATTRIBUTES, _SIZE,
@@ -41,13 +45,6 @@ package body Hostkit.Watch is
      (Handle : System.Address) return Interfaces.C.int
      with Import, Convention => Stdcall,
           External_Name => "FindCloseChangeNotification";
-
-   function Wait_For_Single_Object
-     (Handle       : System.Address;
-      Milliseconds : Interfaces.C.unsigned_long)
-      return Interfaces.C.unsigned_long
-     with Import, Convention => Stdcall,
-          External_Name => "WaitForSingleObject";
 
    function To_Address
      (Value : Interfaces.C.ptrdiff_t) return System.Address;
@@ -116,7 +113,7 @@ package body Hostkit.Watch is
       --  The call reports failure as INVALID_HANDLE_VALUE, which is -1 rather
       --  than null.
       if Handle = System.Null_Address
-        or else To_Value (Handle) = Invalid_Handle
+        or else Handle = Invalid_Handle_Value
       then
          return;
       end if;

@@ -1,5 +1,6 @@
-with Interfaces.C;
+with Interfaces;
 
+with Hostkit.Win32;
 with Hostkit.Windows_Errors;
 
 package body Hostkit.Errors is
@@ -16,13 +17,10 @@ package body Hostkit.Errors is
          when Text_Busy            => 139,
          when Name_Too_Long        => 38);
 
-   function Get_Last_Error return Interfaces.C.unsigned_long
-     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
-
    --  Into the C runtime's own errno, which GNAT.OS_Lib.Errno reads back.
    procedure Set_Errno_From_Last_Error is
    begin
-      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Get_Last_Error));
+      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Hostkit.Win32.Get_Last_Error));
    end Set_Errno_From_Last_Error;
 
 end Hostkit.Errors;

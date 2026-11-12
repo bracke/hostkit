@@ -1,10 +1,12 @@
 with Hostkit.Errors;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
 
 package body Hostkit.Lease_Files is
+   use Hostkit.Win32;
    use type Ada.Streams.Stream_Element_Offset;
    use type Interfaces.C.int;
    use type Interfaces.C.long_long;
@@ -20,15 +22,8 @@ package body Hostkit.Lease_Files is
    --  A Windows DWORD is 32 bits; one ReadFile/WriteFile call moves at most this.
    Max_Transfer : constant := 2 ** 32 - 1;
 
-   Invalid_Handle : constant System.Address :=
-     System.Storage_Elements.To_Address
-       (System.Storage_Elements.Integer_Address'Last);
-   Generic_Read : constant C_DWord := 16#8000_0000#;
-   Generic_Write : constant C_DWord := 16#4000_0000#;
    Share_Read : constant C_DWord := 1;
    Share_Write : constant C_DWord := 2;
-   Create_New : constant C_DWord := 1;
-   Open_Existing : constant C_DWord := 3;
    Hidden : constant C_DWord := 2;
    Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
    Reparse_Point : constant C_DWord := 16#0000_0400#;
@@ -40,17 +35,7 @@ package body Hostkit.Lease_Files is
    Error_Path_Not_Found : constant C_DWord := 3;
    Error_Invalid_Name : constant C_DWord := 123;
    File_Begin : constant C_DWord := 0;
-   File_Id_Info_Class : constant C_Int := 18;
 
-   type Filetime is record
-      Low, High : C_DWord := 0;
-   end record with Convention => C;
-   type File_Information is record
-      Attributes : C_DWord := 0;
-      Creation_Time, Access_Time, Modified_Time : Filetime;
-      Volume_Serial, Size_High, Size_Low, Link_Count : C_DWord := 0;
-      File_Index_High, File_Index_Low : C_DWord := 0;
-   end record with Convention => C;
    type Identifier_Array is array (Natural range 0 .. 15) of Interfaces.Unsigned_8
      with Convention => C;
    type File_Id_Info is record
@@ -69,13 +54,6 @@ package body Hostkit.Lease_Files is
       Event : System.Address := System.Null_Address;
    end record with Convention => C;
 
-   function Create_File
-     (Name : System.Address; Access_Mode, Share_Mode : C_DWord;
-      Security : System.Address; Disposition, Attributes : C_DWord;
-      Template : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "CreateFileW";
-   function Close_Handle (Handle : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
    function Lock_File_Ex
      (Handle : System.Address; Flags, Reserved, Bytes_Low, Bytes_High : C_DWord;
       Region : access Overlapped) return C_Int
@@ -84,32 +62,10 @@ package body Hostkit.Lease_Files is
      (Handle : System.Address; Reserved, Bytes_Low, Bytes_High : C_DWord;
       Region : access Overlapped) return C_Int
      with Import, Convention => Stdcall, External_Name => "UnlockFileEx";
-   function Get_File_Information
-     (Handle : System.Address; Info : access File_Information) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
-   function Get_File_Information_Ex
-     (Handle : System.Address; Kind : C_Int; Info : System.Address;
-      Bytes : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandleEx";
-   function Get_Volume_Information
-     (Handle : System.Address; Volume_Name : System.Address; Volume_Name_Size : C_DWord;
-      Serial, Maximum_Name, Flags : System.Address; File_System : System.Address;
-      File_System_Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
    function Set_File_Pointer
      (Handle : System.Address; Distance : C_I64; New_Position : System.Address;
       Method : C_DWord) return C_Int
      with Import, Convention => Stdcall, External_Name => "SetFilePointerEx";
-   function Write_File
-     (Handle, Buffer : System.Address; Bytes : C_DWord;
-      Written : access C_DWord; Overlap : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "WriteFile";
-   function Read_File
-     (Handle, Buffer : System.Address; Bytes : C_DWord;
-      Read_Count : access C_DWord; Overlap : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "ReadFile";
    function Flush_File_Buffers (Handle : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "FlushFileBuffers";
    function Get_File_Size (Handle : System.Address; Value : access C_I64) return C_Int
@@ -151,9 +107,8 @@ package body Hostkit.Lease_Files is
    function Is_NTFS (Handle : System.Address) return Boolean is
       Name : aliased Wide_String (1 .. 16) := [others => Wide_Character'Val (0)];
    begin
-      return Get_Volume_Information
-        (Handle, System.Null_Address, 0, System.Null_Address,
-         System.Null_Address, System.Null_Address, Name'Address,
+      return Get_Volume_Information_By_Handle
+        (Handle, System.Null_Address, 0, null, null, null, Name'Address,
          C_DWord (Name'Length)) /= 0
         and then Name (1) in 'N' | 'n' and then Name (2) in 'T' | 't'
         and then Name (3) in 'F' | 'f' and then Name (4) in 'S' | 's'
@@ -162,7 +117,7 @@ package body Hostkit.Lease_Files is
 
    function Identity_For (Handle : System.Address) return Lease_Identity is
       Id : aliased File_Id_Info;
-      Info : aliased File_Information;
+      Info : aliased By_Handle_File_Information;
       Number : Interfaces.Unsigned_64;
    begin
       if Get_File_Information_Ex
@@ -212,8 +167,8 @@ package body Hostkit.Lease_Files is
       Item : out Lease) return Open_Outcome
    is
       Name : aliased Wide_String := Wide (Path);
-      Handle : System.Address := Invalid_Handle;
-      Info : aliased File_Information;
+      Handle : System.Address := Invalid_Handle_Value;
+      Info : aliased By_Handle_File_Information;
       Outcome : Open_Outcome;
       Code : C_DWord;
       Ignored : C_Int;
@@ -224,7 +179,7 @@ package body Hostkit.Lease_Files is
          Share_Read + (if Writable then 0 else Share_Write),
          System.Null_Address, (if New_File then Create_New else Open_Existing),
          Open_Reparse_Point + (if New_File then Hidden else 0), System.Null_Address);
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          Code := Get_Last_Error;
          Hostkit.Errors.Set_Errno_From_Last_Error;
          if not New_File and then Code in Error_Not_Found | Error_Path_Not_Found | Error_Invalid_Name then
@@ -253,7 +208,7 @@ package body Hostkit.Lease_Files is
       return Opened;
    exception
       when others =>
-         if Handle /= Invalid_Handle then
+         if Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (Handle);
          end if;
          Reset (Item);
@@ -378,8 +333,8 @@ package body Hostkit.Lease_Files is
 
    function Path_Matches (Item : Lease; Path : String) return Boolean is
       Name : aliased Wide_String := Wide (Path);
-      Handle : System.Address := Invalid_Handle;
-      Info : aliased File_Information;
+      Handle : System.Address := Invalid_Handle_Value;
+      Info : aliased By_Handle_File_Information;
       Left, Right : Lease_Identity;
       Ignored : C_Int;
    begin
@@ -390,7 +345,7 @@ package body Hostkit.Lease_Files is
         (Name'Address, Generic_Read, Share_Read + Share_Write,
          System.Null_Address, Open_Existing, Open_Reparse_Point,
          System.Null_Address);
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          return False;
       end if;
       if Get_File_Information (Handle, Info'Access) = 0
@@ -408,7 +363,7 @@ package body Hostkit.Lease_Files is
         and then Left.High = Right.High;
    exception
       when others =>
-         if Handle /= Invalid_Handle then
+         if Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (Handle);
          end if;
          return False;

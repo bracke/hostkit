@@ -1,4 +1,5 @@
 with Hostkit.Errors;
+with Hostkit.Win32;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces;
@@ -6,6 +7,7 @@ with Interfaces.C;
 
 package body Hostkit.Durability is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
 
    subtype C_Int is Interfaces.C.int;
@@ -27,14 +29,6 @@ package body Hostkit.Durability is
    use type C_DWord;
    Read_Only          : constant C_DWord := 16#0001#;
    Invalid_Attributes : constant C_DWord := 16#FFFF_FFFF#;
-
-   function Get_File_Attributes_W (Path : System.Address) return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetFileAttributesW";
-   function Set_File_Attributes_W (Path : System.Address; Attributes : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
-
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
 
    --  What a failed open is worth waiting out: someone else holding the file
    --  without sharing writes (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION).
@@ -89,11 +83,11 @@ package body Hostkit.Durability is
       --  may flush it: drop the attribute for the flush and put it back.
       if FD < 0 then
          declare
-            Attributes : constant C_DWord := Get_File_Attributes_W (Name'Address);
+            Attributes : constant C_DWord := Get_File_Attributes (Name'Address);
          begin
             if Attributes /= Invalid_Attributes
               and then (Attributes and Read_Only) /= 0
-              and then Set_File_Attributes_W (Name'Address, Attributes - Read_Only) /= 0
+              and then Set_File_Attributes (Name'Address, Attributes - Read_Only) /= 0
             then
                FD := open (Name'Address, O_Rdwr + O_Binary);
                if FD < 0 then
@@ -108,7 +102,7 @@ package body Hostkit.Durability is
                end if;
                --  A file left writable is a failure of its own, said as
                --  every other one is.
-               if Set_File_Attributes_W (Name'Address, Attributes) = 0 then
+               if Set_File_Attributes (Name'Address, Attributes) = 0 then
                   Hostkit.Errors.Set_Errno_From_Last_Error;
                   Result := Failed;
                end if;

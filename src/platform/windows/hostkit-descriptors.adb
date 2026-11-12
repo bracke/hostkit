@@ -1,4 +1,5 @@
 
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -7,11 +8,11 @@ with System;
 
 package body Hostkit.Descriptors is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type Ada.Streams.Stream_Element_Offset;
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
@@ -24,33 +25,19 @@ package body Hostkit.Descriptors is
    --  INVALID_HANDLE_VALUE is -1, which is also this package's Invalid, so the
    --  two coincide and no translation is needed for the common failure.
 
-   Invalid_Handle : constant System.Address :=
-     System.Storage_Elements.To_Address (-1);
-
    Std_Input_Handle  : constant C_DWord := 16#FFFF_FFF6#;  --  (DWORD) -10
    Std_Output_Handle : constant C_DWord := 16#FFFF_FFF5#;  --  (DWORD) -11
    Std_Error_Handle  : constant C_DWord := 16#FFFF_FFF4#;  --  (DWORD) -12
 
    Handle_Flag_Inherit : constant C_DWord := 1;
 
-   Generic_Read  : constant C_DWord := 16#8000_0000#;
-   Generic_Write : constant C_DWord := 16#4000_0000#;
-
-   File_Share_Read  : constant C_DWord := 1;
-   File_Share_Write : constant C_DWord := 2;
-
    Create_Always     : constant C_DWord := 2;
-   Create_New        : constant C_DWord := 1;
-   Open_Existing     : constant C_DWord := 3;
    Open_Always       : constant C_DWord := 4;
 
-   File_Attribute_Normal : constant C_DWord := 16#80#;
-
-   --  FILE_APPEND_DATA without FILE_WRITE_DATA. This is how Windows expresses
-   --  what O_APPEND means on POSIX: the write goes to the end atomically,
-   --  rather than the caller seeking and then writing, which two processes
-   --  appending to one log would interleave wrongly.
-   File_Append_Data : constant C_DWord := 4;
+   --  FILE_APPEND_DATA (Hostkit.Win32) without FILE_WRITE_DATA is how Windows
+   --  expresses what O_APPEND means on POSIX: the write goes to the end
+   --  atomically, rather than the caller seeking and then writing, which two
+   --  processes appending to one log would interleave wrongly.
 
    File_Type_Char : constant C_DWord := 2;
 
@@ -72,12 +59,6 @@ package body Hostkit.Descriptors is
       Attributes   : access Security_Attributes;
       Size         : C_DWord) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreatePipe";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
-
-   function Get_Current_Process return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "GetCurrentProcess";
 
    function Duplicate_Handle
      (Source_Process : System.Address;
@@ -120,47 +101,8 @@ package body Hostkit.Descriptors is
       Flags  : C_DWord) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "SetHandleInformation";
 
-   function Get_Std_Handle (Which : C_DWord) return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "GetStdHandle";
-
    function Set_Std_Handle (Which : C_DWord; Handle : System.Address) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "SetStdHandle";
-
-   function Read_File
-     (Handle    : System.Address;
-      Buffer    : System.Address;
-      To_Read   : C_DWord;
-      Did_Read  : access C_DWord;
-      Overlapped : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "ReadFile";
-
-   function Write_File
-     (Handle     : System.Address;
-      Buffer     : System.Address;
-      To_Write   : C_DWord;
-      Did_Write  : access C_DWord;
-      Overlapped : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "WriteFile";
-
-   function Create_File
-     (Name        : System.Address;
-      Access_Mode : C_DWord;
-      Share_Mode  : C_DWord;
-      Security    : System.Address;
-      Disposition : C_DWord;
-      Attributes  : C_DWord;
-      Template    : System.Address) return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
-
-   function Get_File_Type (Handle : System.Address) return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetFileType";
-
-   function Get_Console_Mode
-     (Handle : System.Address; Mode : access C_DWord) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "GetConsoleMode";
-
-   function Get_Last_Error return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
@@ -176,7 +118,7 @@ package body Hostkit.Descriptors is
 
    function To_Descriptor (Handle : System.Address) return Descriptor is
    begin
-      if Handle = Invalid_Handle or else Handle = System.Null_Address then
+      if Handle = Invalid_Handle_Value or else Handle = System.Null_Address then
          return Invalid;
       end if;
 
@@ -354,19 +296,6 @@ package body Hostkit.Descriptors is
          Read    : access C_DWord) return Interfaces.C.int
         with Import => True, Convention => Stdcall,
              External_Name => "PeekConsoleInputW";
-
-      function Peek_Named_Pipe
-        (Pipe            : System.Address;
-         Buffer          : System.Address;
-         Buffer_Size     : C_DWord;
-         Bytes_Read      : access C_DWord;
-         Total_Available : access C_DWord;
-         Bytes_Left      : access C_DWord) return Interfaces.C.int
-        with Import => True, Convention => Stdcall,
-             External_Name => "PeekNamedPipe";
-
-      procedure Sleep (Milliseconds : C_DWord)
-        with Import => True, Convention => Stdcall, External_Name => "Sleep";
 
       Available : aliased C_DWord := 0;
       Waited    : Integer := 0;

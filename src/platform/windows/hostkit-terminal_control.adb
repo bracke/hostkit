@@ -1,4 +1,5 @@
 with Ada.Streams;
+with Hostkit.Win32;
 with Interfaces.C;
 
 with System.Storage_Elements;
@@ -6,6 +7,7 @@ with System;
 
 package body Hostkit.Terminal_Control is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.short;
@@ -34,10 +36,6 @@ package body Hostkit.Terminal_Control is
    --  On the output handle: interpret control sequences rather than printing
    --  them. Required before any cursor movement or erase reaches the screen.
    Enable_Virtual_Terminal_Processing : constant C_DWord := 16#0004#;
-
-   function Get_Console_Mode
-     (Handle : System.Address; Mode : access C_DWord) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "GetConsoleMode";
 
    function Set_Console_Mode
      (Handle : System.Address; Mode : C_DWord) return Interfaces.C.int

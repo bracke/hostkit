@@ -1,16 +1,16 @@
 with Hostkit.Errors;
+with Hostkit.Win32;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces;
 with Interfaces.C;
 with System;
-with System.Storage_Elements;
 
 package body Hostkit.Private_Paths is
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_DWord is Interfaces.C.unsigned_long;
@@ -31,47 +31,19 @@ package body Hostkit.Private_Paths is
    end record
      with Convention => C;
 
-   type By_Handle_File_Information is record
-      Attributes       : C_DWord;
-      Creation_Low     : C_DWord;
-      Creation_High    : C_DWord;
-      Access_Low       : C_DWord;
-      Access_High      : C_DWord;
-      Write_Low        : C_DWord;
-      Write_High       : C_DWord;
-      Volume_Serial    : C_DWord;
-      Size_High        : C_DWord;
-      Size_Low         : C_DWord;
-      Link_Count       : C_DWord;
-      File_Index_High  : C_DWord;
-      File_Index_Low   : C_DWord;
-   end record
-     with Convention => C;
-
    type Byte_Buffer is array (Natural range <>) of aliased Interfaces.Unsigned_8
      with Convention => C;
 
-   Invalid_Handle : constant System.Address :=
-     System.Storage_Elements.To_Address (-1);
-   File_Attribute_Directory     : constant C_DWord := 16#0000_0010#;
-   File_Attribute_Reparse_Point : constant C_DWord := 16#0000_0400#;
-   File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
-   File_Flag_Backup_Semantics   : constant C_DWord := 16#0200_0000#;
    File_Share_All               : constant C_DWord := 7;
-   Open_Existing                : constant C_DWord := 3;
    Read_Control                 : constant C_DWord := 16#0002_0000#;
    Write_Dac                    : constant C_DWord := 16#0004_0000#;
-   File_Read_Attributes         : constant C_DWord := 16#0000_0080#;
    Owner_Security_Information  : constant C_DWord := 16#0000_0001#;
    Dacl_Security_Information   : constant C_DWord := 16#0000_0004#;
    Protected_Dacl_Information : constant C_DWord := 16#8000_0000#;
-   Token_Query : constant C_DWord := 16#0000_0008#;
    Token_Owner_Class : constant C_Int := 4;
-   Se_File_Object : constant C_Int := 1;
    Sddl_Revision_1 : constant C_DWord := 1;
    Error_File_Exists    : constant C_DWord := 80;
    Error_Already_Exists : constant C_DWord := 183;
-   File_Id_Info_Class : constant C_Int := 18;
 
    --  Windows system error codes for a refusal no Win32 call reported, put
    --  into errno through Hostkit.Windows_Errors.Set_Errno_From:
@@ -101,8 +73,6 @@ package body Hostkit.Private_Paths is
      (Name : System.Address;
       Attributes : access Security_Attributes) return C_Int
      with Import, Convention => Stdcall, External_Name => "CreateDirectoryW";
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
 
    --  For an open that failed: its last error put into errno; always False.
    function Refused return Boolean is
@@ -110,28 +80,7 @@ package body Hostkit.Private_Paths is
       Hostkit.Errors.Set_Errno_From_Last_Error;
       return False;
    end Refused;
-   function Create_File_W
-     (Name : System.Address; Access_Mode, Share : C_DWord;
-      Security : System.Address; Disposition, Flags : C_DWord;
-      Template : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "CreateFileW";
-   function Close_Handle (Handle : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
-   function Get_File_Information
-     (Handle : System.Address;
-      Info : access By_Handle_File_Information) return C_Int
-     with Import, Convention => Stdcall,
-          External_Name => "GetFileInformationByHandle";
-   function Get_File_Information_Ex
-     (Handle : System.Address; Kind : C_Int;
-      Info : System.Address; Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall,
-          External_Name => "GetFileInformationByHandleEx";
-   function Get_Security_Info
-     (Handle : System.Address; Object_Type : C_Int; Information : C_DWord;
-      Owner, Group, Dacl, Sacl : System.Address;
-      Descriptor : access System.Address) return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetSecurityInfo";
+
    function Set_Security_Info
      (Handle : System.Address; Object_Type : C_Int; Information : C_DWord;
       Owner, Group, Dacl, Sacl : System.Address) return C_DWord
@@ -146,32 +95,8 @@ package body Hostkit.Private_Paths is
       Dacl : access System.Address; Defaulted : access C_Int) return C_Int
      with Import, Convention => Stdcall,
           External_Name => "GetSecurityDescriptorDacl";
-   function Local_Free (Value : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "LocalFree";
-   function Get_Current_Process return System.Address
-     with Import, Convention => Stdcall, External_Name => "GetCurrentProcess";
-   function Open_Process_Token
-     (Process : System.Address; Access_Mode : C_DWord;
-      Token : access System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "OpenProcessToken";
-   function Get_Token_Information
-     (Token : System.Address; Kind : C_Int; Buffer : System.Address;
-      Size : C_DWord; Needed : access C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetTokenInformation";
    function Equal_Sid (Left, Right : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "EqualSid";
-   function Get_Final_Path
-     (Handle : System.Address; Buffer : System.Address;
-      Size, Flags : C_DWord) return C_DWord
-     with Import, Convention => Stdcall,
-          External_Name => "GetFinalPathNameByHandleW";
-   function Osfhandle (Descriptor : C_Int) return System.Address
-     with Import, Convention => C, External_Name => "_get_osfhandle";
-   function Get_Volume_Information_By_Handle_W
-     (Handle : System.Address; Volume_Name : System.Address; Volume_Name_Size : C_DWord;
-      Serial, Max_Component, Flags : access C_DWord;
-      File_System_Name : System.Address; File_System_Name_Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
 
    --  Whether the volume Handle is on keeps access control lists: NTFS and
    --  ReFS do; FAT and exFAT -- a USB stick, a memory card -- keep none, and
@@ -181,7 +106,7 @@ package body Hostkit.Private_Paths is
       File_Persistent_Acls : constant C_DWord := 16#0000_0008#;
       Serial, Max_Component, Flags : aliased C_DWord := 0;
    begin
-      return Get_Volume_Information_By_Handle_W
+      return Get_Volume_Information_By_Handle
           (Handle, System.Null_Address, 0, Serial'Access, Max_Component'Access, Flags'Access,
            System.Null_Address, 0) = 0
         or else (Flags and File_Persistent_Acls) /= 0;
@@ -376,13 +301,13 @@ package body Hostkit.Private_Paths is
       end if;
       declare
          Name : aliased Wide_String := Wide (Path);
-         Handle : constant System.Address := Create_File_W
+         Handle : constant System.Address := Create_File
            (Name'Address, Read_Control + Write_Dac + File_Read_Attributes,
             File_Share_All, System.Null_Address, Open_Existing,
             File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point,
             System.Null_Address);
          Info : aliased By_Handle_File_Information;
-         Opened : constant Boolean := Handle /= Invalid_Handle or else Refused;
+         Opened : constant Boolean := Handle /= Invalid_Handle_Value or else Refused;
          Read : constant Boolean := Opened
            and then (Get_File_Information (Handle, Info'Access) /= 0 or else Refused);
          --  A file, or a link or junction where a folder was asked for, is
@@ -397,7 +322,7 @@ package body Hostkit.Private_Paths is
             Hostkit.Windows_Errors.Set_Errno_From (Error_Directory);
          end if;
          Ok := Folder and then Set_Private (Handle);
-         if Handle /= Invalid_Handle then
+         if Handle /= Invalid_Handle_Value then
             Ignored := Close_Handle (Handle);
          end if;
          return Ok;
@@ -408,14 +333,14 @@ package body Hostkit.Private_Paths is
    end Ensure_Directory;
 
    function Restrict_Open_File (Descriptor : Integer) return Boolean is
-      Original : constant System.Address := Osfhandle (C_Int (Descriptor));
+      Original : constant System.Address := Get_Osfhandle (C_Int (Descriptor));
       Count : C_DWord;
    begin
       --  _get_osfhandle has set errno (EBADF) itself.
-      if Original = Invalid_Handle then
+      if Original = Invalid_Handle_Value then
          return False;
       end if;
-      Count := Get_Final_Path
+      Count := Get_Final_Path_Name
         (Original, System.Null_Address, 0, 0);
       if Count = 0 then
          return Refused;
@@ -423,9 +348,9 @@ package body Hostkit.Private_Paths is
       declare
          Name : aliased Wide_String (1 .. Natural (Count) + 1) :=
            [others => Wide_Character'Val (0)];
-         Actual : constant C_DWord := Get_Final_Path
+         Actual : constant C_DWord := Get_Final_Path_Name
            (Original, Name'Address, C_DWord (Name'Length), 0);
-         Reopened : System.Address := Invalid_Handle;
+         Reopened : System.Address := Invalid_Handle_Value;
          Ok : Boolean := Actual > 0 and then Actual < C_DWord (Name'Length);
          Ignored : C_Int;
       begin
@@ -439,11 +364,11 @@ package body Hostkit.Private_Paths is
                Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
             end if;
          else
-            Reopened := Create_File_W
+            Reopened := Create_File
               (Name'Address, Read_Control + Write_Dac + File_Read_Attributes,
                File_Share_All, System.Null_Address, Open_Existing,
                File_Flag_Open_Reparse_Point, System.Null_Address);
-            if Reopened = Invalid_Handle then
+            if Reopened = Invalid_Handle_Value then
                Ok := Refused;
             elsif not Same_File (Original, Reopened) then
                Hostkit.Windows_Errors.Set_Errno_From (Error_File_Not_Found);
@@ -452,7 +377,7 @@ package body Hostkit.Private_Paths is
                Ok := Set_Private (Reopened);
             end if;
          end if;
-         if Reopened /= Invalid_Handle then
+         if Reopened /= Invalid_Handle_Value then
             Ignored := Close_Handle (Reopened);
          end if;
          return Ok;

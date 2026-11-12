@@ -8,6 +8,7 @@ with Ada.Unchecked_Conversion;
 with Hostkit.Directory_Listing;
 with Hostkit.Fs;
 with Hostkit.Trash.Recycle_Bin_Format;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
@@ -27,6 +28,7 @@ with System.Storage_Elements;
 --  files, as Explorer does.
 package body Hostkit.Trash is
    use Ada.Strings.Unbounded;
+   use Hostkit.Win32;
    use type Hostkit.Directory_Listing.Entry_Kind;
    use type Hostkit.Fs.Entry_Kind;
    use type Hostkit.Fs.Move_Outcome;
@@ -154,16 +156,6 @@ package body Hostkit.Trash is
    --  The host: volumes, the user's SID, the shell's change notices
    ----------------------------------------------------------------------
 
-   function Get_Volume_Path_Name_W
-     (File_Name   : System.Address;
-      Volume_Path : System.Address;
-      Length      : C_DWord)
-      return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "GetVolumePathNameW";
-
-   function Get_Drive_Type_W (Root : System.Address) return Interfaces.C.unsigned
-     with Import, Convention => Stdcall, External_Name => "GetDriveTypeW";
-
    function Get_Logical_Drives return C_DWord
      with Import, Convention => Stdcall, External_Name => "GetLogicalDrives";
 
@@ -186,33 +178,8 @@ package body Hostkit.Trash is
       return Interfaces.C.long
      with Import, Convention => Stdcall, External_Name => "SHQueryRecycleBinW";
 
-   function Get_Current_Process return System.Address
-     with Import, Convention => Stdcall, External_Name => "GetCurrentProcess";
-
-   function Open_Process_Token
-     (Process : System.Address;
-      Desired : C_DWord;
-      Token   : access System.Address)
-      return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "OpenProcessToken";
-
-   function Get_Token_Information
-     (Token         : System.Address;
-      Class         : Interfaces.C.int;
-      Information   : System.Address;
-      Length        : C_DWord;
-      Return_Length : access C_DWord)
-      return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "GetTokenInformation";
-
    function Convert_Sid_To_String_Sid_W (Sid : System.Address; Text : access System.Address) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "ConvertSidToStringSidW";
-
-   function Local_Free (Memory : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "LocalFree";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
 
    procedure SH_Change_Notify
      (Event  : Interfaces.C.long;
@@ -221,7 +188,6 @@ package body Hostkit.Trash is
       Item_2 : System.Address)
      with Import, Convention => Stdcall, External_Name => "SHChangeNotify";
 
-   Token_Query      : constant C_DWord := 16#0008#;
    Token_User_Class : constant Interfaces.C.int := 1;
    Shcne_Update_Dir : constant Interfaces.C.long := 16#0000_1000#;
    Shcnf_Path_W     : constant Interfaces.C.unsigned := 16#0005#;
@@ -301,7 +267,7 @@ package body Hostkit.Trash is
       Wide_Path : aliased constant Wide_String := Hostkit.Windows_Paths.Native (Path);
       Root      : aliased Wide_String (1 .. 32_768) := [others => NUL];
    begin
-      if Path = "" or else Get_Volume_Path_Name_W (Wide_Path'Address, Root'Address, Root'Length) = 0 then
+      if Path = "" or else Get_Volume_Path_Name (Wide_Path'Address, Root'Address, Root'Length) = 0 then
          return "";
       end if;
       return Format.Without_Long_Prefix (UTF_8 (Until_NUL (Root)));
@@ -313,7 +279,7 @@ package body Hostkit.Trash is
    function Is_Fixed (Root : String) return Boolean is
       Wide_Root : aliased constant Wide_String := UTF_16 (Root);
    begin
-      return Root /= "" and then Get_Drive_Type_W (Wide_Root'Address) = Drive_Fixed;
+      return Root /= "" and then Get_Drive_Type (Wide_Root'Address) = Drive_Fixed;
    end Is_Fixed;
 
    function Bin_Folder_On (Root : String; Sid : String) return String is

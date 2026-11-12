@@ -1,5 +1,6 @@
+with Hostkit.Win32;
 with Interfaces.C;
-with System.Storage_Elements;
+with System;
 
 --  No parent-death signal here either, but a process handle can be waited
 --  on: open the parent, and a thread of our own waits for it and ends the
@@ -11,6 +12,7 @@ with System.Storage_Elements;
 --  system.
 package body Hostkit.Parent_Watch is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.Unsigned_64;
@@ -22,9 +24,6 @@ package body Hostkit.Parent_Watch is
    Th32cs_Snapprocess      : constant Dword := 16#0000_0002#;
    Synchronize             : constant Dword := 16#0010_0000#;
    Query_Limited_Info      : constant Dword := 16#0000_1000#;
-   Infinite                : constant Dword := 16#FFFF_FFFF#;
-   Invalid_Handle_Value    : constant Handle :=
-     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);  --  (HANDLE) -1
 
    type Wide_Name is array (1 .. 260) of Interfaces.C.wchar_t with Convention => C;
 
@@ -42,31 +41,19 @@ package body Hostkit.Parent_Watch is
    end record
      with Convention => C;
 
-   type File_Time is record
-      Low  : Dword := 0;
-      High : Dword := 0;
-   end record
-     with Convention => C;
-
    function Create_Snapshot (Flags : Dword; Process_Id : Dword) return Handle
      with Import, Convention => Stdcall, External_Name => "CreateToolhelp32Snapshot";
    function Process_First (Snapshot : Handle; Item : access Process_Entry) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "Process32FirstW";
    function Process_Next (Snapshot : Handle; Item : access Process_Entry) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "Process32NextW";
-   function Close_Handle (Object : Handle) return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
    function Current_Process_Id return Dword
      with Import, Convention => Stdcall, External_Name => "GetCurrentProcessId";
-   function Current_Process return Handle
-     with Import, Convention => Stdcall, External_Name => "GetCurrentProcess";
    function Open_Process (Access_Mask : Dword; Inherit : Interfaces.C.int; Process_Id : Dword) return Handle
      with Import, Convention => Stdcall, External_Name => "OpenProcess";
    function Process_Times
-     (Process : Handle; Creation, Ended, Kernel, User : access File_Time) return Interfaces.C.int
+     (Process : Handle; Creation, Ended, Kernel, User : access Filetime) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "GetProcessTimes";
-   function Wait_For (Object : Handle; Milliseconds : Dword) return Dword
-     with Import, Convention => Stdcall, External_Name => "WaitForSingleObject";
    procedure C_Exit (Status : Interfaces.C.int)
      with Import, Convention => C, External_Name => "_exit";
 
@@ -107,7 +94,7 @@ package body Hostkit.Parent_Watch is
    end Parent_Id;
 
    function Started_At (Process : Handle; Time : out Interfaces.Unsigned_64) return Boolean is
-      Creation, Ended, Kernel, User : aliased File_Time;
+      Creation, Ended, Kernel, User : aliased Filetime;
    begin
       if Process_Times (Process, Creation'Access, Ended'Access, Kernel'Access, User'Access) = 0 then
          Time := 0;
@@ -129,7 +116,7 @@ package body Hostkit.Parent_Watch is
       pragma Unreferenced (Argument);
       Ignored : Dword;
    begin
-      Ignored := Wait_For (Parent, Infinite);
+      Ignored := Wait_For_Single_Object (Parent, Infinite);
       C_Exit (143);
       return 0;
    end Watch;
@@ -154,7 +141,7 @@ package body Hostkit.Parent_Watch is
          C_Exit (143);
       end if;
 
-      if not Started_At (Parent, Parent_Start) or else not Started_At (Current_Process, Own_Start) then
+      if not Started_At (Parent, Parent_Start) or else not Started_At (Get_Current_Process, Own_Start) then
          Ignored := Close_Handle (Parent);
          return False;
       elsif Parent_Start > Own_Start then

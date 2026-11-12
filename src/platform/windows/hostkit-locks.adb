@@ -1,4 +1,5 @@
 
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -7,25 +8,14 @@ with System;
 
 package body Hostkit.Locks is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   Invalid_Handle : constant System.Address :=
-     System.Storage_Elements.To_Address (-1);
-
-   Generic_Read  : constant C_DWord := 16#8000_0000#;
-   Generic_Write : constant C_DWord := 16#4000_0000#;
-
-   File_Share_Read  : constant C_DWord := 1;
-   File_Share_Write : constant C_DWord := 2;
-
    Open_Always : constant C_DWord := 4;
-
-   File_Attribute_Normal : constant C_DWord := 16#80#;
 
    Lockfile_Exclusive_Lock   : constant C_DWord := 2;
    Lockfile_Fail_Immediately : constant C_DWord := 1;
@@ -52,19 +42,6 @@ package body Hostkit.Locks is
    end record
      with Convention => C;
 
-   function Create_File
-     (Name        : System.Address;
-      Access_Mode : C_DWord;
-      Share_Mode  : C_DWord;
-      Security    : System.Address;
-      Disposition : C_DWord;
-      Attributes  : C_DWord;
-      Template    : System.Address) return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
-
    function Lock_File_Ex
      (Handle       : System.Address;
       Flags        : C_DWord;
@@ -81,9 +58,6 @@ package body Hostkit.Locks is
       Bytes_High : C_DWord;
       Region     : access Overlapped) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "UnlockFileEx";
-
-   function Get_Last_Error return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
 
    function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
@@ -128,7 +102,7 @@ package body Hostkit.Locks is
          File_Attribute_Normal,
          System.Null_Address);
 
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          return Lock_Error;
       end if;
 

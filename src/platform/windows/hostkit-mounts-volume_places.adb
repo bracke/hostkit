@@ -1,3 +1,4 @@
+with Hostkit.Win32;
 with Interfaces.C;
 with System;
 separate (Hostkit.Mounts)
@@ -17,9 +18,6 @@ function Volume_Places return Volume_Place_List is
 
    function Get_Logical_Drives return Interfaces.C.unsigned
      with Import => True, Convention => Stdcall, External_Name => "GetLogicalDrives";
-
-   function Get_Drive_Type_W (Root : System.Address) return Interfaces.C.unsigned
-     with Import => True, Convention => Stdcall, External_Name => "GetDriveTypeW";
 
    function Get_Volume_Information_W
      (Root           : System.Address;
@@ -55,7 +53,7 @@ begin
          Kind : Interfaces.C.unsigned;
       begin
          if (Present and Interfaces.C.unsigned (2 ** Bit)) /= 0 then
-            Kind := Get_Drive_Type_W (Root'Address);
+            Kind := Hostkit.Win32.Get_Drive_Type (Root'Address);
             if Kind /= Drive_No_Root_Dir
               and then ((Kind /= Drive_Removable and then Kind /= Drive_Cdrom)
                         or else Get_Volume_Information_W

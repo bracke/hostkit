@@ -9,6 +9,7 @@ with Hostkit.Directory_Listing;
 with Hostkit.Errors;
 with Hostkit.Fs;
 with Hostkit.Path_Text;
+with Hostkit.Win32;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Hostkit.Windows_Programs;
@@ -20,6 +21,7 @@ with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
    use type Hostkit.Fs.Entry_Kind;
+   use Hostkit.Win32;
 
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
@@ -47,10 +49,6 @@ package body Hostkit.Metadata is
    --  from that number later.
 
    Success : constant C_DWord := 0;
-   Invalid_Handle_Value : constant System.Address :=
-     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);
-
-   Se_File_Object : constant C_Int := 1;
 
    Owner_Information : constant C_DWord := 16#0000_0001#;
    Group_Information : constant C_DWord := 16#0000_0002#;
@@ -76,19 +74,9 @@ package body Hostkit.Metadata is
    --  WinWorldSid: the "Everyone" group, which stands in for the POSIX "other".
 
    Read_Only_Volume : constant C_DWord := 16#0008_0000#;
-   File_Read_Attributes  : constant C_DWord := 16#0000_0080#;
-   File_Write_Attributes : constant C_DWord := 16#0000_0100#;
-   File_Share_Read       : constant C_DWord := 16#0000_0001#;
-   File_Share_Write      : constant C_DWord := 16#0000_0002#;
    File_Share_Delete     : constant C_DWord := 16#0000_0004#;
-   Open_Existing         : constant C_DWord := 3;
-   File_Attribute_Normal : constant C_DWord := 16#0000_0080#;
-   File_Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
-   File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
-   File_Attribute_Reparse_Point  : constant C_DWord := 16#0000_0400#;
    File_Basic_Info_Class : constant C_Int := 0;
    File_Attribute_Tag_Info_Class : constant C_Int := 9;
-   File_Id_Info_Class    : constant C_Int := 18;
 
    --  The two reparse tags that are links (IO_REPARSE_TAG_SYMLINK and
    --  IO_REPARSE_TAG_MOUNT_POINT, a junction), as Hostkit.Fs.Is_Link reads
@@ -130,12 +118,6 @@ package body Hostkit.Metadata is
      array (1 .. 3) of aliased Explicit_Access_Record
      with Convention => C;
 
-   type Filetime is record
-      Low  : C_DWord := 0;
-      High : C_DWord := 0;
-   end record
-     with Convention => C;
-
    type Attribute_Data is record
       Attributes     : C_DWord := 0;
       Creation_Time  : Filetime;
@@ -143,20 +125,6 @@ package body Hostkit.Metadata is
       Modified_Time  : Filetime;
       Size_High      : C_DWord := 0;
       Size_Low       : C_DWord := 0;
-   end record
-     with Convention => C;
-
-   type By_Handle_File_Information is record
-      Attributes      : C_DWord := 0;
-      Creation_Time   : Filetime;
-      Access_Time     : Filetime;
-      Modified_Time   : Filetime;
-      Volume_Serial   : C_DWord := 0;
-      Size_High       : C_DWord := 0;
-      Size_Low        : C_DWord := 0;
-      Link_Count      : C_DWord := 0;
-      File_Index_High : C_DWord := 0;
-      File_Index_Low  : C_DWord := 0;
    end record
      with Convention => C;
 
@@ -200,9 +168,6 @@ package body Hostkit.Metadata is
    pragma Compile_Time_Error
      (Attribute_Tag_Info'Size /= 8 * 8,
       "Win32 FILE_ATTRIBUTE_TAG_INFO must be 8 bytes");
-   pragma Compile_Time_Error
-     (By_Handle_File_Information'Size /= 52 * 8,
-      "Win32 BY_HANDLE_FILE_INFORMATION must be 52 bytes");
 
    function Get_Named_Security_Info
      (Object_Name : System.Address;
@@ -226,18 +191,6 @@ package body Hostkit.Metadata is
       Sacl        : System.Address) return C_DWord
      with Import, Convention => Stdcall,
           External_Name => "SetNamedSecurityInfoW";
-
-   function Get_Security_Info
-     (Handle      : System.Address;
-      Object_Type : C_Int;
-      Information : C_DWord;
-      Owner       : access System.Address;
-      Group       : access System.Address;
-      Dacl        : access System.Address;
-      Sacl        : access System.Address;
-      Descriptor  : access System.Address) return C_DWord
-     with Import, Convention => Stdcall,
-          External_Name => "GetSecurityInfo";
 
    function Set_Security_Info
      (Handle      : System.Address;
@@ -402,9 +355,6 @@ package body Hostkit.Metadata is
      with Import, Convention => Stdcall,
           External_Name => "CreateWellKnownSid";
 
-   function Local_Free (Item : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "LocalFree";
-
    function Get_File_Attributes_Ex
      (Name  : System.Address;
       Level : C_Int;
@@ -431,49 +381,6 @@ package body Hostkit.Metadata is
       System_Size  : C_DWord) return C_Int
      with Import, Convention => Stdcall,
           External_Name => "GetVolumeInformationW";
-
-   function Get_Volume_Path_Name
-     (Name   : System.Address;
-      Root   : System.Address;
-      Length : C_DWord) return C_Int
-     with Import, Convention => Stdcall,
-          External_Name => "GetVolumePathNameW";
-
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
-
-   function Get_Final_Path_Name
-     (File   : System.Address;
-      Path   : System.Address;
-      Length : C_DWord;
-      Flags  : C_DWord) return C_DWord
-     with Import, Convention => Stdcall,
-          External_Name => "GetFinalPathNameByHandleW";
-
-   function Create_File_Wide
-     (Name        : System.Address;
-      Access_Mode : C_DWord;
-      Share       : C_DWord;
-      Security    : System.Address;
-      Disposition : C_DWord;
-      Flags       : C_DWord;
-      Template    : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "CreateFileW";
-
-   function Get_File_Information
-     (File : System.Address;
-      Info : access By_Handle_File_Information) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
-
-   function Get_File_Information_Ex
-     (File  : System.Address;
-      Kind  : C_Int;
-      Info  : System.Address;
-      Bytes : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandleEx";
-
-   function Close_Handle (Item : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
 
    function Set_File_Time
      (File          : System.Address;
@@ -880,8 +787,6 @@ package body Hostkit.Metadata is
    Set_Access  : constant C_Int := 2;
    Deny_Access : constant C_Int := 3;
 
-   File_Append_Data         : constant C_DWord := 16#0000_0004#;
-   File_Attribute_Directory : constant C_DWord := 16#0000_0010#;
    Sddl_Revision            : constant C_DWord := 1;
 
    function Get_Security_Descriptor_Control
@@ -1353,210 +1258,7 @@ package body Hostkit.Metadata is
    function Explicit_Dacl
      (Dacl, Owner, Group, Everyone : System.Address;
       Target                       : Natural;
-      Runnable                     : Boolean) return Acl_Words
-   is
-      use type Interfaces.Unsigned_32;
-
-      Header : constant Acl_Header with Import, Address => Dacl;
-      --  Room for each ACE twice (an ACE handed down is split in two) and
-      --  for five of the largest a SID makes, within the most an ACL holds.
-      Size   : constant Natural := Natural'Min (8 + 2 * Natural (Header.Size) + 5 * (8 + 68), 65_532);
-      Count  : constant Natural := Natural (Header.Count);
-
-      Considered : constant Natural := (if Runnable then 7 else 6);
-      Owner_Bits : constant Natural := (Target / 64) mod 8;
-      Group_Bits : constant Natural := (Target / 8) mod 8;
-      Other_Bits : constant Natural := Target mod 8;
-      Has_Owner  : constant Boolean := Owner /= System.Null_Address;
-      Has_Group  : constant Boolean :=
-        Group /= System.Null_Address and then (not Has_Owner or else Equal_Sid (Group, Owner) = 0);
-
-      type Other_Sid_List is array (1 .. 3) of aliased Sid_Buffer;
-      Other_Kinds  : constant array (Other_Sid_List'Range) of C_Int :=
-        [Win_World_Sid, Win_Authenticated_User_Sid, Win_Builtin_Users_Sid];
-      Other_Sids   : Other_Sid_List := [others => [others => Interfaces.C.nul]];
-      Other_Known  : array (Other_Sid_List'Range) of Boolean := [others => False];
-      First_Allow  : Natural := 0;
-
-      function Class_Of (Sid : System.Address) return Access_Class is
-      begin
-         if Has_Owner and then Equal_Sid (Sid, Owner) /= 0 then
-            return Owner_Class;
-         elsif Has_Group and then Equal_Sid (Sid, Group) /= 0 then
-            return Group_Class;
-         end if;
-         for Index in Other_Sids'Range loop
-            if Other_Known (Index) and then Equal_Sid (Sid, Other_Sids (Index) (1)'Address) /= 0 then
-               return Other_Class;
-            end if;
-         end loop;
-         return No_Class;
-      end Class_Of;
-
-      --  The bits Class keeps.
-      function Kept (Class : Access_Class) return Natural is
-        (case Class is
-            when Owner_Class => Owner_Bits,
-            when Group_Class => Group_Bits,
-            when Other_Class => Other_Bits,
-            when No_Class    => 7);
-
-      --  The bits whoever Class stands for is given: its own, and the
-      --  owner's and the group's when it takes them in.
-      function Granted (Class : Access_Class) return Natural is
-        (case Class is
-            when Owner_Class => Owner_Bits,
-            when Group_Class => Union (Owner_Bits, Group_Bits),
-            when Other_Class => Union (Union (Owner_Bits, Group_Bits), Other_Bits),
-            when No_Class    => 0);
-
-      --  The DACL, with a deny of Owner_Deny for the owner and Group_Deny
-      --  for the group where not 0.
-      function Build (Owner_Deny, Group_Deny : C_DWord) return Acl_Words is
-         Words    : Acl_Words (1 .. Size / 4) := [others => 0];
-         Revision : constant C_DWord := C_DWord (Header.Revision);
-         Built    : Boolean := Initialize_Acl (Words'Address, C_DWord (Size), Revision) /= 0;
-
-         --  Add an ACE of Kind with Flags allowing or denying Mask to Sid.
-         procedure Append
-           (Kind, Flags : Interfaces.C.unsigned_char;
-            Mask        : C_DWord;
-            Sid         : System.Address)
-         is
-            Ace_Size : constant Natural := 8 + Natural (Get_Length_Sid (Sid));
-            Ace      : Acl_Words (1 .. (Ace_Size + 3) / 4) := [others => 0];
-         begin
-            if not Built then
-               return;
-            end if;
-            --  ACE_HEADER, little-endian: type, flags, size; then the mask.
-            Ace (1) :=
-              Interfaces.Unsigned_32 (Kind) + Interfaces.Unsigned_32 (Flags) * 16#100#
-              + Interfaces.Unsigned_32 (Ace_Size) * 16#1_0000#;
-            Ace (2) := Interfaces.Unsigned_32 (Mask);
-            Built :=
-              Copy_Sid (C_DWord (Ace_Size - 8), Ace (3)'Address, Sid) /= 0
-              and then Add_Ace (Words'Address, Revision, Ace_Append_At_End, Ace'Address, C_DWord (Ace_Size)) /= 0;
-         end Append;
-
-         --  Add the ACE at Source as it is, with Flags.
-         procedure Copy (Source : System.Address; Flags : Interfaces.C.unsigned_char) is
-            Head     : constant Ace_Header with Import, Address => Source;
-            Original : constant Acl_Words (1 .. (Natural (Head.Size) + 3) / 4) with Import, Address => Source;
-            Ace      : Acl_Words := Original;
-         begin
-            if not Built then
-               return;
-            end if;
-            Ace (1) := (Ace (1) and 16#FFFF_00FF#) or Interfaces.Unsigned_32 (Flags) * 16#100#;
-            Built := Add_Ace (Words'Address, Revision, Ace_Append_At_End, Ace'Address, C_DWord (Head.Size)) /= 0;
-         end Copy;
-
-         --  Add ACE Index of Dacl, made explicit and edited for its class.
-         procedure Carry (Index : Natural) is
-            Source : constant System.Address := Ace_At (Dacl, Index);
-            Head   : constant Ace_Header with Import, Address => Source;
-            Raw    : constant Interfaces.Unsigned_32
-              with Import, Address => System.Storage_Elements."+" (Source, 4);
-            Sid    : constant System.Address := System.Storage_Elements."+" (Source, 8);
-            Flags  : constant Interfaces.C.unsigned_char := Head.Flags and not Ace_Inherited;
-            Mask   : constant C_DWord := C_DWord (Raw);
-            Class  : constant Access_Class :=
-              (if Head.Kind = Access_Allowed_Ace or else Head.Kind = Access_Denied_Ace then Class_Of (Sid)
-               else No_Class);
-         begin
-            --  An inherit-only ACE grants nothing here.
-            if Class = No_Class or else (Head.Flags and Inherit_Only_Ace) /= 0 then
-               Copy (Source, Flags);
-               return;
-            end if;
-            declare
-               Edited : constant C_DWord :=
-                 Specific_Rights (Mask)
-                 and not Rights_Of_Bits
-                   (if Head.Kind = Access_Allowed_Ace then Without (Considered, Kept (Class)) else Granted (Class));
-            begin
-               if Edited = Specific_Rights (Mask) then
-                  Copy (Source, Flags);
-                  return;
-               end if;
-               if Edited /= 0 then
-                  Append
-                    (Head.Kind, Flags and not (Object_Inherit_Ace or Container_Inherit_Ace or No_Propagate_Ace),
-                     Edited, Sid);
-               end if;
-               if (Flags and (Object_Inherit_Ace or Container_Inherit_Ace)) /= 0 then
-                  Append (Head.Kind, Flags or Inherit_Only_Ace, Mask, Sid);
-               end if;
-            end;
-         end Carry;
-      begin
-         for Index in 0 .. First_Allow - 1 loop
-            Carry (Index);
-         end loop;
-         if Has_Owner and then Owner_Deny /= 0 then
-            Append (Access_Denied_Ace, 0, Owner_Deny, Owner);
-         end if;
-         --  The owner's ACE even with no bits: it grants what a stat needs.
-         if Has_Owner then
-            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Owner_Bits) or Owner_Only_Rights, Owner);
-         end if;
-         if Has_Group and then Group_Deny /= 0 then
-            Append (Access_Denied_Ace, 0, Group_Deny, Group);
-         end if;
-         if Has_Group and then Group_Bits /= 0 then
-            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Group_Bits), Group);
-         end if;
-         if Other_Bits /= 0 then
-            Append (Access_Allowed_Ace, 0, Triplet_To_Rights (Other_Bits), Everyone);
-         end if;
-         for Index in First_Allow .. Count - 1 loop
-            Carry (Index);
-         end loop;
-         return (if Built then Words else Words (1 .. 0));
-      end Build;
-   begin
-      for Index in Other_Sids'Range loop
-         declare
-            Length : aliased C_DWord := C_DWord (Sid_Buffer'Length);
-         begin
-            Other_Known (Index) :=
-              Create_Well_Known_Sid
-                (Other_Kinds (Index), System.Null_Address, Other_Sids (Index) (1)'Address, Length'Access) /= 0;
-         end;
-      end loop;
-      --  The explicit denies lead a canonical DACL.
-      while First_Allow < Count loop
-         declare
-            Head : constant Ace_Header with Import, Address => Ace_At (Dacl, First_Allow);
-         begin
-            exit when Head.Kind /= Access_Denied_Ace or else (Head.Flags and Ace_Inherited) /= 0;
-         end;
-         First_Allow := First_Allow + 1;
-      end loop;
-      declare
-         Plain : constant Acl_Words := Build (0, 0);
-      begin
-         if Plain'Length = 0 then
-            return Plain;
-         end if;
-         declare
-            Owner_Left : constant Natural :=
-              (if Has_Owner
-               then Without (Shown (Triplet_Of (Plain'Address, Owner, Everyone, Group), Runnable), Owner_Bits)
-               else 0);
-            Group_Left : constant Natural :=
-              (if Has_Group
-               then Without (Shown (Triplet_Of (Plain'Address, Group, Everyone), Runnable), Group_Bits)
-               else 0);
-         begin
-            if Owner_Left = 0 and then Group_Left = 0 then
-               return Plain;
-            end if;
-            return Build (Rights_To_Deny (Owner_Left), Rights_To_Deny (Group_Left));
-         end;
-      end;
-   end Explicit_Dacl;
+      Runnable                     : Boolean) return Acl_Words is separate;
 
    --  A fresh DACL granting the owner, the primary group and Everyone
    --  exactly Mode's triplets and no one else: Set_Exact_Permissions' form.
@@ -1695,7 +1397,7 @@ package body Hostkit.Metadata is
       pragma Unreferenced (Freed);
    begin
       if Get_Security_Info
-           (File, Se_File_Object, Dacl_Information, Owner'Access, Group'Access, Dacl'Access, Sacl'Access,
+           (File, Se_File_Object, Dacl_Information, Owner'Address, Group'Address, Dacl'Address, Sacl'Address,
             Descriptor'Access) /= Success
       then
          return "";
@@ -2087,7 +1789,7 @@ package body Hostkit.Metadata is
       Result : C_Int;
    begin
       File :=
-        Create_File_Wide
+        Create_File
           (C_Path'Address,
            File_Read_Attributes or File_Write_Attributes,
            File_Share_Read or File_Share_Write or File_Share_Delete,
@@ -2215,7 +1917,7 @@ package body Hostkit.Metadata is
    function Open_Entry (Path : String; Access_Mode : C_DWord) return System.Address is
       Wide_Path : aliased Wide_String := Wide (Path);
    begin
-      return Create_File_Wide
+      return Create_File
         (Wide_Path'Address, Access_Mode,
          File_Share_Read or File_Share_Write or File_Share_Delete,
          System.Null_Address, Open_Existing,
@@ -2358,6 +2060,55 @@ package body Hostkit.Metadata is
       return False;
    end Is_Held_Link;
 
+   --  The SID of the account Name, into Sid, by LookupAccountNameW: asked
+   --  first how much room the SID takes -- the call "fails" with
+   --  ERROR_INSUFFICIENT_BUFFER and says, or fails for the reason there is
+   --  no such account -- then for the SID. False when there is none, errno
+   --  then set from the call's last error when Say_Why. Name not UTF-8
+   --  raises, as converting it does.
+   function Account_Sid
+     (Name    : String;
+      Sid     : out Sid_Buffer;
+      Say_Why : Boolean) return Boolean
+   is
+      Wide_Name   : aliased constant Wide_String := Wide_Text (Name);
+      Sid_Size    : aliased C_DWord := 0;
+      Domain_Size : aliased C_DWord := 0;
+      Use_Kind    : aliased C_Int := 0;
+      Ignored     : C_Int;
+   begin
+      Sid := [others => Interfaces.C.nul];
+      Ignored := Lookup_Account_Name_Wide
+        (System.Null_Address, Wide_Name'Address,
+         System.Null_Address, Sid_Size'Access,
+         System.Null_Address, Domain_Size'Access, Use_Kind'Access);
+      if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
+         if Say_Why then
+            Hostkit.Errors.Set_Errno_From_Last_Error;
+         end if;
+         return False;
+      end if;
+      declare
+         Domain : aliased Wide_String
+           (1 .. Natural'Max (1, Natural (Domain_Size))) :=
+             [others => Wide_Character'Val (0)];
+         Actual_Sid_Size : aliased C_DWord := Sid_Size;
+         Actual_Domain_Size : aliased C_DWord := Domain_Size;
+      begin
+         if Lookup_Account_Name_Wide
+           (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
+            Actual_Sid_Size'Access, Domain'Address,
+            Actual_Domain_Size'Access, Use_Kind'Access) = 0
+         then
+            if Say_Why then
+               Hostkit.Errors.Set_Errno_From_Last_Error;
+            end if;
+            return False;
+         end if;
+      end;
+      return True;
+   end Account_Sid;
+
    function Update_Entry_Metadata
      (Path           : String;
       Expected       : Entry_Identity;
@@ -2368,230 +2119,7 @@ package body Hostkit.Metadata is
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
       Group_Name     : String := "";
-      Access_Text    : String := "") return Metadata_Update_Result
-   is
-      --  The SID of the account Name, into Sid, when its number is
-      --  Expected_Id; False, with errno set, when there is none.
-      function Resolve_Account
-        (Name        : String;
-         Expected_Id : Identity_Field;
-         Sid         : out Sid_Buffer) return Boolean
-      is
-         Sid_Size    : aliased C_DWord := 0;
-         Domain_Size : aliased C_DWord := 0;
-         Use_Kind    : aliased C_Int := 0;
-         Ignored     : C_Int;
-      begin
-         Sid := [others => Interfaces.C.nul];
-         if Name = "" or else Expected_Id > Identity_Field (Natural'Last) then
-            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
-            return False;
-         end if;
-         declare
-            Wide_Name : aliased constant Wide_String := Wide_Text (Name);
-         begin
-            --  Asked first how much room the SID takes: the call "fails"
-            --  with ERROR_INSUFFICIENT_BUFFER and says, or fails for the
-            --  reason there is no such account.
-            Ignored := Lookup_Account_Name_Wide
-              (System.Null_Address, Wide_Name'Address,
-               System.Null_Address, Sid_Size'Access,
-               System.Null_Address, Domain_Size'Access, Use_Kind'Access);
-            if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
-               Hostkit.Errors.Set_Errno_From_Last_Error;
-               return False;
-            end if;
-            declare
-               Domain : aliased Wide_String
-                 (1 .. Natural'Max (1, Natural (Domain_Size))) :=
-                   [others => Wide_Character'Val (0)];
-               Actual_Sid_Size : aliased C_DWord := Sid_Size;
-               Actual_Domain_Size : aliased C_DWord := Domain_Size;
-            begin
-               if Lookup_Account_Name_Wide
-                 (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
-                  Actual_Sid_Size'Access, Domain'Address,
-                  Actual_Domain_Size'Access, Use_Kind'Access) = 0
-               then
-                  Hostkit.Errors.Set_Errno_From_Last_Error;
-                  return False;
-               end if;
-            end;
-         end;
-         if Identity_Field (Identity_Of (Sid (1)'Address)) /= Expected_Id then
-            --  Name is another account than the number says.
-            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
-            return False;
-         end if;
-         return True;
-      exception
-         when others =>
-            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
-            return False;
-      end Resolve_Account;
-
-      Access_Mode : constant C_DWord := Read_Control or
-        (if Kind = Update_Ownership then Write_Owner else Write_Dac);
-      File       : System.Address := Open_Entry (Path, Access_Mode);
-      Info       : aliased By_Handle_File_Information;
-      Answer     : Metadata_Update_Result;
-      Owner      : aliased System.Address := System.Null_Address;
-      Primary_Group : aliased System.Address := System.Null_Address;
-      Dacl       : aliased System.Address := System.Null_Address;
-      Sacl       : aliased System.Address := System.Null_Address;
-      Descriptor : aliased System.Address := System.Null_Address;
-
-      procedure Free_Local (Item : in out System.Address) is
-         Freed : System.Address;
-         pragma Unreferenced (Freed);
-      begin
-         if Item /= System.Null_Address then
-            Freed := Local_Free (Item);
-            Item := System.Null_Address;
-         end if;
-      end Free_Local;
-
-      procedure Clean is
-      begin
-         Free_Local (Descriptor);
-         Close_Entry (File);
-      end Clean;
-   begin
-      if File = Invalid_Handle_Value then
-         Hostkit.Errors.Set_Errno_From_Last_Error;
-         --  An ownership left as it is needs no WRITE_OWNER, which an
-         --  entry's owner need not hold: look, and write only what changes.
-         if Kind = Update_Ownership then
-            File := Open_Entry (Path, Read_Control);
-         end if;
-         if File = Invalid_Handle_Value then
-            return Answer;
-         end if;
-      end if;
-      --  Each refusal says why through errno, as the open's does.
-      declare
-         Error   : Interfaces.Unsigned_32;
-         Refused : Boolean := True;
-      begin
-         Answer.Identity := Identity_From_Handle (File, Info'Access, Error);
-         if not Answer.Identity.Available or else Is_Held_Link (File, Info.Attributes, Error) then
-            null;
-         elsif Check_Expected and then Answer.Identity /= Expected then
-            --  Path names another entry now than the one asked about.
-            Error := Error_File_Not_Found;
-         else
-            Refused := False;
-         end if;
-         if Refused then
-            Hostkit.Windows_Errors.Set_Errno_From (Error);
-            Clean;
-            return Answer;
-         end if;
-      end;
-      declare
-         Status : constant C_DWord :=
-           Get_Security_Info
-             (File, Se_File_Object,
-              Owner_Information or Group_Information or Dacl_Information,
-              Owner'Access, Primary_Group'Access, Dacl'Access, Sacl'Access,
-              Descriptor'Access);
-      begin
-         if Status /= Success then
-            Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
-            Clean;
-            return Answer;
-         end if;
-      end;
-
-      if Kind = Update_Ownership then
-         Answer.Previous := Identity_Field (Identity_Of (Owner));
-         Answer.Previous_Group := Identity_Field (Identity_Of (Primary_Group));
-         Remember (Owner, Natural (Answer.Previous));
-         Remember (Primary_Group, Natural (Answer.Previous_Group));
-         if Answer.Previous > Max_Previous
-           or else Answer.Previous_Group > Max_Previous
-           or else Value > Identity_Field (Natural'Last)
-           or else Group > Identity_Field (Natural'Last)
-         then
-            --  An id no SID here was given, or a previous one the caller
-            --  could not keep to undo with.
-            Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
-         else
-            declare
-               Owner_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
-               Group_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
-               Borrow_Owner : constant Boolean := Answer.Previous = Value;
-               Borrow_Group : constant Boolean := Answer.Previous_Group = Group;
-               Have_Owner : constant Boolean := Borrow_Owner or else
-                 Resolve_Account (Owner_Name, Value, Owner_Sid);
-               Have_Group : constant Boolean := Borrow_Group or else
-                 Resolve_Account (Group_Name, Group, Group_Sid);
-               New_Owner : constant System.Address :=
-                 (if Borrow_Owner then Owner else Owner_Sid (1)'Address);
-               New_Group : constant System.Address :=
-                 (if Borrow_Group then Primary_Group else Group_Sid (1)'Address);
-            begin
-               if Borrow_Owner and then Borrow_Group then
-                  Answer.Success := True;
-               elsif Have_Owner and then Have_Group then
-                  declare
-                     Status : constant C_DWord := Set_Security_Info
-                       (File, Se_File_Object,
-                        Owner_Information or Group_Information,
-                        New_Owner, New_Group, System.Null_Address,
-                        System.Null_Address);
-                  begin
-                     Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
-                     Answer.Success := Status = Success;
-                  end;
-               end if;
-            end;
-         end if;
-      else
-         --  The edit Set_Permissions makes, on the held entry; or, given an
-         --  access record an earlier update reported, that record exactly.
-         declare
-            Everyone      : aliased Sid_Buffer := [others => Interfaces.C.nul];
-            Everyone_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
-            Control       : aliased Interfaces.C.unsigned_short := 0;
-            Revision      : aliased C_DWord := 0;
-            Runnable      : constant Boolean :=
-              Runs_On_Windows (Path) or else (Info.Attributes and File_Attribute_Directory) /= 0;
-            Old_Mode      : Natural;
-         begin
-            if Create_Well_Known_Sid
-                 (Win_World_Sid, System.Null_Address, Everyone (1)'Address, Everyone_Size'Access) /= 0
-              and then Get_Security_Descriptor_Control (Descriptor, Control'Access, Revision'Access) /= 0
-            then
-               Old_Mode := Mode_Of (Dacl, Owner, Primary_Group, Everyone (1)'Address, Runnable);
-               Answer.Previous := Identity_Field (Old_Mode);
-               Answer.Previous_Access := To_Unbounded_String (Dacl_Text (Descriptor));
-               if Access_Text /= "" then
-                  Answer.Success := Set_Dacl_Text (File, Access_Text);
-               elsif Value <= 8#7777# then
-                  Answer.Success :=
-                    Apply_Permission_Edit
-                      (System.Null_Address, File, Dacl, Owner, Primary_Group, Everyone (1)'Address, Control,
-                       Old_Mode, Natural (Value), Runnable);
-               else
-                  --  No mode: more bits than set-id, sticky and rwx.
-                  Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
-               end if;
-               if Answer.Success then
-                  Answer.Applied_Access := To_Unbounded_String (Dacl_Text_Of (File));
-               end if;
-            else
-               Hostkit.Errors.Set_Errno_From_Last_Error;
-            end if;
-         end;
-      end if;
-      Clean;
-      return Answer;
-   exception
-      when others =>
-         Clean;
-         return (others => <>);
-   end Update_Entry_Metadata;
+      Access_Text    : String := "") return Metadata_Update_Result is separate;
 
    function Entry_Revision_Of (Path : String) return Entry_Revision is
       File   : System.Address := Open_Entry (Path, File_Read_Attributes);
@@ -2641,7 +2169,7 @@ package body Hostkit.Metadata is
       use type Interfaces.Integer_64;
       Wide_Path : aliased Wide_String := Wide (Path);
       File      : System.Address :=
-        Create_File_Wide
+        Create_File
           (Wide_Path'Address, File_Read_Attributes,
            File_Share_Read or File_Share_Write or File_Share_Delete,
            System.Null_Address, Open_Existing, File_Flag_Backup_Semantics,
@@ -2687,7 +2215,7 @@ package body Hostkit.Metadata is
    function Followed_Information (Path : String; Info : access By_Handle_File_Information) return Boolean is
       Wide_Path : aliased Wide_String := Wide (Path);
       File      : System.Address :=
-        Create_File_Wide
+        Create_File
           (Wide_Path'Address, 0,
            File_Share_Read or File_Share_Write or File_Share_Delete,
            System.Null_Address, Open_Existing, File_Flag_Backup_Semantics,
@@ -2824,42 +2352,16 @@ package body Hostkit.Metadata is
      (Name  : String;
       Found : out Boolean) return Natural
    is
-      Sid         : aliased Sid_Buffer := [others => Interfaces.C.nul];
-      Sid_Size    : aliased C_DWord := 0;
-      Domain_Size : aliased C_DWord := 0;
-      Use_Kind    : aliased C_Int := 0;
-      Ignored     : C_Int;
-      Id          : Natural;
+      Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
+      Id  : Natural;
    begin
       Found := False;
-      --  Converted here, not as a declaration, so that a name that is not
-      --  UTF-8 is a name not found rather than an exception to the caller.
-      declare
-         Wide_Name : aliased constant Wide_String := Wide_Text (Name);
-      begin
-         Ignored := Lookup_Account_Name_Wide
-           (System.Null_Address, Wide_Name'Address,
-            System.Null_Address, Sid_Size'Access,
-            System.Null_Address, Domain_Size'Access, Use_Kind'Access);
-         if Sid_Size = 0 or else Natural (Sid_Size) > Sid_Buffer'Length then
-            return 0;
-         end if;
-         declare
-            Domain : aliased Wide_String
-              (1 .. Natural'Max (1, Natural (Domain_Size))) :=
-                [others => Wide_Character'Val (0)];
-            Actual_Sid_Size : aliased C_DWord := Sid_Size;
-            Actual_Domain_Size : aliased C_DWord := Domain_Size;
-         begin
-            if Lookup_Account_Name_Wide
-              (System.Null_Address, Wide_Name'Address, Sid (1)'Address,
-               Actual_Sid_Size'Access, Domain'Address,
-               Actual_Domain_Size'Access, Use_Kind'Access) = 0
-            then
-               return 0;
-            end if;
-         end;
-      end;
+      --  Converted in the call, not in a declaration here, so that a name
+      --  that is not UTF-8 is a name not found rather than an exception to
+      --  the caller.
+      if not Account_Sid (Name, Sid, Say_Why => False) then
+         return 0;
+      end if;
       Id := Identity_Of (Sid (1)'Address);
       Remember (Sid (1)'Address, Id);
       Found := Id /= 0;

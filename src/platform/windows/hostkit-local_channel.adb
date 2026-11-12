@@ -1,3 +1,4 @@
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 
 with Interfaces.C;
@@ -7,68 +8,18 @@ with System;
 
 package body Hostkit.Local_Channel is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
-   use type System.Storage_Elements.Integer_Address;
+   use type System.Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
-
-   Generic_Read       : constant C_DWord := 16#8000_0000#;
-   Generic_Write      : constant C_DWord := 16#4000_0000#;
-   Open_Existing      : constant C_DWord := 3;
-   Invalid_Handle_Int : constant System.Storage_Elements.Integer_Address :=
-     System.Storage_Elements.Integer_Address'Last;  --  (HANDLE) -1
-
-   function Create_File
-     (Name       : System.Address;
-      Access_Way : C_DWord;
-      Share      : C_DWord;
-      Security   : System.Address;
-      Creation   : C_DWord;
-      Attributes : C_DWord;
-      Template   : System.Address)
-      return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
-
-   function Write_File
-     (Handle       : System.Address;
-      Buffer       : System.Address;
-      To_Write     : C_DWord;
-      Written      : access C_DWord;
-      Overlapped   : System.Address)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "WriteFile";
-
-   function Read_File
-     (Handle     : System.Address;
-      Buffer     : System.Address;
-      To_Read    : C_DWord;
-      Read       : access C_DWord;
-      Overlapped : System.Address)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "ReadFile";
-
-   function Close_Handle (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
    function Wait_Named_Pipe
      (Name    : System.Address;
       Timeout : C_DWord)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "WaitNamedPipeW";
-
-   function Peek_Named_Pipe
-     (Pipe             : System.Address;
-      Buffer           : System.Address;
-      Buffer_Size      : C_DWord;
-      Bytes_Read       : access C_DWord;
-      Total_Available  : access C_DWord;
-      Bytes_Left       : access C_DWord)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "PeekNamedPipe";
-
-   procedure Sleep (Milliseconds : C_DWord)
-     with Import => True, Convention => Stdcall, External_Name => "Sleep";
 
    function Wide (Value : String) return Wide_String is
      (Hostkit.Windows_Paths.From_UTF_8 (Value) & Wide_Character'Val (0));
@@ -96,12 +47,12 @@ package body Hostkit.Local_Channel is
            Share      => 0,
            Security   => System.Null_Address,
            Creation   => Open_Existing,
-           Attributes => 0,
+           Flags      => 0,
            Template   => System.Null_Address);
 
       --  Busy is the pipe's normal "all instances taken" state, not a failure. Wait briefly
       --  for a free instance and try once more before giving up.
-      if System.Storage_Elements.To_Integer (Handle) = Invalid_Handle_Int then
+      if Handle = Invalid_Handle_Value then
          Ignored := Wait_Named_Pipe (Wide_Path'Address, 2000);
          Handle :=
            Create_File
@@ -110,11 +61,11 @@ package body Hostkit.Local_Channel is
               Share      => 0,
               Security   => System.Null_Address,
               Creation   => Open_Existing,
-              Attributes => 0,
+              Flags      => 0,
               Template   => System.Null_Address);
       end if;
 
-      if System.Storage_Elements.To_Integer (Handle) = Invalid_Handle_Int then
+      if Handle = Invalid_Handle_Value then
          return False;
       end if;
 

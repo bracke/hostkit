@@ -101,6 +101,18 @@ procedure Check_Hostkit is
          Relative_Path & " must bind " & Host_Call);
    end Require_Binding;
 
+   --  A Windows call several bodies make is bound once, in Hostkit.Win32,
+   --  and the body calls it from there. Both halves are required: the
+   --  binding, and the body calling it by its Ada name, Ada_Call.
+   procedure Require_Win32_Call (Relative_Path : String; Host_Call : String; Ada_Call : String) is
+   begin
+      Require_Binding ("src/platform/windows/hostkit-win32.ads", Host_Call);
+      Require_Text
+        (Relative_Path,
+         Ada_Call,
+         Relative_Path & " must call " & Host_Call & " (Hostkit.Win32." & Ada_Call & ")");
+   end Require_Win32_Call;
+
    --  A unit with per-OS bodies needs one for every host, or the build for the
    --  missing host fails -- and it fails on that host's runner, not here.
    procedure Require_A_Body_Per_Host is
@@ -370,12 +382,12 @@ begin
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "CoCreateInstance");
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHCreateItemFromParsingName");
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHChangeNotify");
-   Require_Binding ("src/platform/windows/hostkit-trash.adb", "GetVolumePathNameW");
+   Require_Win32_Call ("src/platform/windows/hostkit-trash.adb", "GetVolumePathNameW", "Get_Volume_Path_Name");
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "ConvertSidToStringSidW");
    Require_Binding ("src/platform/windows/hostkit-shell_paths.adb", "GetShortPathNameW");
    Require_Binding ("src/platform/windows/hostkit-native.adb", "AssocQueryStringW");
-   Require_Binding ("src/platform/windows/hostkit-errors.adb", "GetLastError");
-   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileType");
+   Require_Win32_Call ("src/platform/windows/hostkit-errors.adb", "GetLastError", "Get_Last_Error");
+   Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetFileType", "Get_File_Type");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "SHGetKnownFolderPath");
    Require_Binding ("src/platform/windows/hostkit-native.adb", "SetInformationJobObject");
    Require_Binding
@@ -383,8 +395,12 @@ begin
    Require_Binding
      ("src/platform/windows/hostkit-metadata.adb", "ConvertStringSecurityDescriptorToSecurityDescriptorW");
    Require_Binding ("src/platform/windows/hostkit-metadata.adb", "EqualSid");
-   Require_Binding ("src/platform/windows/hostkit-metadata_copy.adb", "GetVolumeInformationByHandleW");
-   Require_Binding ("src/platform/windows/hostkit-private_paths.adb", "GetVolumeInformationByHandleW");
+   Require_Win32_Call
+     ("src/platform/windows/hostkit-metadata_copy.adb", "GetVolumeInformationByHandleW",
+      "Get_Volume_Information_By_Handle");
+   Require_Win32_Call
+     ("src/platform/windows/hostkit-private_paths.adb", "GetVolumeInformationByHandleW",
+      "Get_Volume_Information_By_Handle");
    Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
    Require_Text
      ("src/platform/macos/hostkit-trash.adb",
@@ -420,8 +436,9 @@ begin
       "src/platform/macos/hostkit-regular_files.adb must bind Darwin_Symbols.Fstat");
    Require_Binding ("src/platform/macos/hostkit-regular_files.adb", "lseek");
    Require_Binding ("src/platform/macos/hostkit-regular_files.adb", "ftruncate");
-   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "CreateFileW");
-   Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "GetFileInformationByHandle");
+   Require_Win32_Call ("src/platform/windows/hostkit-regular_files.adb", "CreateFileW", "Create_File");
+   Require_Win32_Call
+     ("src/platform/windows/hostkit-regular_files.adb", "GetFileInformationByHandle", "Get_File_Information");
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_open_osfhandle");
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "DeviceIoControl");
    Require_Binding ("src/platform/windows/hostkit-regular_files.adb", "_lseeki64");
@@ -473,11 +490,11 @@ begin
       "External_Name => Hostkit.Darwin_Symbols.Lstat;",
       "src/platform/macos/hostkit-fs.adb must bind Darwin_Symbols.Lstat");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileAttributesExW");
-   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileInformationByHandle");
-   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetSecurityInfo");
+   Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetFileInformationByHandle", "Get_File_Information");
+   Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetSecurityInfo", "Get_Security_Info");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DuplicateToken");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "AccessCheck");
-   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetVolumePathNameW");
+   Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetVolumePathNameW", "Get_Volume_Path_Name");
 
    Check_Generated_Artifacts;
 

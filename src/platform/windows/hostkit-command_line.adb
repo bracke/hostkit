@@ -1,6 +1,7 @@
 with Ada.Command_Line;
 with Ada.Containers.Indefinite_Vectors;
 
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 
 with Interfaces.C;
@@ -9,6 +10,7 @@ with System;
 
 package body Hostkit.Command_Line is
 
+   use Hostkit.Win32;
    use type System.Address;
    use type Interfaces.C.int;
 
@@ -26,11 +28,6 @@ package body Hostkit.Command_Line is
       return System.Address
      with Import, Convention => Stdcall,
           External_Name => "CommandLineToArgvW";
-
-   --  CommandLineToArgvW returns one LocalAlloc block holding the vector and
-   --  the strings; the caller frees it with LocalFree.
-   function Local_Free (Memory : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "LocalFree";
 
    package String_Vectors is new
      Ada.Containers.Indefinite_Vectors (Positive, String);
@@ -102,6 +99,8 @@ package body Hostkit.Command_Line is
          Arguments.Append (Decoded (Element_At (Vector, Index)));
       end loop;
 
+      --  CommandLineToArgvW returns one LocalAlloc block holding the vector
+      --  and the strings; the caller frees it with LocalFree.
       declare
          Unused : constant System.Address := Local_Free (Vector);
       begin

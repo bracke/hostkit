@@ -1,14 +1,13 @@
 with Hostkit.Environment;
 with Ada.Characters.Handling;
-with Ada.Containers.Indefinite_Vectors;
 with Ada.IO_Exceptions;
 with Ada.Strings.Fixed;
-with Ada.Strings.Wide_Unbounded;
 
 with GNAT.OS_Lib;
 
 with Hostkit.Errors;
 with Hostkit.Fs.Instants;
+with Hostkit.Win32;
 with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Hostkit.Windows_Programs;
@@ -16,18 +15,16 @@ with Interfaces.C;
 with Interfaces.C_Streams;
 
 with System;
-with System.Storage_Elements;
 
 package body Hostkit.Fs is
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
    Invalid_File_Attributes      : constant C_DWord := 16#FFFF_FFFF#;
-   File_Attribute_Reparse_Point : constant C_DWord := 16#0000_0400#;
-   File_Attribute_Directory     : constant C_DWord := 16#0000_0010#;
 
    Symbolic_Link_Allow_Unprivileged : constant C_DWord := 16#0000_0002#;
    Symbolic_Link_Directory          : constant C_DWord := 16#0000_0001#;
@@ -35,11 +32,6 @@ package body Hostkit.Fs is
    --  Paths are UTF-8 here and UTF-16 to Windows: the "A" entry points would
    --  read them in the ANSI code page, so any non-ASCII path (a profile named
    --  Jürgen) would not be found.
-   function Get_File_Attributes
-     (Name : System.Address)
-      return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesW";
-
    function Get_Temp_Path
      (Buffer_Length : C_DWord;
       Buffer        : System.Address)
@@ -55,9 +47,6 @@ package body Hostkit.Fs is
       Data : access Find_Data)
       return System.Address
      with Import => True, Convention => Stdcall, External_Name => "FindFirstFileW";
-
-   function Find_Close (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "FindClose";
 
    Io_Reparse_Tag_Symlink     : constant Interfaces.Unsigned_32 := 16#A000_000C#;
    Io_Reparse_Tag_Mount_Point : constant Interfaces.Unsigned_32 := 16#A000_0003#;
@@ -126,8 +115,6 @@ package body Hostkit.Fs is
       Data       : aliased Find_Data := [others => 0];
       Handle     : System.Address;
       Tag        : Interfaces.Unsigned_32;
-      Invalid_Handle : constant System.Address := System.Storage_Elements.To_Address
-        (System.Storage_Elements.Integer_Address'Last);
    begin
       if Attributes = Invalid_File_Attributes
         or else (Attributes and File_Attribute_Reparse_Point) = 0
@@ -135,7 +122,7 @@ package body Hostkit.Fs is
          return False;
       end if;
       Handle := Find_First_File (Wide_Path'Address, Data'Access);
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          --  The tag is unreadable: a reparse point is still safest treated
          --  as a link, which is never followed.
          return True;
@@ -160,8 +147,6 @@ package body Hostkit.Fs is
    Share_Everything            : constant C_DWord := 7;
    Open_Existing_Only          : constant C_DWord := 3;
    Backup_Semantics_Flag       : constant C_DWord := 16#0200_0000#;
-   Invalid_Handle_Value        : constant System.Address :=
-     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);
 
    --  WIN32_FILE_ATTRIBUTE_DATA: FILETIMEs are two DWORDs, low first.
    type Attribute_Data is record
@@ -172,50 +157,12 @@ package body Hostkit.Fs is
       Size_High, Size_Low       : C_DWord := 0;
    end record with Convention => C;
 
-   --  BY_HANDLE_FILE_INFORMATION.
-   type Handle_Information is record
-      Attributes                : C_DWord := 0;
-      Creation_Low, Creation_High : C_DWord := 0;
-      Access_Low, Access_High   : C_DWord := 0;
-      Write_Low, Write_High     : C_DWord := 0;
-      Volume                    : C_DWord := 0;
-      Size_High, Size_Low       : C_DWord := 0;
-      Links                     : C_DWord := 0;
-      Index_High, Index_Low     : C_DWord := 0;
-   end record with Convention => C;
-
    function Get_File_Attributes_Ex
      (Name  : System.Address;
       Level : Interfaces.C.int;
       Data  : access Attribute_Data)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesExW";
-
-   function Open_Entry
-     (Name        : System.Address;
-      Access_Mode : C_DWord;
-      Share       : C_DWord;
-      Security    : System.Address;
-      Disposition : C_DWord;
-      Flags       : C_DWord;
-      Template    : System.Address)
-      return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
-
-   function Close_Entry (Handle : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
-
-   function Get_Handle_Information
-     (Handle : System.Address;
-      Info   : access Handle_Information)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
-
-   function Last_Error return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetLastError";
-
-   function Get_File_Type (Handle : System.Address) return C_DWord
-     with Import => True, Convention => Stdcall, External_Name => "GetFileType";
 
    --  A name the Win32 layer may turn into a device: the device namespace
    --  (\\.\NUL, \\.\pipe\...), or a last part DOS reserves -- NUL, CON,
@@ -265,7 +212,7 @@ package body Hostkit.Fs is
       declare
          Native_Path : aliased constant Wide_String := Wide (Path);
       begin
-         Handle := Open_Entry
+         Handle := Create_File
            (Native_Path'Address, File_Read_Attributes_Access, Share_Everything, System.Null_Address,
             Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
       end;
@@ -273,7 +220,7 @@ package body Hostkit.Fs is
          return False;
       end if;
       Kind := Get_File_Type (Handle);
-      Ignored := Close_Entry (Handle);
+      Ignored := Close_Handle (Handle);
       return Kind /= File_Type_Disk;
    exception
       when others =>
@@ -326,7 +273,7 @@ package body Hostkit.Fs is
       if Path = "" or else (for some C of Path => C = ASCII.NUL) then
          raise Ada.Directories.Name_Error with "no entry at """ & Path & """";
       elsif Get_File_Attributes_Ex (Native_Path'Address, 0, Data'Access) = 0 then
-         Refuse (Path, Last_Error);
+         Refuse (Path, Get_Last_Error);
       elsif Follow_Links
         and then (Data.Attributes and File_Attribute_Reparse_Point) /= 0
         and then Is_Link (Path)
@@ -334,26 +281,26 @@ package body Hostkit.Fs is
          declare
             use type System.Address;
             Handle  : constant System.Address :=
-              Open_Entry
+              Create_File
                 (Native_Path'Address, File_Read_Attributes_Access, Share_Everything, System.Null_Address,
                  Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
-            Info    : aliased Handle_Information;
+            Info    : aliased By_Handle_File_Information;
             Asked   : Boolean;
             Error   : C_DWord;
             Ignored : Interfaces.C.int;
          begin
             if Handle = Invalid_Handle_Value then
-               Refuse (Path, Last_Error);
+               Refuse (Path, Get_Last_Error);
             end if;
-            Asked := Get_Handle_Information (Handle, Info'Access) /= 0;
-            Error := Last_Error;
-            Ignored := Close_Entry (Handle);
+            Asked := Get_File_Information (Handle, Info'Access) /= 0;
+            Error := Get_Last_Error;
+            Ignored := Close_Handle (Handle);
             if not Asked then
                Refuse (Path, Error);
             end if;
             return
               (Attributes => Info.Attributes,
-               Written    => Joined (Info.Write_High, Info.Write_Low),
+               Written    => Joined (Info.Modified_Time.High, Info.Modified_Time.Low),
                Size       => Joined (Info.Size_High, Info.Size_Low));
          end;
       end if;
@@ -380,11 +327,6 @@ package body Hostkit.Fs is
    --  about the server's accounts.
    function On_Network_Volume (Path : String) return Boolean is
       use type Interfaces.C.unsigned;
-      function Get_Volume_Path_Name
-        (Name : System.Address; Root : System.Address; Length : C_DWord) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "GetVolumePathNameW";
-      function Get_Drive_Type (Root : System.Address) return Interfaces.C.unsigned
-        with Import => True, Convention => Stdcall, External_Name => "GetDriveTypeW";
       Drive_Remote : constant Interfaces.C.unsigned := 4;
       Native_Path  : aliased constant Wide_String := Wide (Path);
       Root         : aliased Wide_String (1 .. 32_768) := [others => Wide_Character'Val (0)];
@@ -415,22 +357,6 @@ package body Hostkit.Fs is
       --  of room.
       type Privilege_Buffer is array (1 .. 64) of Interfaces.Unsigned_32 with Convention => C;
 
-      function Get_Security_Info
-        (Handle      : System.Address;
-         Object_Type : Interfaces.C.int;
-         Wanted_Info : C_DWord;
-         Owner       : System.Address;
-         Group       : System.Address;
-         Dacl        : System.Address;
-         Sacl        : System.Address;
-         Descriptor  : access System.Address)
-         return C_DWord
-        with Import => True, Convention => Stdcall, External_Name => "GetSecurityInfo";
-      function Get_Current_Process return System.Address
-        with Import => True, Convention => Stdcall, External_Name => "GetCurrentProcess";
-      function Open_Process_Token
-        (Process : System.Address; Desired : C_DWord; Token : access System.Address) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "OpenProcessToken";
       function Duplicate_Token
         (Existing : System.Address; Level : Interfaces.C.int; Duplicate : access System.Address)
          return Interfaces.C.int
@@ -446,13 +372,9 @@ package body Hostkit.Fs is
          Status            : access Interfaces.C.int)
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "AccessCheck";
-      function Local_Free (Item : System.Address) return System.Address
-        with Import => True, Convention => Stdcall, External_Name => "LocalFree";
 
-      Se_File_Object         : constant Interfaces.C.int := 1;
       Owner_Group_Dacl       : constant C_DWord := 16#1# + 16#2# + 16#4#;
       Token_Duplicate        : constant C_DWord := 16#2#;
-      Token_Query            : constant C_DWord := 16#8#;
       Security_Impersonation : constant Interfaces.C.int := 2;
 
       Native_Path   : aliased constant Wide_String := Wide (Path);
@@ -470,10 +392,10 @@ package body Hostkit.Fs is
          Ignored_Free  : System.Address;
       begin
          if Token /= System.Null_Address then
-            Ignored_Close := Close_Entry (Token);
+            Ignored_Close := Close_Handle (Token);
          end if;
          if Process_Token /= System.Null_Address then
-            Ignored_Close := Close_Entry (Process_Token);
+            Ignored_Close := Close_Handle (Process_Token);
          end if;
          if Descriptor /= System.Null_Address then
             Ignored_Free := Local_Free (Descriptor);
@@ -482,7 +404,7 @@ package body Hostkit.Fs is
    begin
       declare
          Handle  : constant System.Address :=
-           Open_Entry
+           Create_File
              (Native_Path'Address, Read_Control_Access, Share_Everything, System.Null_Address,
               Open_Existing_Only, Backup_Semantics_Flag, System.Null_Address);
          Read    : C_DWord;
@@ -494,7 +416,7 @@ package body Hostkit.Fs is
          Read := Get_Security_Info
            (Handle, Se_File_Object, Owner_Group_Dacl, System.Null_Address, System.Null_Address,
             System.Null_Address, System.Null_Address, Descriptor'Access);
-         Ignored := Close_Entry (Handle);
+         Ignored := Close_Handle (Handle);
          if Read /= 0 then
             Descriptor := System.Null_Address;
             return False;
@@ -537,7 +459,6 @@ package body Hostkit.Fs is
    function Is_Owner_Writable (Path : String) return Boolean is
       File_Attribute_Readonly : constant C_DWord := 16#1#;
       File_Write_Data         : constant C_DWord := 16#2#;
-      File_Append_Data        : constant C_DWord := 16#4#;
       Native_Path             : aliased constant Wide_String := Wide (Path);
       Attributes              : C_DWord;
    begin
@@ -754,9 +675,6 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
 
-      function Get_Last_Error return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetLastError";
-
       Error_Access_Denied     : constant C_DWord := 5;
       Error_Sharing_Violation : constant C_DWord := 32;
       Error_Lock_Violation    : constant C_DWord := 33;
@@ -808,9 +726,6 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
 
-      function Get_Last_Error return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetLastError";
-
       Error_Not_Same_Device  : constant C_DWord := 17;
       Error_Invalid_Function  : constant C_DWord := 1;
       Error_Not_Supported    : constant C_DWord := 50;
@@ -858,7 +773,6 @@ package body Hostkit.Fs is
       use type System.Address;
 
       Fsctl_Get_Reparse_Point : constant C_DWord := 16#0009_00A8#;
-      Open_Existing           : constant C_DWord := 3;
       Flag_Backup_Semantics   : constant C_DWord := 16#0200_0000#;
       Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
       Share_All               : constant C_DWord := 7;
@@ -868,20 +782,6 @@ package body Hostkit.Fs is
       --  read here, which errno says as EINVAL.
       Error_Not_A_Reparse_Point  : constant Interfaces.Unsigned_32 := 4390;
       Error_Invalid_Reparse_Data : constant Interfaces.Unsigned_32 := 4392;
-      Invalid_Handle          : constant System.Address :=
-        System.Storage_Elements.To_Address
-          (System.Storage_Elements.Integer_Address'Last);
-
-      function Create_File
-        (Name       : System.Address;
-         Access_Way : C_DWord;
-         Share      : C_DWord;
-         Security   : System.Address;
-         Creation   : C_DWord;
-         Flags      : C_DWord;
-         Template   : System.Address)
-         return System.Address
-        with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
 
       function Device_Io_Control
         (Handle     : System.Address;
@@ -895,9 +795,6 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall,
              External_Name => "DeviceIoControl";
-
-      function Close_Handle (Handle : System.Address) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
       Wide_Path : aliased Wide_String := Wide (Path);
       Buffer    : array (0 .. 16 * 1024 - 1) of aliased Interfaces.Unsigned_8 :=
@@ -946,7 +843,7 @@ package body Hostkit.Fs is
          Creation   => Open_Existing,
          Flags      => Flag_Backup_Semantics + Flag_Open_Reparse_Point,
          Template   => System.Null_Address);
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
       end if;
@@ -960,7 +857,7 @@ package body Hostkit.Fs is
          Out_Size   => Buffer'Length,
          Returned   => Returned'Access,
          Overlapped => System.Null_Address);
-      Error := Last_Error;
+      Error := Get_Last_Error;
       Ignored := Close_Handle (Handle);
       if Outcome = 0 then
          Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
@@ -1053,367 +950,7 @@ package body Hostkit.Fs is
          return False;
    end Delete_Link;
 
-   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
-      use type Interfaces.Unsigned_64;
-      use type Interfaces.Unsigned_32;
-      use type Interfaces.C.unsigned_short;
-      use type System.Address;
-      use type System.Storage_Elements.Integer_Address;
-
-      subtype C_U16 is Interfaces.C.unsigned_short;
-      type U16_Array is array (Natural range <>) of aliased C_U16
-        with Convention => C;
-      type Byte_Array is array (Natural range <>) of aliased Interfaces.Unsigned_8
-        with Convention => C;
-      type Directory_Header is record
-         Next_Offset : Interfaces.Unsigned_32;
-         Name_Length : Interfaces.Unsigned_32;
-         File_Id     : Interfaces.Unsigned_64;
-      end record;
-      for Directory_Header use record
-         Next_Offset at 0 range 0 .. 31;
-         Name_Length at 60 range 0 .. 31;
-         File_Id     at 96 range 0 .. 63;
-      end record;
-      for Directory_Header'Size use 104 * 8;
-      type Handle_Info is record
-         Attributes : C_DWord;
-         Creation_Low, Creation_High, Access_Low, Access_High : C_DWord;
-         Write_Low, Write_High, Volume : C_DWord;
-         Size_High, Size_Low, Links, Index_High, Index_Low : C_DWord;
-      end record with Convention => C;
-      type Disposition_Info is record
-         Delete_File : Interfaces.C.int;
-      end record with Convention => C;
-      type Disposition_Info_Ex is record
-         Flags : C_DWord;
-      end record with Convention => C;
-      type Attribute_Tag_Info is record
-         Attributes : C_DWord;
-         Reparse_Tag : Interfaces.Unsigned_32;
-      end record with Convention => C;
-      type Child (Length : Natural) is record
-         Name : U16_Array (1 .. Length);
-         Id   : Interfaces.Unsigned_64;
-      end record;
-      package Child_Vectors is new Ada.Containers.Indefinite_Vectors
-        (Index_Type => Positive, Element_Type => Child);
-
-      Max_Depth : constant := 2_048;
-      Max_Entries : constant := 100_000;
-      Max_Name_Bytes : constant := 64 * 1_024 * 1_024;
-      Invalid_Handle : constant System.Address :=
-        System.Storage_Elements.To_Address (-1);
-      Delete_Access : constant C_DWord := 16#0001_0000#;
-      File_List_Directory : constant C_DWord := 1;
-      File_Read_Attributes : constant C_DWord := 16#80#;
-      File_Write_Attributes : constant C_DWord := 16#100#;
-      Share_All : constant C_DWord := 7;
-      Open_Existing : constant C_DWord := 3;
-      Backup_Semantics : constant C_DWord := 16#0200_0000#;
-      Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
-      Id_Both_Directory_Info : constant Interfaces.C.int := 10;
-      Id_Both_Directory_Restart_Info : constant Interfaces.C.int := 11;
-      File_Disposition_Info : constant Interfaces.C.int := 4;
-      File_Attribute_Tag_Info : constant Interfaces.C.int := 9;
-      File_Disposition_Info_Ex : constant Interfaces.C.int := 21;
-      --  FILE_DISPOSITION_FLAG_DELETE, _POSIX_SEMANTICS and
-      --  _IGNORE_READONLY_ATTRIBUTE: a read-only file (git marks its objects
-      --  so) is deleted like any other, as it is on POSIX hosts.
-      Disposition_Delete_Flags : constant C_DWord := 16#1# + 16#2# + 16#10#;
-      Error_No_More_Files : constant C_DWord := 18;
-
-      function Create_File_W
-        (Name : System.Address; Access_Mode, Share : C_DWord;
-         Security : System.Address; Disposition, Flags : C_DWord;
-         Template : System.Address) return System.Address
-        with Import, Convention => Stdcall, External_Name => "CreateFileW";
-      function Close_Handle (Handle : System.Address) return Interfaces.C.int
-        with Import, Convention => Stdcall, External_Name => "CloseHandle";
-      function Get_File_Information
-        (Handle : System.Address; Info : access Handle_Info) return Interfaces.C.int
-        with Import, Convention => Stdcall,
-             External_Name => "GetFileInformationByHandle";
-      function Get_File_Information_Ex
-        (Handle : System.Address; Kind : Interfaces.C.int;
-         Info : System.Address; Size : C_DWord) return Interfaces.C.int
-        with Import, Convention => Stdcall,
-             External_Name => "GetFileInformationByHandleEx";
-      function Set_File_Information
-        (Handle : System.Address; Kind : Interfaces.C.int;
-         Info : System.Address; Size : C_DWord) return Interfaces.C.int
-        with Import, Convention => Stdcall,
-             External_Name => "SetFileInformationByHandle";
-      function Get_Final_Path
-        (Handle : System.Address; Name : System.Address;
-         Size, Flags : C_DWord) return C_DWord
-        with Import, Convention => Stdcall,
-             External_Name => "GetFinalPathNameByHandleW";
-      function Get_Last_Error return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetLastError";
-
-      --  Name opened to be deleted, never followed. Listing is asked for as
-      --  well, for a folder to be emptied; an entry whose own DACL refuses
-      --  reading (a mode-0 file) is opened again without it, since deleting
-      --  needs no read: its folder's FILE_DELETE_CHILD grants the DELETE,
-      --  as a POSIX folder's write bit lets an unreadable file go.
-      --  Writing the attributes is asked for too, where granted, so that a
-      --  read-only file can be let go on a volume without
-      --  FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE (FAT, exFAT).
-      function Open_For_Delete (Name : System.Address) return System.Address is
-         Error_Access_Denied : constant C_DWord := 5;
-         Handle : System.Address := Create_File_W
-           (Name, Delete_Access + File_Read_Attributes + File_Write_Attributes + File_List_Directory,
-            Share_All, System.Null_Address, Open_Existing,
-            Backup_Semantics + Open_Reparse_Point, System.Null_Address);
-      begin
-         if Handle = Invalid_Handle and then Get_Last_Error = Error_Access_Denied then
-            Handle := Create_File_W
-              (Name, Delete_Access + File_Read_Attributes + File_List_Directory,
-               Share_All, System.Null_Address, Open_Existing,
-               Backup_Semantics + Open_Reparse_Point, System.Null_Address);
-         end if;
-         if Handle = Invalid_Handle and then Get_Last_Error = Error_Access_Denied then
-            Handle := Create_File_W
-              (Name, Delete_Access + File_Read_Attributes,
-               Share_All, System.Null_Address, Open_Existing,
-               Backup_Semantics + Open_Reparse_Point, System.Null_Address);
-         end if;
-         return Handle;
-      end Open_For_Delete;
-
-      --  Drop the read-only attribute of the entry held as Held, keeping
-      --  the others: False where it has none or it cannot be dropped.
-      function Drop_Read_Only (Held : System.Address; Info : Handle_Info) return Boolean is
-         --  FILE_BASIC_INFO: 40 bytes, its DWORD padded to the next 8.
-         type Basic_Info is record
-            Creation, Last_Access, Last_Write, Change : Interfaces.Integer_64;
-            Attributes : C_DWord;
-            Padding    : C_DWord := 0;
-         end record with Convention => C;
-         Read_Only_Attribute : constant C_DWord := 16#0000_0001#;
-         Normal_Attribute    : constant C_DWord := 16#0000_0080#;
-         File_Basic_Info     : constant Interfaces.C.int := 0;
-         --  Zero times leave each time as it is.
-         Basic : aliased Basic_Info := (0, 0, 0, 0, Info.Attributes and not Read_Only_Attribute, 0);
-      begin
-         if (Info.Attributes and Read_Only_Attribute) = 0 then
-            return False;
-         end if;
-         if Basic.Attributes = 0 then
-            Basic.Attributes := Normal_Attribute;
-         end if;
-         return Set_File_Information (Held, File_Basic_Info, Basic'Address, C_DWord (Basic_Info'Size / 8)) /= 0;
-      end Drop_Read_Only;
-
-      function File_Index (Info : Handle_Info) return Interfaces.Unsigned_64 is
-        (Interfaces.Unsigned_64 (Info.Index_High) * 2 ** 32
-         + Interfaces.Unsigned_64 (Info.Index_Low));
-
-      --  Read Directory's children from its start. Full is True when
-      --  Max_Entries were read and more may follow: the caller deletes those,
-      --  then reads again, so a folder of any size is deleted in batches.
-      function Read_Children
-        (Directory : System.Address; Items : in out Child_Vectors.Vector; Full : out Boolean)
-         return Boolean
-      is
-         Buffer : aliased Byte_Array (0 .. 65_535);
-         Kind : Interfaces.C.int := Id_Both_Directory_Restart_Info;
-         Name_Bytes : Natural := 0;
-      begin
-         Full := False;
-         loop
-            if Get_File_Information_Ex
-              (Directory, Kind, Buffer'Address, C_DWord (Buffer'Length)) = 0
-            then
-               return Get_Last_Error = Error_No_More_Files;
-            end if;
-            Kind := Id_Both_Directory_Info;
-            declare
-               Offset : Natural := 0;
-            begin
-               loop
-                  declare
-                     Header : Directory_Header
-                       with Import, Address => Buffer (Offset)'Address;
-                     Length : constant Natural := Natural (Header.Name_Length) / 2;
-                     Item : Child (Length);
-                     Dot : Boolean := False;
-                  begin
-                     if Offset + 104 + Natural (Header.Name_Length) > Buffer'Length then
-                        return False;
-                     end if;
-                     for Index in 1 .. Length loop
-                        declare
-                           Unit : C_U16 with Import,
-                             Address => Buffer (Offset + 104 + (Index - 1) * 2)'Address;
-                        begin
-                           Item.Name (Index) := Unit;
-                        end;
-                     end loop;
-                     Dot := (Length = 1 and then Item.Name (1) = Character'Pos ('.'))
-                       or else (Length = 2 and then Item.Name (1) = Character'Pos ('.')
-                                and then Item.Name (2) = Character'Pos ('.'));
-                     if not Dot then
-                        if Natural (Items.Length) >= Max_Entries
-                          or else Natural (Header.Name_Length) > Max_Name_Bytes - Name_Bytes
-                        then
-                           Full := True;
-                           return True;
-                        end if;
-                        Item.Id := Header.File_Id;
-                        Items.Append (Item);
-                        Name_Bytes := Name_Bytes + Natural (Header.Name_Length);
-                     end if;
-                     exit when Header.Next_Offset = 0;
-                     if Natural (Header.Next_Offset) > Buffer'Length - Offset then
-                        return False;
-                     end if;
-                     Offset := Offset + Natural (Header.Next_Offset);
-                  end;
-               end loop;
-            end;
-         end loop;
-      exception
-         when others =>
-            return False;
-      end Read_Children;
-
-      function Child_Path (Parent : System.Address; Name : U16_Array) return U16_Array is
-         Length : constant C_DWord := Get_Final_Path
-           (Parent, System.Null_Address, 0, 0);
-      begin
-         if Length = 0 then
-            return [1 .. 0 => 0];
-         end if;
-         declare
-            Result : U16_Array (0 .. Natural (Length) + Name'Length + 1) := [others => 0];
-            Written : constant C_DWord := Get_Final_Path
-              (Parent, Result'Address, Length + 1, 0);
-            Next : Natural := Natural (Written);
-         begin
-            if Written = 0 or else Written > Length then
-               return [1 .. 0 => 0];
-            end if;
-            if Next > 0 and then Result (Next - 1) /= Character'Pos ('\') then
-               Result (Next) := Character'Pos ('\');
-               Next := Next + 1;
-            end if;
-            for Unit of Name loop
-               Result (Next) := Unit;
-               Next := Next + 1;
-            end loop;
-            Result (Next) := 0;
-            return Result (0 .. Next);
-         end;
-      end Child_Path;
-
-      --  Whether the held entry is a link to leave alone rather than a
-      --  folder to empty: only the symbolic-link and junction tags are, as
-      --  in Is_Link. A OneDrive placeholder folder is a reparse point too,
-      --  and its contents are the user's. An unreadable tag counts as a link.
-      function Is_Held_Link (Held : System.Address; Info : Handle_Info) return Boolean is
-         Tag_Info : aliased Attribute_Tag_Info;
-      begin
-         if (Info.Attributes and File_Attribute_Reparse_Point) = 0 then
-            return False;
-         end if;
-         if Get_File_Information_Ex
-           (Held, File_Attribute_Tag_Info, Tag_Info'Address, C_DWord (Attribute_Tag_Info'Size / 8)) = 0
-         then
-            return True;
-         end if;
-         return Tag_Info.Reparse_Tag = Io_Reparse_Tag_Symlink
-           or else Tag_Info.Reparse_Tag = Io_Reparse_Tag_Mount_Point;
-      end Is_Held_Link;
-
-      function Delete_Held (Held : System.Address; Depth : Natural) return Boolean is
-         Info : aliased Handle_Info;
-         Items : Child_Vectors.Vector;
-         Ok : Boolean := Depth <= Max_Depth
-           and then Get_File_Information (Held, Info'Access) /= 0;
-         Full : Boolean := True;
-         Ignored : Interfaces.C.int;
-      begin
-         if Ok and then (Info.Attributes and File_Attribute_Directory) /= 0
-           and then not Is_Held_Link (Held, Info)
-         then
-            while Ok and then Full loop
-               Items.Clear;
-               Ok := Read_Children (Held, Items, Full);
-               for Item of Items loop
-                  exit when not Ok;
-                  declare
-                     Name : constant U16_Array := Child_Path (Held, Item.Name);
-                     Child_Handle : System.Address :=
-                       (if Name'Length = 0 then Invalid_Handle else Open_For_Delete (Name'Address));
-                     Child_Info : aliased Handle_Info;
-                  begin
-                     if Child_Handle = Invalid_Handle and then Name'Length /= 0 then
-                        Hostkit.Errors.Set_Errno_From_Last_Error;
-                     end if;
-                     Ok := Child_Handle /= Invalid_Handle
-                       and then Get_File_Information (Child_Handle, Child_Info'Access) /= 0
-                       and then Child_Info.Volume = Info.Volume
-                       and then File_Index (Child_Info) = Item.Id;
-                     if Ok then
-                        Ok := Delete_Held (Child_Handle, Depth + 1);
-                        Child_Handle := Invalid_Handle;
-                     elsif Child_Handle /= Invalid_Handle then
-                        Ignored := Close_Handle (Child_Handle);
-                     end if;
-                  end;
-               end loop;
-            end loop;
-         end if;
-         if Ok then
-            declare
-               Disposition_Ex : aliased Disposition_Info_Ex := (Flags => Disposition_Delete_Flags);
-               Disposition : aliased Disposition_Info := (Delete_File => 1);
-            begin
-               --  The extended form needs Windows 10 1809 and NTFS; elsewhere
-               --  the plain one still deletes what is not read-only.
-               Ok := Set_File_Information
-                 (Held, File_Disposition_Info_Ex, Disposition_Ex'Address,
-                  C_DWord (Disposition_Info_Ex'Size / 8)) /= 0
-                 or else Set_File_Information
-                   (Held, File_Disposition_Info, Disposition'Address,
-                    C_DWord (Disposition_Info'Size / 8)) /= 0
-                 or else (Drop_Read_Only (Held, Info)
-                          and then Set_File_Information
-                            (Held, File_Disposition_Info, Disposition'Address,
-                             C_DWord (Disposition_Info'Size / 8)) /= 0);
-               if not Ok then
-                  --  Why the plain form refused: a folder not empty, a file
-                  --  held open without delete sharing, a refused right.
-                  Hostkit.Errors.Set_Errno_From_Last_Error;
-               end if;
-            end;
-         end if;
-         Ignored := Close_Handle (Held);
-         return Ok;
-      exception
-         when others =>
-            Ignored := Close_Handle (Held);
-            return False;
-      end Delete_Held;
-
-      Name : aliased Wide_String := Wide (Path);
-      Held : System.Address;
-   begin
-      if Path = "" then
-         return Tree_Delete_Failed;
-      end if;
-      Held := Open_For_Delete (Name'Address);
-      if Held = Invalid_Handle then
-         Hostkit.Errors.Set_Errno_From_Last_Error;
-         return Tree_Delete_Failed;
-      end if;
-      return (if Delete_Held (Held, 0) then Tree_Deleted else Tree_Delete_Failed);
-   exception
-      when others =>
-         return Tree_Delete_Failed;
-   end Delete_Tree_No_Follow;
+   function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is separate;
 
    --  Windows has no realpath. Open the path -- following links, so no
    --  FILE_FLAG_OPEN_REPARSE_POINT here -- and ask the kernel for the final, canonical
@@ -1423,35 +960,8 @@ package body Hostkit.Fs is
    function Real_Path (Path : String) return String is
       use type System.Address;
 
-      Open_Existing         : constant C_DWord := 3;
       Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
       Share_All             : constant C_DWord := 7;
-      Invalid_Handle        : constant System.Address :=
-        System.Storage_Elements.To_Address
-          (System.Storage_Elements.Integer_Address'Last);
-
-      function Create_File
-        (Name       : System.Address;
-         Access_Way : C_DWord;
-         Share      : C_DWord;
-         Security   : System.Address;
-         Creation   : C_DWord;
-         Flags      : C_DWord;
-         Template   : System.Address)
-         return System.Address
-        with Import => True, Convention => Stdcall, External_Name => "CreateFileW";
-
-      function Get_Final_Path_Name_By_Handle
-        (Handle : System.Address;
-         Path   : System.Address;
-         Count  : C_DWord;
-         Flags  : C_DWord)
-         return C_DWord
-        with Import => True, Convention => Stdcall,
-             External_Name => "GetFinalPathNameByHandleW";
-
-      function Close_Handle (Handle : System.Address) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "CloseHandle";
 
       --  Resolve a single path that must exist, to its canonical long-name form (with
       --  the \\?\ / \\?\UNC\ prefix stripped). Returns "" when Target does not exist.
@@ -1471,15 +981,15 @@ package body Hostkit.Fs is
             Creation   => Open_Existing,
             Flags      => Flag_Backup_Semantics,
             Template   => System.Null_Address);
-         if Handle = Invalid_Handle then
+         if Handle = Invalid_Handle_Value then
             return "";
          end if;
 
          --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
          --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it
          --  would not fit -- the required size including the NUL, treated as failure.
-         Length := Get_Final_Path_Name_By_Handle
-           (Handle => Handle,
+         Length := Get_Final_Path_Name
+           (Object => Handle,
             Path   => Wide_Buf'Address,
             Count  => Wide_Buf'Length,
             Flags  => 0);
@@ -1597,211 +1107,7 @@ package body Hostkit.Fs is
       Path    : String;
       Most    : Natural;
       Text    : out Ada.Strings.Unbounded.Unbounded_String;
-      Outcome : out Read_Beneath_Outcome)
-   is
-      use type System.Address;
-      use type System.Storage_Elements.Integer_Address;
-
-      package Part_Vectors is new Ada.Containers.Indefinite_Vectors
-        (Index_Type => Positive, Element_Type => String);
-      package Handle_Vectors is new Ada.Containers.Indefinite_Vectors
-        (Index_Type => Positive, Element_Type => System.Address);
-
-      type Handle_Info is record
-         Attributes : C_DWord;
-         Creation_Low, Creation_High, Access_Low, Access_High : C_DWord;
-         Write_Low, Write_High, Volume : C_DWord;
-         Size_High, Size_Low, Links, Index_High, Index_Low : C_DWord;
-      end record with Convention => C;
-
-      Invalid_Handle       : constant System.Address := System.Storage_Elements.To_Address (-1);
-      Generic_Read         : constant C_DWord := 16#8000_0000#;
-      File_Read_Attributes : constant C_DWord := 16#80#;
-      --  A data right: a handle holding only attribute rights takes no part
-      --  in the sharing check, so the folder it held could still be renamed
-      --  away and a link put in its place while the walk went on below it.
-      File_List_Directory  : constant C_DWord := 16#01#;
-      --  Read and write, never delete: a directory held so cannot be
-      --  renamed or replaced while the walk goes on below it.
-      Share_No_Delete      : constant C_DWord := 3;
-      Open_Existing        : constant C_DWord := 3;
-      Backup_Semantics     : constant C_DWord := 16#0200_0000#;
-      Open_Reparse_Point   : constant C_DWord := 16#0020_0000#;
-      Error_File_Not_Found : constant C_DWord := 2;
-      Error_Path_Not_Found : constant C_DWord := 3;
-      Chunk                : constant := 65_536;
-
-      function Create_File_W
-        (Name : System.Address; Access_Mode, Share : C_DWord;
-         Security : System.Address; Disposition, Flags : C_DWord;
-         Template : System.Address) return System.Address
-        with Import, Convention => Stdcall, External_Name => "CreateFileW";
-      function Close_Handle (Handle : System.Address) return Interfaces.C.int
-        with Import, Convention => Stdcall, External_Name => "CloseHandle";
-      function Get_File_Information
-        (Handle : System.Address; Info : access Handle_Info) return Interfaces.C.int
-        with Import, Convention => Stdcall, External_Name => "GetFileInformationByHandle";
-      function Get_Final_Path
-        (Handle : System.Address; Name : System.Address; Size, Flags : C_DWord) return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetFinalPathNameByHandleW";
-      function Read_File
-        (Handle : System.Address; Buffer : System.Address; Count : C_DWord;
-         Got : access C_DWord; Overlapped : System.Address) return Interfaces.C.int
-        with Import, Convention => Stdcall, External_Name => "ReadFile";
-      function Get_Last_Error return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetLastError";
-
-      Held  : Handle_Vectors.Vector;
-      Parts : Part_Vectors.Vector;
-      Start : Positive := Path'First;
-
-      procedure Let_Go is
-         Ignored : Interfaces.C.int;
-      begin
-         for Handle of Held loop
-            Ignored := Close_Handle (Handle);
-         end loop;
-         Held.Clear;
-      end Let_Go;
-
-      function Open (Name : Wide_String; Access_Mode, Flags : C_DWord) return System.Address is
-         Terminated : aliased constant Wide_String := Name & Wide_Character'Val (0);
-      begin
-         return Create_File_W
-           (Terminated'Address, Access_Mode, Share_No_Delete, System.Null_Address, Open_Existing, Flags,
-            System.Null_Address);
-      end Open;
-   begin
-      Text := Ada.Strings.Unbounded.Null_Unbounded_String;
-      Outcome := Read_Failed;
-      if Path'Length = 0 or else Path (Path'First) in '/' | '\' then
-         Outcome := Read_Outside;
-         return;
-      end if;
-      for Index in Path'First .. Path'Last + 1 loop
-         if Index > Path'Last or else Path (Index) in '/' | '\' then
-            declare
-               Part : constant String := Path (Start .. Index - 1);
-            begin
-               if Part = ".." or else (for some C of Part => C in ':' | ASCII.NUL) then
-                  Outcome := Read_Outside;
-                  return;
-               elsif Part /= "" and then Part /= "." then
-                  Parts.Append (Part);
-               end if;
-            end;
-            Start := Index + 1;
-         end if;
-      end loop;
-      if Parts.Is_Empty then
-         Outcome := Read_Not_File;
-         return;
-      end if;
-
-      --  Root, links and all, held and named as it resolves: every part
-      --  below is named from there. Root in the long form, without the
-      --  terminator Open adds itself.
-      declare
-         Native_Root : constant Wide_String := Wide (if Root = "" then "." else Root);
-         Root_Handle : constant System.Address :=
-           Open (Native_Root (Native_Root'First .. Native_Root'Last - 1), File_Read_Attributes + File_List_Directory,
-                 Backup_Semantics);
-      begin
-         if Root_Handle = Invalid_Handle then
-            Outcome := Read_Missing;
-            return;
-         end if;
-         Held.Append (Root_Handle);
-      end;
-      declare
-         Length : constant C_DWord := Get_Final_Path (Held.First_Element, System.Null_Address, 0, 0);
-      begin
-         if Length = 0 then
-            Let_Go;
-            return;
-         end if;
-         declare
-            Buffer  : aliased Wide_String (1 .. Natural (Length) + 1);
-            Written : constant C_DWord := Get_Final_Path (Held.First_Element, Buffer'Address, Length + 1, 0);
-            Current : Ada.Strings.Wide_Unbounded.Unbounded_Wide_String;
-            Handle  : System.Address := Invalid_Handle;
-            Info    : aliased Handle_Info;
-         begin
-            if Written = 0 or else Written > Length then
-               Let_Go;
-               return;
-            end if;
-            Current := Ada.Strings.Wide_Unbounded.To_Unbounded_Wide_String (Buffer (1 .. Natural (Written)));
-            for Index in Parts.First_Index .. Parts.Last_Index loop
-               declare
-                  Last : constant Boolean := Index = Parts.Last_Index;
-               begin
-                  Ada.Strings.Wide_Unbounded.Append
-                    (Current, "\" & Hostkit.Windows_Paths.From_UTF_8 (Parts (Index)));
-                  --  The part as itself: a link or junction is opened, not
-                  --  what it points at, and refused below.
-                  Handle := Open
-                    (Ada.Strings.Wide_Unbounded.To_Wide_String (Current),
-                     File_Read_Attributes + (if Last then Generic_Read else File_List_Directory),
-                     Backup_Semantics + Open_Reparse_Point);
-                  if Handle = Invalid_Handle then
-                     Outcome :=
-                       (if Get_Last_Error in Error_File_Not_Found | Error_Path_Not_Found then Read_Missing
-                        else Read_Failed);
-                     Let_Go;
-                     return;
-                  end if;
-                  Held.Append (Handle);
-                  if Get_File_Information (Handle, Info'Access) = 0 then
-                     Let_Go;
-                     return;
-                  elsif (Info.Attributes and File_Attribute_Reparse_Point) /= 0 then
-                     Outcome := Read_Outside;
-                     Let_Go;
-                     return;
-                  elsif Last = ((Info.Attributes and File_Attribute_Directory) /= 0) then
-                     Outcome := (if Last then Read_Not_File else Read_Missing);
-                     Let_Go;
-                     return;
-                  end if;
-               end;
-            end loop;
-            if Info.Size_High /= 0 or else Long_Long_Integer (Info.Size_Low) > Long_Long_Integer (Most) then
-               Outcome := Read_Too_Large;
-               Let_Go;
-               return;
-            end if;
-            declare
-               Chunk_Of : aliased String (1 .. Chunk);
-               Got      : aliased C_DWord;
-               Total    : Natural := 0;
-            begin
-               loop
-                  if Read_File (Handle, Chunk_Of'Address, Chunk, Got'Access, System.Null_Address) = 0 then
-                     exit;
-                  elsif Got = 0 then
-                     Outcome := Read_Done;
-                     exit;
-                  elsif Natural (Got) > Most - Total then
-                     Outcome := Read_Too_Large;
-                     exit;
-                  end if;
-                  Total := Total + Natural (Got);
-                  Ada.Strings.Unbounded.Append (Text, Chunk_Of (1 .. Natural (Got)));
-               end loop;
-            end;
-         end;
-      end;
-      Let_Go;
-      if Outcome /= Read_Done then
-         Text := Ada.Strings.Unbounded.Null_Unbounded_String;
-      end if;
-   exception
-      when others =>
-         Let_Go;
-         Text := Ada.Strings.Unbounded.Null_Unbounded_String;
-         Outcome := Read_Failed;
-   end Read_Beneath;
+      Outcome : out Read_Beneath_Outcome) is separate;
 
    --  The directory part of a Windows path, either separator.
    function Directory_Part (Path : String) return String is
@@ -2169,8 +1475,6 @@ package body Hostkit.Fs is
    function Delete_Empty_Directory (Path : String) return Boolean is
       function Remove_Directory (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "RemoveDirectoryW";
-      function Set_File_Attributes (Name : System.Address; Attributes : C_DWord) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "SetFileAttributesW";
       Read_Only  : constant C_DWord := 16#0001#;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
@@ -2203,8 +1507,6 @@ package body Hostkit.Fs is
    function Delete_File (Path : String) return Boolean is
       function Delete_File_W (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
-      function Set_File_Attributes (Name : System.Address; Attributes : C_DWord) return Interfaces.C.int
-        with Import => True, Convention => Stdcall, External_Name => "SetFileAttributesW";
       Read_Only : constant C_DWord := 16#0001#;
    begin
       if Path = "" or else (for some C of Path => C = ASCII.NUL) then
@@ -2309,9 +1611,6 @@ package body Hostkit.Fs is
         Hostkit.Windows_Paths.From_UTF_8 (Mode & (if Text then "t" else "b")) & Wide_Character'Val (0);
       Stream    : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
       Error     : Integer := 2;
-
-      function Get_Last_Error return C_DWord
-        with Import, Convention => Stdcall, External_Name => "GetLastError";
    begin
       if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
          declare

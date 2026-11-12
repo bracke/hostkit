@@ -1,9 +1,9 @@
 with Hostkit.Errors;
 with Hostkit.Fs;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
-with System.Storage_Elements;
 
 --  FindFirstFileW and FindNextFileW over Path\*, through the long form:
 --  GNAT's Ada.Directories search refuses a folder past 260 characters, and
@@ -15,6 +15,7 @@ with System.Storage_Elements;
 package body Hostkit.Directory_Listing is
    use type Hostkit.Fs.Entry_Kind;
 
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
@@ -49,21 +50,15 @@ package body Hostkit.Directory_Listing is
    Tag_Mount_Point         : constant C_DWord := 16#A000_0003#;
    Error_File_Not_Found    : constant C_DWord := 2;
    Error_No_More_Files     : constant C_DWord := 18;
-   Invalid_Handle          : constant System.Address :=
-     System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address'Last);
 
    function Find_First_File (Name : System.Address; Data : access Find_Data) return System.Address
      with Import, Convention => Stdcall, External_Name => "FindFirstFileW";
    function Find_Next_File (Handle : System.Address; Data : access Find_Data) return Interfaces.C.int
      with Import, Convention => Stdcall, External_Name => "FindNextFileW";
-   function Find_Close (Handle : System.Address) return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "FindClose";
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
 
    function List (Path : String; Entries : out Entry_Vectors.Vector) return Boolean is
       Data    : aliased Find_Data;
-      Handle  : System.Address := Invalid_Handle;
+      Handle  : System.Address := Invalid_Handle_Value;
       Ignored : Interfaces.C.int;
 
       --  The entry Data holds, unless it is . or ..
@@ -108,7 +103,7 @@ package body Hostkit.Directory_Listing is
       begin
          Handle := Find_First_File (Pattern'Address, Data'Access);
       end;
-      if Handle = Invalid_Handle then
+      if Handle = Invalid_Handle_Value then
          --  Nothing matched: a drive's root has no . and .. to list, so an
          --  empty one says so -- as does a path that is not there.
          if Get_Last_Error = Error_File_Not_Found
@@ -134,7 +129,7 @@ package body Hostkit.Directory_Listing is
       end;
    exception
       when others =>
-         if Handle /= Invalid_Handle then
+         if Handle /= Invalid_Handle_Value then
             Ignored := Find_Close (Handle);
          end if;
          return False;

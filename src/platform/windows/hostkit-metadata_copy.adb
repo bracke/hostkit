@@ -1,49 +1,24 @@
 with Hostkit.Errors;
+with Hostkit.Win32;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
-with System.Storage_Elements;
 
 package body Hostkit.Metadata_Copy is
    use Ada.Strings.Unbounded;
+   use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.Unsigned_64;
    use type System.Address;
-   use type System.Storage_Elements.Integer_Address;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   type Filetime is record
-      Low, High : C_DWord;
-   end record with Convention => C;
-
-   type By_Handle_File_Information is record
-      Attributes : C_DWord;
-      Creation, Accessed, Modified : Filetime;
-      Volume_Serial, Size_High, Size_Low, Link_Count : C_DWord;
-      File_Index_High, File_Index_Low : C_DWord;
-   end record with Convention => C;
-
-   Invalid_Handle : constant System.Address :=
-     System.Storage_Elements.To_Address (-1);
-   File_Read_Attributes  : constant C_DWord := 16#0000_0080#;
-   File_Write_Attributes : constant C_DWord := 16#0000_0100#;
    File_Share_All : constant C_DWord := 7;
-   Open_Existing : constant C_DWord := 3;
-   File_Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
-   File_Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
 
    function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
-   function Create_File_W
-     (Name : System.Address; Access_Mode, Share : C_DWord;
-      Security : System.Address; Disposition, Flags : C_DWord;
-      Template : System.Address) return System.Address
-     with Import, Convention => Stdcall, External_Name => "CreateFileW";
-   function Close_Handle (Handle : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "CloseHandle";
    function Get_File_Time
      (Handle : System.Address; Created : System.Address;
       Accessed, Modified : access Filetime) return C_Int
@@ -52,18 +27,7 @@ package body Hostkit.Metadata_Copy is
      (Handle : System.Address; Created : System.Address;
       Accessed, Modified : access Filetime) return C_Int
      with Import, Convention => Stdcall, External_Name => "SetFileTime";
-   function Get_File_Information
-     (Handle : System.Address;
-      Info : access By_Handle_File_Information) return C_Int
-     with Import, Convention => Stdcall,
-          External_Name => "GetFileInformationByHandle";
 
-   function Get_Last_Error return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetLastError";
-   function Get_File_Attributes_W (Path : System.Address) return C_DWord
-     with Import, Convention => Stdcall, External_Name => "GetFileAttributesW";
-   function Set_File_Attributes_W (Path : System.Address; Attributes : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
    function Encrypt_File_W (Path : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "EncryptFileW";
 
@@ -85,35 +49,20 @@ package body Hostkit.Metadata_Copy is
      with Import, Convention => Stdcall, External_Name => "FindFirstStreamW";
    function Find_Next_Stream_W (Find : System.Address; Data : access Find_Stream_Data) return C_Int
      with Import, Convention => Stdcall, External_Name => "FindNextStreamW";
-   function Find_Close (Find : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "FindClose";
-   function Read_File
-     (Handle : System.Address; Buffer : System.Address; Size : C_DWord;
-      Done : access C_DWord; Overlapped : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "ReadFile";
-   function Write_File
-     (Handle : System.Address; Buffer : System.Address; Size : C_DWord;
-      Done : access C_DWord; Overlapped : System.Address) return C_Int
-     with Import, Convention => Stdcall, External_Name => "WriteFile";
-   function Get_Volume_Information_By_Handle_W
-     (Handle : System.Address; Volume_Name : System.Address; Volume_Name_Size : C_DWord;
-      Serial, Max_Component, Flags : access C_DWord;
-      File_System_Name : System.Address; File_System_Name_Size : C_DWord) return C_Int
-     with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
 
    function Open_Entry (Path : String; Access_Mode : C_DWord)
       return System.Address
    is
       Name : aliased Wide_String := Wide (Path);
    begin
-      return Create_File_W
+      return Create_File
         (Name'Address, Access_Mode, File_Share_All, System.Null_Address,
          Open_Existing,
          File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point,
          System.Null_Address);
    exception
       when others =>
-         return Invalid_Handle;
+         return Invalid_Handle_Value;
    end Open_Entry;
 
    function Value (Item : Filetime) return Interfaces.Integer_64 is
@@ -137,7 +86,7 @@ package body Hostkit.Metadata_Copy is
    is
       Handle : constant System.Address := Open_Entry (Path, File_Read_Attributes);
       Accessed, Modified : aliased Filetime;
-      Ok : constant Boolean := Handle /= Invalid_Handle
+      Ok : constant Boolean := Handle /= Invalid_Handle_Value
         and then Get_File_Time
           (Handle, System.Null_Address, Accessed'Access, Modified'Access) /= 0;
       Ignored : C_Int;
@@ -146,7 +95,7 @@ package body Hostkit.Metadata_Copy is
       if Ok then
          Times := [Value (Accessed), 0, Value (Modified), 0];
       end if;
-      if Handle /= Invalid_Handle then
+      if Handle /= Invalid_Handle_Value then
          Ignored := Close_Handle (Handle);
       end if;
       return Ok;
@@ -162,7 +111,7 @@ package body Hostkit.Metadata_Copy is
       Handle : constant System.Address := Open_Entry (Path, File_Write_Attributes);
       Accessed : aliased Filetime := File_Time (Times (1));
       Modified : aliased Filetime := File_Time (Times (3));
-      Ok : constant Boolean := Handle /= Invalid_Handle
+      Ok : constant Boolean := Handle /= Invalid_Handle_Value
         and then Set_File_Time
           (Handle, System.Null_Address, Accessed'Access, Modified'Access) /= 0;
       Ignored : C_Int;
@@ -171,7 +120,7 @@ package body Hostkit.Metadata_Copy is
          --  The open's or SetFileTime's own reason, before CloseHandle.
          Hostkit.Errors.Set_Errno_From_Last_Error;
       end if;
-      if Handle /= Invalid_Handle then
+      if Handle /= Invalid_Handle_Value then
          Ignored := Close_Handle (Handle);
       end if;
       return Ok;
@@ -192,7 +141,7 @@ package body Hostkit.Metadata_Copy is
         Find_First_Stream_W (Wide_Path'Address, 0, Data'Access, 0);
       Ignored   : C_Int;
    begin
-      if Find = Invalid_Handle then
+      if Find = Invalid_Handle_Value then
          return;
       end if;
       loop
@@ -231,7 +180,7 @@ package body Hostkit.Metadata_Copy is
       Result : Snapshot;
       Ignored : C_Int;
    begin
-      Result.Available := Handle /= Invalid_Handle
+      Result.Available := Handle /= Invalid_Handle_Value
         and then Get_File_Time
           (Handle, System.Null_Address, Accessed'Access, Modified'Access) /= 0
         and then Get_File_Information (Handle, Info'Access) /= 0;
@@ -243,7 +192,7 @@ package body Hostkit.Metadata_Copy is
          Result.Is_Link := (Info.Attributes and Attribute_Reparse_Point) /= 0;
          Result.Encrypted := not Result.Is_Link and then (Info.Attributes and Attribute_Encrypted) /= 0;
       end if;
-      if Handle /= Invalid_Handle then
+      if Handle /= Invalid_Handle_Value then
          Ignored := Close_Handle (Handle);
       end if;
       --  A link's streams are its target's to keep: FindFirstStreamW
@@ -272,9 +221,6 @@ package body Hostkit.Metadata_Copy is
    --  Capture is left out. Any other failure is the copy's, with errno set.
    function Copy_Streams (Item : Snapshot; Path : String) return Boolean is
       File_Named_Streams      : constant C_DWord := 16#0004_0000#;
-      Generic_Read            : constant C_DWord := 16#8000_0000#;
-      Generic_Write           : constant C_DWord := 16#4000_0000#;
-      Create_New              : constant C_DWord := 1;
       Error_File_Not_Found    : constant C_DWord := 2;
       Error_Not_Supported     : constant C_DWord := 50;
       Error_Invalid_Parameter : constant C_DWord := 87;
@@ -288,10 +234,10 @@ package body Hostkit.Metadata_Copy is
          Known   : Boolean;
          Ignored : C_Int;
       begin
-         if Handle = Invalid_Handle then
+         if Handle = Invalid_Handle_Value then
             return True;
          end if;
-         Known := Get_Volume_Information_By_Handle_W
+         Known := Get_Volume_Information_By_Handle
            (Handle, System.Null_Address, 0, Serial'Access, Max_Component'Access, Flags'Access,
             System.Null_Address, 0) /= 0;
          Ignored := Close_Handle (Handle);
@@ -301,15 +247,15 @@ package body Hostkit.Metadata_Copy is
       function Open_Stream (Name : String; Access_Mode, Disposition : C_DWord) return System.Address is
          Wide_Name : aliased constant Wide_String := Wide (Name);
       begin
-         return Create_File_W
+         return Create_File
            (Wide_Name'Address, Access_Mode,
             (if Disposition = Open_Existing then File_Share_All else 0),
             System.Null_Address, Disposition, File_Flag_Backup_Semantics, System.Null_Address);
       end Open_Stream;
 
       Source  : constant String := To_String (Item.Source);
-      Input   : System.Address := Invalid_Handle;
-      Output  : System.Address := Invalid_Handle;
+      Input   : System.Address := Invalid_Handle_Value;
+      Output  : System.Address := Invalid_Handle_Value;
       Buffer  : aliased String (1 .. 16_384);
       Read, Written : aliased C_DWord;
       Ignored : C_Int;
@@ -322,14 +268,14 @@ package body Hostkit.Metadata_Copy is
             Name : constant String := To_String (Stream.Name);
          begin
             Input := Open_Stream (Source & Name, Generic_Read, Open_Existing);
-            if Input = Invalid_Handle then
+            if Input = Invalid_Handle_Value then
                if Get_Last_Error /= Error_File_Not_Found then
                   Hostkit.Errors.Set_Errno_From_Last_Error;
                   return False;
                end if;
             else
                Output := Open_Stream (Path & Name, Generic_Write, Create_New);
-               if Output = Invalid_Handle then
+               if Output = Invalid_Handle_Value then
                   declare
                      Error : constant C_DWord := Get_Last_Error;
                   begin
@@ -361,23 +307,23 @@ package body Hostkit.Metadata_Copy is
                   end if;
                end loop;
                Ignored := Close_Handle (Input);
-               Input := Invalid_Handle;
+               Input := Invalid_Handle_Value;
                if Close_Handle (Output) = 0 then
-                  Output := Invalid_Handle;
+                  Output := Invalid_Handle_Value;
                   Hostkit.Errors.Set_Errno_From_Last_Error;
                   return False;
                end if;
-               Output := Invalid_Handle;
+               Output := Invalid_Handle_Value;
             end if;
          end;
       end loop;
       return True;
    exception
       when others =>
-         if Input /= Invalid_Handle then
+         if Input /= Invalid_Handle_Value then
             Ignored := Close_Handle (Input);
          end if;
-         if Output /= Invalid_Handle then
+         if Output /= Invalid_Handle_Value then
             Ignored := Close_Handle (Output);
          end if;
          return False;
@@ -406,7 +352,7 @@ package body Hostkit.Metadata_Copy is
       --  rather than arriving decrypted.
       if Item.Encrypted then
          declare
-            Current : constant C_DWord := Get_File_Attributes_W (Wide_Path'Address);
+            Current : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
          begin
             if Current = Invalid_File_Attributes
               or else ((Current and Attribute_Encrypted) = 0 and then Encrypt_File_W (Wide_Path'Address) = 0)
@@ -420,7 +366,7 @@ package body Hostkit.Metadata_Copy is
          return False;
       end if;
       --  Last: a read-only entry's times could not be set after it.
-      if Set_File_Attributes_W (Wide_Path'Address, C_DWord (Item.Mode and Kept)) = 0 then
+      if Set_File_Attributes (Wide_Path'Address, C_DWord (Item.Mode and Kept)) = 0 then
          Hostkit.Errors.Set_Errno_From_Last_Error;
          return False;
       end if;
