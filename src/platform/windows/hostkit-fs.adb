@@ -2242,12 +2242,23 @@ package body Hostkit.Fs is
         Hostkit.Windows_Paths.From_UTF_8 (Mode & (if Text then "t" else "b")) & Wide_Character'Val (0);
       Stream    : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
       Error     : Integer := 2;
+
+      function Get_Last_Error return C_DWord
+        with Import, Convention => Stdcall, External_Name => "GetLastError";
    begin
       if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
          declare
             Wide_Path : aliased constant Wide_String := Wide (Path);
          begin
-            Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
+            --  A file just written may be held a moment by someone else -- a
+            --  virus scanner, the search indexer -- that did not share it
+            --  (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION); try again
+            --  briefly, as Durability.Sync_File does. Nothing else is retried.
+            for Attempt in 1 .. 10 loop
+               Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
+               exit when Stream /= Interfaces.C_Streams.NULL_Stream or else Get_Last_Error not in 32 | 33;
+               delay Duration (Attempt) * 0.02;
+            end loop;
             Error := GNAT.OS_Lib.Errno;
          end;
       end if;

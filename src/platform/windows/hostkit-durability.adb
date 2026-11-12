@@ -1,5 +1,7 @@
 with Hostkit.Errors;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
+with Interfaces;
 with Interfaces.C;
 
 package body Hostkit.Durability is
@@ -54,11 +56,13 @@ package body Hostkit.Durability is
       return False;
    end Committed;
 
-   --  The last error of an open just refused, put into errno as well.
+   --  The last error of an open just refused, put into errno as well. Read
+   --  first: setting errno may itself call into the system.
    function Refusal return C_DWord is
+      Error : constant C_DWord := Get_Last_Error;
    begin
-      Hostkit.Errors.Set_Errno_From_Last_Error;
-      return Get_Last_Error;
+      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
+      return Error;
    end Refusal;
 
    function close (FD : C_Int) return C_Int
