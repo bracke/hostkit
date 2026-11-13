@@ -32,6 +32,14 @@ package body Hostkit.Watch is
      16#0001# or 16#0002# or 16#0004# or 16#0008#
      or 16#0010# or 16#0020# or 16#0040#;
 
+   --  NOTE_DELETE, NOTE_RENAME and NOTE_REVOKE on the directory itself -- not on
+   --  an entry in it, which is NOTE_WRITE -- mean it was deleted, moved away from
+   --  the path, or its volume went. The open descriptor still names the old
+   --  vnode, so nothing more about the path will arrive: the watch is released,
+   --  and the next Watch_Path on the same path, a folder made again there
+   --  included, arms a fresh one.
+   Gone_Mask : constant Interfaces.C.unsigned := 16#0001# or 16#0020# or 16#0040#;
+
    type Kevent_Record is record
       Ident  : Interfaces.C.unsigned_long := 0;
       Filter : Interfaces.C.short := 0;
@@ -167,6 +175,7 @@ package body Hostkit.Watch is
       Zero    : aliased Timespec := (0, 0);
       Count   : Interfaces.C.int;
       Changed : Boolean := False;
+      Gone    : Boolean := False;
    begin
       if State.Handle < 0 then
          return False;
@@ -183,7 +192,16 @@ package body Hostkit.Watch is
          exit when Count <= 0;
          Changed := True;
          State.Events := State.Events + 1;
+
+         if (Event.Fflags and Gone_Mask) /= 0 then
+            Gone := True;
+            exit;
+         end if;
       end loop;
+
+      if Gone then
+         Release (State);
+      end if;
 
       return Changed;
 

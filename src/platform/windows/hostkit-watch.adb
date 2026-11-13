@@ -8,6 +8,7 @@ package body Hostkit.Watch is
 
    use Ada.Strings.Unbounded;
    use Hostkit.Win32;
+   use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
    use type System.Address;
 
@@ -28,6 +29,12 @@ package body Hostkit.Watch is
      or 16#0000_0008# or 16#0000_0010#;
 
    Wait_Object_0 : constant Interfaces.C.unsigned_long := 0;
+   Wait_Failed   : constant Interfaces.C.unsigned_long := 16#FFFF_FFFF#;
+
+   --  INVALID_FILE_ATTRIBUTES: what GetFileAttributesW answers for a path that
+   --  names nothing -- or a folder deleted while something still holds it open,
+   --  which Windows keeps, unreachable, until the last handle closes.
+   Invalid_File_Attributes : constant DWORD := 16#FFFF_FFFF#;
 
    function Find_First_Change_Notification
      (Path_Name    : System.Address;
@@ -68,6 +75,17 @@ package body Hostkit.Watch is
    begin
       return Convert (Address);
    end To_Value;
+
+   --  Whether Path still names a folder.
+   function Is_Still_A_Folder (Path : String) return Boolean;
+
+   function Is_Still_A_Folder (Path : String) return Boolean is
+      Wide_Path  : aliased constant Wide_String := Hostkit.Windows_Paths.Native (Path);
+      Attributes : constant DWORD := Get_File_Attributes (Wide_Path'Address);
+   begin
+      return Attributes /= Invalid_File_Attributes
+        and then (Attributes and File_Attribute_Directory) /= 0;
+   end Is_Still_A_Folder;
 
    procedure Release (State : in out Watch_State) is
    begin
@@ -129,6 +147,7 @@ package body Hostkit.Watch is
    function Poll (State : in out Watch_State) return Boolean is
       Handle  : System.Address;
       Changed : Boolean := False;
+      Gone    : Boolean := False;
       Status  : Interfaces.C.unsigned_long;
    begin
       if State.Handle = Invalid_Handle then
@@ -141,20 +160,36 @@ package body Hostkit.Watch is
       --  changed, and rearming with FindNextChangeNotification resumes watching.
       loop
          Status := Wait_For_Single_Object (Handle, 0);
+
+         if Status = Wait_Failed then
+            Gone := True;
+            exit;
+         end if;
+
          exit when Status /= Wait_Object_0;
 
          Changed := True;
          State.Events := State.Events + 1;
 
-         --  Rearm, or the handle stays signalled and this spins.
-         declare
-            Ignored : constant Interfaces.C.int :=
-              Find_Next_Change_Notification (Handle);
-            pragma Unreferenced (Ignored);
-         begin
-            null;
-         end;
+         --  Rearm, or the handle stays signalled and this spins. A handle that
+         --  cannot be rearmed will not be signalled again: its folder is gone.
+         if Find_Next_Change_Notification (Handle) = 0 then
+            Gone := True;
+            exit;
+         end if;
       end loop;
+
+      --  The folder itself being deleted or renamed signals the handle like any
+      --  other change, and the handle stays usable -- it holds the folder,
+      --  deleted but kept until the handle closes -- while the path names
+      --  nothing. So after a change, and only then, the path is asked whether
+      --  it is still a folder; a watch on one that is gone is released, which
+      --  also lets go of the folder, and the next Watch_Path on the same path,
+      --  a folder made again there included, arms a fresh one.
+      if Gone or else (Changed and then not Is_Still_A_Folder (To_String (State.Path))) then
+         Release (State);
+         return True;
+      end if;
 
       return Changed;
 

@@ -688,6 +688,10 @@ package body Hostkit_Suite is
 
    procedure Test_The_Watch_Notices_Changes (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
+   --  A watch whose folder is deleted lets go of it, so that watching the same
+   --  path again arms a fresh watch rather than keeping the dead one.
+   procedure Test_A_Watch_Lets_Go_Of_A_Deleted_Folder (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
    type Hostkit_Test_Case is new AUnit.Test_Cases.Test_Case with null record;
 
    overriding function Name (T : Hostkit_Test_Case) return AUnit.Message_String;
@@ -1030,6 +1034,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_The_Watch_Notices_Changes'Access,
          "watch : the host's notification facility notices creations and deletions");
+      Register_Routine
+        (T, Test_A_Watch_Lets_Go_Of_A_Deleted_Folder'Access,
+         "watch : a watch lets go of a deleted folder and the path can be watched again");
       Register_Routine
         (T, Test_The_Null_Device_Reads_As_Nothing'Access,
          "fs : the null device reads as nothing and takes what is written");

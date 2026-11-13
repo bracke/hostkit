@@ -34,6 +34,7 @@ package body Hostkit.Spawn is
    E_Isdir   : constant := 21;
    E_Noexec  : constant := 8;
    E_Perm    : constant := 1;
+   E_Intr    : constant := 4;
    E_Notdir  : constant := 20;
    --  ELOOP and ENAMETOOLONG are 62 and 63 here, 40 and 36 on Linux.
    E_Loop    : constant := 62;
@@ -59,6 +60,8 @@ package body Hostkit.Spawn is
      with Import => True, Convention => C, External_Name => "_exit";
    function Waitpid (Pid : C_Int; Status : System.Address; Options : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "waitpid";
+   function Kill (Pid : C_Int; Signal : C_Int) return C_Int
+     with Import => True, Convention => C, External_Name => "kill";
    function C_Write (Fd : C_Int; Buffer : System.Address; Count : C_Long) return C_Long
      with Import => True, Convention => C, External_Name => "write";
    function C_Read (Fd : C_Int; Buffer : System.Address; Count : C_Long) return C_Long
@@ -113,6 +116,29 @@ package body Hostkit.Spawn is
      with Import => True, Convention => C, External_Name => "_NSGetEnviron";
 
    SIG_DFL : constant System.Address := System.Null_Address;
+
+   --  SIGKILL is 9 on every host this body is built for.
+   SIGKILL : constant C_Int := 9;
+
+   --  waitpid, again for as long as a signal interrupts it. A signal that arrives
+   --  while the caller blocks says nothing about the child, and answering it with
+   --  "no such child" would lose a status the kernel is still holding.
+   function Waitpid_Retrying (Pid : C_Int; Status : System.Address; Options : C_Int) return C_Int;
+
+   ----------------------
+   -- Waitpid_Retrying --
+   ----------------------
+
+   function Waitpid_Retrying (Pid : C_Int; Status : System.Address; Options : C_Int) return C_Int is
+      Collected : C_Int;
+   begin
+      loop
+         Collected := Waitpid (Pid, Status, Options);
+         exit when Collected >= 0 or else Errno /= E_Intr;
+      end loop;
+
+      return Collected;
+   end Waitpid_Retrying;
 
    function To_Native (Item : Hostkit.Descriptors.Descriptor) return C_Int;
 
@@ -254,6 +280,13 @@ package body Hostkit.Spawn is
       Program_C : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String (Program);
 
+      --  The working directory, made a C string before the fork with everything
+      --  else the child needs. Between fork and exec only async-signal-safe calls
+      --  are allowed: another thread may have held the allocator's lock at the
+      --  moment of the fork, and a child that allocates would then wait on it for
+      --  ever.
+      Dir_C     : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
+
       Env_Count : constant Natural := Natural (With_Options.Environment.Length);
       Envp      : C_String_Array (0 .. Env_Count);
 
@@ -285,6 +318,10 @@ package body Hostkit.Spawn is
          if Program_C /= Interfaces.C.Strings.Null_Ptr then
             Interfaces.C.Strings.Free (Program_C);
          end if;
+
+         if Dir_C /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (Dir_C);
+         end if;
       end Free_Vectors;
 
       ----------------
@@ -293,7 +330,9 @@ package body Hostkit.Spawn is
 
       --  Everything between the fork and the exec. Nothing here may return: on
       --  any failure it reports the reason down the pipe and _exits, because a
-      --  return would leave two copies of the caller running.
+      --  return would leave two copies of the caller running. Nor may it
+      --  allocate, or use anything of the Ada run-time that might: every string
+      --  it needs was made before the fork.
       procedure Child_Side is
          Failure : aliased C_Int := 0;
          Ignored : C_Long;
@@ -397,19 +436,8 @@ package body Hostkit.Spawn is
             Fail_Now;
          end if;
 
-         if With_Options.Working_Directory /= Null_Unbounded_String then
-            declare
-               Dir : Interfaces.C.Strings.chars_ptr :=
-                 Interfaces.C.Strings.New_String
-                   (To_String (With_Options.Working_Directory));
-               Changed : constant C_Int := Chdir (Dir);
-            begin
-               Interfaces.C.Strings.Free (Dir);
-
-               if Changed /= 0 then
-                  Fail_Now;
-               end if;
-            end;
+         if Dir_C /= Interfaces.C.Strings.Null_Ptr and then Chdir (Dir_C) /= 0 then
+            Fail_Now;
          end if;
 
          --  Signal dispositions back to the host default, and the mask with
@@ -482,6 +510,10 @@ package body Hostkit.Spawn is
       end loop;
       Envp (Env_Count) := Interfaces.C.Strings.Null_Ptr;
 
+      if With_Options.Working_Directory /= Null_Unbounded_String then
+         Dir_C := Interfaces.C.Strings.New_String (To_String (With_Options.Working_Directory));
+      end if;
+
       Child := Fork;
 
       if Child < 0 then
@@ -526,27 +558,39 @@ package body Hostkit.Spawn is
       end;
 
       --  Did it exec, or did it fail? End-of-file means the pipe closed
-      --  untouched, which only an exec does.
+      --  untouched, which only an exec does. A read a signal interrupted has not
+      --  heard yet, so it is asked again; one that failed for any other reason
+      --  cannot say the exec succeeded, so it is not taken to.
       declare
          Reported : aliased C_Int := 0;
-         Got      : constant C_Long :=
-           C_Read (To_Native (Report.Read_End),
-                   Reported'Address,
-                   C_Long (C_Int'Size / 8));
+         Got      : C_Long;
       begin
+         loop
+            Got := C_Read (To_Native (Report.Read_End),
+                           Reported'Address,
+                           C_Long (C_Int'Size / 8));
+            exit when Got >= 0 or else Errno /= E_Intr;
+         end loop;
+
          Hostkit.Descriptors.Close (Report.Read_End);
 
-         if Got > 0 then
-            --  It failed. Reap the corpse so it does not become a zombie, then
-            --  report why in the caller's terms.
+         if Got /= 0 then
+            --  It failed, or there is no telling whether it did. Reap the child
+            --  so it does not become a zombie -- after stopping it, when it may
+            --  have exec'd after all and be running a program nobody tracks --
+            --  then report why in the caller's terms.
             declare
                Ignored : C_Int;
                Discard : aliased C_Int := 0;
             begin
-               Ignored := Waitpid (Child, Discard'Address, 0);
+               if Got < 0 then
+                  Ignored := Kill (Child, SIGKILL);
+               end if;
+
+               Ignored := Waitpid_Retrying (Child, Discard'Address, 0);
             end;
 
-            Result := Outcome_For_Errno (Integer (Reported));
+            Result := (if Got > 0 then Outcome_For_Errno (Integer (Reported)) else Spawn_Failed);
             Item := Invalid_Process;
          else
             Item.Id := Interfaces.Integer_64 (Child);
@@ -582,7 +626,7 @@ package body Hostkit.Spawn is
          return False;
       end if;
 
-      Collected := Waitpid (C_Int (Item.Id), Raw'Address, Options_C);
+      Collected := Waitpid_Retrying (C_Int (Item.Id), Raw'Address, Options_C);
 
       if Collected = C_Int (Item.Id) then
          Decode_Status (Raw, Result);
@@ -595,8 +639,8 @@ package body Hostkit.Spawn is
          return True;
       end if;
 
-      --  Negative: no such child. Either it never existed or something else
-      --  reaped it -- see the note about Hostkit.Process.Launch in the spec.
+      --  Negative: no such child. Either it never existed or something outside
+      --  this crate reaped it (Hostkit.Process.Launch collects only its own).
       Result.State := Wait_Lost;
       return True;
    end Wait;
@@ -622,7 +666,7 @@ package body Hostkit.Spawn is
                  Signal_Known       => False,
                  Raw_Signal_Number  => 0);
 
-      Collected := Waitpid (-1, Raw'Address, Options_C);
+      Collected := Waitpid_Retrying (-1, Raw'Address, Options_C);
 
       if Collected > 0 then
          Which.Id := Interfaces.Integer_64 (Collected);

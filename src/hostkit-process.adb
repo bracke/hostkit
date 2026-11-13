@@ -26,7 +26,9 @@ package body Hostkit.Process is
    --  application from exiting -- the environment task waits for library-level tasks
    --  to finish -- so quitting while a launched editor is still open would hang on
    --  quit, which is the bug this whole design exists to avoid. It collects only
-   --  children that have *already* finished, which returns at once.
+   --  children that have *already* finished, which returns at once -- and only the
+   --  ones Launch and Open_Native started, so a child that Hostkit.Spawn or
+   --  Run_Captured is waiting for keeps its exit status.
    --
    --  The terminate alternative is what makes that a guarantee: when no one can call
    --  Note_Launch again, the task ends and the program is free to exit.
@@ -96,6 +98,9 @@ package body Hostkit.Process is
          return False;
       end if;
 
+      --  Noted before the reaper is woken, so it collects this one -- and only the
+      --  ones noted this way, never a child Hostkit.Spawn or Run_Captured waits for.
+      Hostkit.Native.Note_Child (GNAT.OS_Lib.Pid_To_Integer (Started));
       Reaper.Note_Launch;
       return True;
    exception

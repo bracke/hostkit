@@ -1,6 +1,12 @@
 package body Hostkit.Native is
 
    --  An unknown host: nothing is claimed, and nothing is pretended.
+   procedure Note_Child (Process_Id : Integer) is
+      pragma Unreferenced (Process_Id);
+   begin
+      null;
+   end Note_Child;
+
    procedure Reap_Finished_Children is
    begin
       null;

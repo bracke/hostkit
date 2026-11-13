@@ -8,6 +8,7 @@ package body Hostkit.Watch is
    use type Interfaces.C.long;
    use type Interfaces.C.unsigned;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Unsigned_32;
 
    --  IN_NONBLOCK, so a drain never stalls the render loop, and IN_CLOEXEC so a
    --  spawned child does not inherit the descriptor.
@@ -22,6 +23,25 @@ package body Hostkit.Watch is
      16#00000002# or 16#00000004# or 16#00000008# or 16#00000040# or 16#00000080#
      or 16#00000100# or 16#00000200# or 16#00000400# or 16#00000800#
      or 16#00002000# or 16#00004000# or 16#01000000#;
+
+   --  IN_DELETE_SELF, IN_MOVE_SELF, IN_UNMOUNT and IN_IGNORED: the watched
+   --  directory itself was deleted, moved away from the path, or unmounted, and
+   --  the kernel has dropped -- or is about to drop -- the watch. Nothing more
+   --  will arrive on it, so the watch is released and the next Watch_Path on
+   --  the same path, a folder made again there included, arms a fresh one.
+   Gone_Mask : constant Interfaces.Unsigned_32 :=
+     16#0000_0400# or 16#0000_0800# or 16#0000_2000# or 16#0000_8000#;
+
+   --  What a read of the descriptor delivers: struct inotify_event records end
+   --  to end, each a fixed part of four 32-bit words -- wd, mask, cookie and
+   --  len -- and then len bytes of name, padded so the next record is aligned.
+   --  Read as words, so the fixed part of each record is indexed directly.
+   Header_Bytes : constant := 16;
+   Mask_Word    : constant := 1;
+   Length_Word  : constant := 3;
+
+   type Event_Words is array (Natural range 0 .. 1_023) of Interfaces.Unsigned_32
+     with Convention => C;
 
    function Inotify_Init1
      (Flags : Interfaces.C.int) return Interfaces.C.int
@@ -115,9 +135,10 @@ package body Hostkit.Watch is
    end Watch_Path;
 
    function Poll (State : in out Watch_State) return Boolean is
-      Buffer  : Interfaces.C.char_array (0 .. 4_095);
+      Buffer  : aliased Event_Words := [others => 0];
       Count   : Interfaces.C.long;
       Changed : Boolean := False;
+      Gone    : Boolean := False;
    begin
       if State.Handle < 0 then
          return False;
@@ -130,11 +151,33 @@ package body Hostkit.Watch is
            C_Read
              (Interfaces.C.int (State.Handle),
               Buffer'Address,
-              Buffer'Length);
+              Interfaces.C.size_t (Event_Words'Size / 8));
          exit when Count <= 0;
          Changed := True;
          State.Events := State.Events + 1;
+
+         --  Every record is looked at, not only counted: one of them may say
+         --  the directory itself is gone, and a watch that went on looking
+         --  active after that would never report anything again.
+         declare
+            Length : constant Natural := Natural (Count);
+            Offset : Natural := 0;
+         begin
+            while Offset + Header_Bytes <= Length loop
+               if (Buffer (Offset / 4 + Mask_Word) and Gone_Mask) /= 0 then
+                  Gone := True;
+               end if;
+
+               Offset := Offset + Header_Bytes + Natural (Buffer (Offset / 4 + Length_Word));
+            end loop;
+         end;
+
+         exit when Gone;
       end loop;
+
+      if Gone then
+         Release (State);
+      end if;
 
       return Changed;
 

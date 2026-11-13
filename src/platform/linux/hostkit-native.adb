@@ -11,6 +11,8 @@ with Interfaces.C;
 with System;
 with System.Storage_Elements;
 
+with Hostkit.Posix;
+
 package body Hostkit.Native is
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
@@ -23,9 +25,9 @@ package body Hostkit.Native is
 
    WNOHANG : constant Interfaces.C.int := 1;
 
-   --  waitpid (-1, NULL, WNOHANG): any child, and do not block. It returns the pid of
-   --  a child it collected, 0 when children exist but none have finished, and -1 when
-   --  there are none at all -- so this drains what is ready and stops.
+   --  waitpid (pid, status, WNOHANG): that child, and do not block. It returns the
+   --  pid once the child is collected, 0 while it is still running, and -1 when there
+   --  is no such child.
    function Waitpid
      (Pid     : Interfaces.C.int;
       Status  : System.Address;
@@ -33,16 +35,17 @@ package body Hostkit.Native is
       return Interfaces.C.int
      with Import => True, Convention => C, External_Name => "waitpid";
 
-   procedure Reap_Finished_Children is
-      Collected : Interfaces.C.int;
+   --  Only the children noted as started detached: a waitpid on any child would also
+   --  collect one that Hostkit.Spawn or Run_Captured is waiting for, which would then
+   --  find its status gone.
+   procedure Note_Child (Process_Id : Integer) is
    begin
-      loop
-         Collected := Waitpid (-1, System.Null_Address, WNOHANG);
-         exit when Collected <= 0;
-      end loop;
-   exception
-      when others =>
-         null;
+      Hostkit.Posix.Note_Child (Process_Id);
+   end Note_Child;
+
+   procedure Reap_Finished_Children is
+   begin
+      Hostkit.Posix.Reap_Noted_Children;
    end Reap_Finished_Children;
 
    --  sh takes "-c" and the command as ordinary vector elements, and nothing rewrites
@@ -817,6 +820,7 @@ package body Hostkit.Native is
          return Hostkit.Process.Open_Failed;
       end if;
 
+      Note_Child (GNAT.OS_Lib.Pid_To_Integer (Started));
       Reap_Finished_Children;
       return Hostkit.Process.Opened;
    exception

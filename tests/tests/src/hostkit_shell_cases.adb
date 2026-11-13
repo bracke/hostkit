@@ -147,6 +147,13 @@ package body Hostkit_Shell_Cases is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A detached launch collects only its own children. Launch's reaper once
+   --  waited for any child, so a spawned child that finished beside a launched
+   --  one lost its status to it, and Wait answered Wait_Lost.
+   procedure Test_A_Launch_Leaves_A_Spawned_Childs_Status_Alone
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_A_Missing_Program_Is_Told_Apart_From_A_Failing_One
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -612,6 +619,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_An_Exit_Status_Comes_Back'Access,
          "spawn : an exit status comes back intact");
+      Register_Routine
+        (T, Test_A_Launch_Leaves_A_Spawned_Childs_Status_Alone'Access,
+         "spawn : a launch leaves a spawned child's status alone");
       Register_Routine
         (T, Test_A_Missing_Program_Is_Told_Apart_From_A_Failing_One'Access,
          "spawn : a missing program is told apart from one that ran and failed");

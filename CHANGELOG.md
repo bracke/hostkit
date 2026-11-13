@@ -255,6 +255,28 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **`Process.Launch` no longer takes a spawned child's exit status (POSIX).**
+  Its reaper -- and `Open_Native`'s -- collected with `waitpid` on any child,
+  so a child that `Spawn` or `Run_Captured` was tracking could be collected
+  first, and `Spawn.Wait` then said `Wait_Lost` (`Run_Captured`, exit -1).
+  Launch and Open_Native now note the children they start, and the reaper
+  collects only those, by process id. Mixing `Launch` with `Spawn` is safe.
+- **`Spawn.Start` and `Spawn.Wait` ride out a signal (Linux, macOS).** A read
+  of the exec-status pipe that a signal interrupted was taken for "the exec
+  succeeded", and any other failed read too; it is now asked again on
+  `EINTR`, and any other failure reports `Spawn_Failed` with the child
+  stopped and collected. `Wait` and `Wait_Any` retry `waitpid` on `EINTR`
+  rather than answering `Wait_Lost`. The child's working directory is made a
+  C string before the fork, so nothing between fork and exec allocates.
+- **A watch lets go of a deleted folder.** On every host a watch whose folder
+  was deleted, moved away or unmounted stayed active, heard nothing more, and
+  `Watch_Path` on the same path did nothing because it looked like a repeat.
+  `Poll` now notices -- Linux by parsing the inotify records
+  (`IN_DELETE_SELF`, `IN_MOVE_SELF`, `IN_UNMOUNT`, `IN_IGNORED`), macOS by
+  `NOTE_DELETE`/`NOTE_RENAME`/`NOTE_REVOKE`, Windows by a handle that cannot
+  be rearmed or a path that is no longer a folder after a change -- reports
+  it as a change, and releases the watch, so `Is_Active` is False and the
+  path can be watched again.
 - **Windows: `Spawn.Start` with `Replace_Environment` and an empty
   `Environment` gives the child an empty environment**, as Linux and macOS
   do. It passed no block at all, which `CreateProcessW` reads as "inherit",

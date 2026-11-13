@@ -40,6 +40,12 @@ package Hostkit.Watch is
 
    --  Consume any pending change notifications without blocking.
    --
+   --  When the watched directory itself goes -- deleted, moved away from the
+   --  path, its volume unmounted -- that is reported as a change, and the watch
+   --  is released: nothing more would ever arrive on it. Is_Active then answers
+   --  False, and a later Watch_Path on the same path, a directory made there
+   --  again included, arms a fresh watch rather than being taken for a repeat.
+   --
    --  @param State The watch.
    --  @return True when the watched directory changed since the last call.
    function Poll (State : in out Watch_State) return Boolean;

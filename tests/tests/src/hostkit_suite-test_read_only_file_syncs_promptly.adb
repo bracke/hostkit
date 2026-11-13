@@ -43,12 +43,27 @@ begin
    Assert (Hostkit_Test_Native.Is_Read_Only (Path), "the fixture is read-only before the sync");
    --  The monotonic clock: a wall clock stepped by the host's time service
    --  in the middle would make the bound say nothing.
+   --
+   --  Generous, because a Windows runner's virus scanner holds a file just
+   --  written for as long as it likes, and a sync that waits for that is right
+   --  to: half a second failed runs that had nothing wrong with them. What the
+   --  bound still catches is a sync that hangs on a read-only file rather than
+   --  looking at its attribute.
    Started := Ada.Real_Time.Clock;
    Result := Hostkit.Durability.Sync_File (Path);
    Assert
-     (Ada.Real_Time.Clock - Started < Ada.Real_Time.Milliseconds (500),
+     (Ada.Real_Time.Clock - Started < Ada.Real_Time.Milliseconds (5_000),
       "a read-only file syncs without waiting out retries");
    Assert (Result /= Hostkit.Durability.Failed, "and it syncs");
+   --  The scanner's hold is on a file just written; the second sync of the
+   --  same file meets none, so here the bound is tight enough to catch the
+   --  old 1.1 s of retries.
+   Started := Ada.Real_Time.Clock;
+   Result := Hostkit.Durability.Sync_File (Path);
+   Assert
+     (Ada.Real_Time.Clock - Started < Ada.Real_Time.Milliseconds (800),
+      "a second sync of the read-only file does not wait out retries either");
+   Assert (Result /= Hostkit.Durability.Failed, "and it syncs again");
    --  Windows drops the attribute to flush and must put it back: a copy
    --  made read-only that a sync left writable has lost what it was given.
    Assert (Hostkit_Test_Native.Is_Read_Only (Path), "the file is still read-only after the sync");

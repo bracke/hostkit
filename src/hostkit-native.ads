@@ -5,9 +5,17 @@ with Hostkit.Process;
 
 private package Hostkit.Native is
 
-   --  Collect any children that have already finished, and return at once whether or
-   --  not there are any. It must never wait for one that is still running -- see the
-   --  note on exiting in Hostkit.Process.
+   --  Remember a child started detached (Hostkit.Process.Launch, Open_Native), so that
+   --  Reap_Finished_Children collects it once it has finished.
+   --
+   --  A no-op on Windows, which leaves nothing behind to collect.
+   procedure Note_Child (Process_Id : Integer);
+
+   --  Collect the noted children that have already finished, and return at once
+   --  whether or not there are any. It must never wait for one that is still running
+   --  -- see the note on exiting in Hostkit.Process -- and never touches a child it
+   --  was not told about: Hostkit.Spawn and Run_Captured wait for their own, and
+   --  collecting one of those would lose its exit status.
    --
    --  A no-op on Windows, which leaves nothing behind to collect.
    procedure Reap_Finished_Children;

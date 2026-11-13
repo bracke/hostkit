@@ -41,12 +41,13 @@ with Hostkit.Signals;
 --  between the fork and the exec, and defaults to True because the other choice
 --  is almost always a bug.
 --
---  One interaction to know about. Hostkit.Process.Launch reaps finished children
---  indiscriminately -- waitpid on any child -- because it has no other way to
---  avoid leaving zombies behind. If a consumer of this package also calls
---  Launch, that reaper can collect a child this package is tracking and Wait
---  will then report Wait_Lost for a process whose status is simply gone. A shell
---  should use this package for everything it starts, and not Launch.
+--  Mixing this package with Hostkit.Process.Launch is safe. Launch collects the
+--  children it started once they finish, so as not to leave zombies behind, but
+--  it waits only for those -- by process id, never for any child -- so it cannot
+--  take the status of a child this package is tracking, and Wait never reports
+--  Wait_Lost because of it. The reverse is still possible: Wait_Any asks about
+--  any child, so it can report one Launch started -- a handle this package never
+--  gave out, which a caller simply does not recognise.
 package Hostkit.Spawn is
 
    --  A process this package started.
@@ -296,8 +297,8 @@ package Hostkit.Spawn is
       Wait_Continued,
 
       --  It is gone and the host cannot say how -- most often because
-      --  something else reaped it. See the note about Hostkit.Process.Launch in
-      --  the header.
+      --  something outside this crate reaped it (Hostkit.Process.Launch
+      --  collects only its own children; see the header).
       Wait_Lost);
 
    --  What a wait found.
