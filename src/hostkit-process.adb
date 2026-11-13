@@ -10,7 +10,9 @@ with GNAT.OS_Lib;
 with Hostkit.Fs;
 with Hostkit.Host;
 with Hostkit.Native;
+with Hostkit.Path_Text;
 with Hostkit.Shell;
+with Hostkit.Spawn;
 with Hostkit.Windows_Command_Line;
 
 package body Hostkit.Process is
@@ -108,6 +110,47 @@ package body Hostkit.Process is
          if Args /= null then
             GNAT.OS_Lib.Free (Args);
          end if;
+         return False;
+   end Launch;
+
+   function Launch
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String)
+      return Boolean
+   is
+      use type Hostkit.Spawn.Spawn_Outcome;
+      Item    : Hostkit.Spawn.Process_Handle;
+      Outcome : Hostkit.Spawn.Spawn_Outcome;
+   begin
+      if Working_Directory = "" then
+         return Launch (Program, Arguments);
+      elsif Program = "" then
+         return False;
+      end if;
+
+      --  A program named by a relative path is found from here, not from
+      --  the directory the child moves to before it starts the program.
+      Outcome := Hostkit.Spawn.Start
+        ((if Hostkit.Path_Text.Root_Length (Program) = 0
+            and then (for some C of Program => C = '/' or else C = '\')
+          then Hostkit.Path_Text.Absolute (Program, Hostkit.Fs.Current_Directory)
+          else Program),
+         Arguments,
+         (Working_Directory => To_Unbounded_String (Working_Directory), others => <>),
+         Item);
+      if Outcome /= Hostkit.Spawn.Spawn_Ok then
+         return False;
+      end if;
+
+      --  Detached as Launch's children are: the reaper collects it, and the
+      --  handle (a process handle on Windows) is let go of now.
+      Hostkit.Native.Note_Child (Hostkit.Spawn.Process_Id (Item));
+      Hostkit.Spawn.Release (Item);
+      Reaper.Note_Launch;
+      return True;
+   exception
+      when others =>
          return False;
    end Launch;
 

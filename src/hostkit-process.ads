@@ -48,6 +48,20 @@ package Hostkit.Process is
       Arguments : String_Vectors.Vector)
       return Boolean;
 
+   --  Launch, with the program started in Working_Directory: what a desktop
+   --  entry's Path= asks for. The directory is set in the child, so this
+   --  process's own stays where it is. An empty Working_Directory is Launch.
+   --
+   --  @param Program The program: a path, or a name to find on PATH.
+   --  @param Arguments Its arguments, not including the program name itself.
+   --  @param Working_Directory Where the program starts.
+   --  @return Whether it started.
+   function Launch
+     (Program           : String;
+      Arguments         : String_Vectors.Vector;
+      Working_Directory : String)
+      return Boolean;
+
    --  Become this program: replace the running image, keeping the process.
    --
    --  What a shell's `exec` does, and the reason it is a different thing from

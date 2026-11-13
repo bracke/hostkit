@@ -19,7 +19,8 @@ project Hostkit_Tests is
    --  and waited for input until CI gave up.
    for Main use
      ("hostkit_tests.adb", "noop.adb", "failing.adb", "sleeper.adb", "echoer.adb",
-      "env_reader.adb", "terminal_reporter.adb", "busy_watcher.adb", "leaver.adb", "watched.adb", "orphaner.adb");
+      "env_reader.adb", "terminal_reporter.adb", "busy_watcher.adb", "leaver.adb", "watched.adb", "orphaner.adb",
+      "where_started.adb");
 
    package Compiler is
       for Default_Switches ("Ada") use

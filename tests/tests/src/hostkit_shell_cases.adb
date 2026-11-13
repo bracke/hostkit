@@ -154,6 +154,12 @@ package body Hostkit_Shell_Cases is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A launch with a working directory starts the program there (a desktop
+   --  entry's Path=), and this process stays where it is.
+   procedure Test_A_Launch_Starts_In_Its_Working_Directory
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_A_Missing_Program_Is_Told_Apart_From_A_Failing_One
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -622,6 +628,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_A_Launch_Leaves_A_Spawned_Childs_Status_Alone'Access,
          "spawn : a launch leaves a spawned child's status alone");
+      Register_Routine
+        (T, Test_A_Launch_Starts_In_Its_Working_Directory'Access,
+         "spawn : a launch starts in its working directory");
       Register_Routine
         (T, Test_A_Missing_Program_Is_Told_Apart_From_A_Failing_One'Access,
          "spawn : a missing program is told apart from one that ran and failed");
