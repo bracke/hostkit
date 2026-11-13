@@ -38,16 +38,6 @@ package body Hostkit.Fs is
       return C_DWord
      with Import => True, Convention => Stdcall, External_Name => "GetTempPathW";
 
-   --  WIN32_FIND_DATAW, of which only the reparse tag (dwReserved0, at byte 36
-   --  for a reparse point) is read.
-   type Find_Data is array (1 .. 592) of Interfaces.Unsigned_8 with Alignment => 8;
-
-   function Find_First_File
-     (Name : System.Address;
-      Data : access Find_Data)
-      return System.Address
-     with Import => True, Convention => Stdcall, External_Name => "FindFirstFileW";
-
    function Create_Symbolic_Link
      (Link   : System.Address;
       Target : System.Address;
@@ -105,13 +95,12 @@ package body Hostkit.Fs is
    --  placeholders, deduplicated files and app-execution aliases are reparse
    --  points too, but ordinary files and folders to the user.
    function Is_Link (Path : String) return Boolean is
-      use type Interfaces.Unsigned_32;
       use type System.Address;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
-      Data       : aliased Find_Data := [others => 0];
+      --  Only the reparse tag of what FindFirstFileW finds is read.
+      Data       : aliased Find_Data;
       Handle     : System.Address;
-      Tag        : Interfaces.Unsigned_32;
    begin
       if Attributes = Invalid_File_Attributes
         or else (Attributes and File_Attribute_Reparse_Point) = 0
@@ -127,11 +116,7 @@ package body Hostkit.Fs is
       if Find_Close (Handle) = 0 then
          null;
       end if;
-      Tag := Interfaces.Unsigned_32 (Data (37))
-        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (38)), 8)
-        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (39)), 16)
-        or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Data (40)), 24);
-      return Is_Link_Tag (Tag);
+      return Is_Link_Tag (Data.Reparse_Tag);
    exception
       when others =>
          return False;
@@ -144,22 +129,6 @@ package body Hostkit.Fs is
    Share_Everything            : constant C_DWord := 7;
    Open_Existing_Only          : constant C_DWord := 3;
    Backup_Semantics_Flag       : constant C_DWord := 16#0200_0000#;
-
-   --  WIN32_FILE_ATTRIBUTE_DATA: FILETIMEs are two DWORDs, low first.
-   type Attribute_Data is record
-      Attributes                : C_DWord := 0;
-      Creation_Low, Creation_High : C_DWord := 0;
-      Access_Low, Access_High   : C_DWord := 0;
-      Write_Low, Write_High     : C_DWord := 0;
-      Size_High, Size_Low       : C_DWord := 0;
-   end record with Convention => C;
-
-   function Get_File_Attributes_Ex
-     (Name  : System.Address;
-      Level : Interfaces.C.int;
-      Data  : access Attribute_Data)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "GetFileAttributesExW";
 
    --  A name the Win32 layer may turn into a device: the device namespace
    --  (\\.\NUL, \\.\pipe\...), or a last part DOS reserves -- NUL, CON,
@@ -303,7 +272,7 @@ package body Hostkit.Fs is
       end if;
       return
         (Attributes => Data.Attributes,
-         Written    => Joined (Data.Write_High, Data.Write_Low),
+         Written    => Joined (Data.Modified_Time.High, Data.Modified_Time.Low),
          Size       => Joined (Data.Size_High, Data.Size_Low));
    end Facts_Of;
 
@@ -773,8 +742,6 @@ package body Hostkit.Fs is
       Flag_Backup_Semantics   : constant C_DWord := 16#0200_0000#;
       Flag_Open_Reparse_Point : constant C_DWord := 16#0020_0000#;
       Share_All               : constant C_DWord := 7;
-      Tag_Symlink             : constant C_DWord := 16#A000_000C#;
-      Tag_Mount_Point         : constant C_DWord := 16#A000_0003#;
       --  ERROR_NOT_A_REPARSE_POINT, ERROR_INVALID_REPARSE_DATA: no link to
       --  read here, which errno says as EINVAL.
       Error_Not_A_Reparse_Point  : constant Interfaces.Unsigned_32 := 4390;
@@ -843,14 +810,15 @@ package body Hostkit.Fs is
       end if;
 
       declare
-         Tag           : constant C_DWord := U32 (0);
+         use type Interfaces.Unsigned_32;
+         Tag           : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (U32 (0));
          Path_Buf_Base : Natural;
          Name_Off      : Natural;
          Name_Len      : Natural;   --  in bytes
       begin
-         if Tag = Tag_Symlink then
+         if Tag = Io_Reparse_Tag_Symlink then
             Path_Buf_Base := 20;
-         elsif Tag = Tag_Mount_Point then
+         elsif Tag = Io_Reparse_Tag_Mount_Point then
             Path_Buf_Base := 16;
          else
             --  A cloud placeholder, a deduplicated file: no link.

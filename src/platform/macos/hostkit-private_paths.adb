@@ -2,6 +2,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Posix;
 
 package body Hostkit.Private_Paths is
    use type Interfaces.C.int;
@@ -90,14 +91,7 @@ package body Hostkit.Private_Paths is
      with Import, Convention => C, External_Name => "acl_set_fd_np";
    function C_Acl_Free (Acl : System.Address) return C_Int
      with Import, Convention => C, External_Name => "acl_free";
-   function Errno_Location return System.Address
-     with Import, Convention => C, External_Name => "__error";
-
-   function Errno return C_Int is
-      Value : C_Int with Import, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    function Is_Owned_Kind (Fd : C_Int; Kind : C_U16) return Boolean is
       Info : aliased Stat_Record;

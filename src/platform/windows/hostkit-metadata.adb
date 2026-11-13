@@ -109,16 +109,6 @@ package body Hostkit.Metadata is
      array (1 .. 3) of aliased Explicit_Access_Record
      with Convention => C;
 
-   type Attribute_Data is record
-      Attributes     : C_DWord := 0;
-      Creation_Time  : Filetime;
-      Access_Time    : Filetime;
-      Modified_Time  : Filetime;
-      Size_High      : C_DWord := 0;
-      Size_Low       : C_DWord := 0;
-   end record
-     with Convention => C;
-
    type Identifier_Array is array (Natural range 0 .. 15) of Interfaces.Unsigned_8
      with Convention => C;
 
@@ -146,9 +136,6 @@ package body Hostkit.Metadata is
    pragma Compile_Time_Error
      (Explicit_Access_Record'Size /= 48 * 8,
       "Win32 EXPLICIT_ACCESS_A must be 48 bytes on x64");
-   pragma Compile_Time_Error
-     (Attribute_Data'Size /= 36 * 8,
-      "Win32 WIN32_FILE_ATTRIBUTE_DATA must be 36 bytes");
 
    function Get_Named_Security_Info
      (Object_Name : System.Address;
@@ -335,13 +322,6 @@ package body Hostkit.Metadata is
       Size       : access C_DWord) return C_Int
      with Import, Convention => Stdcall,
           External_Name => "CreateWellKnownSid";
-
-   function Get_File_Attributes_Ex
-     (Name  : System.Address;
-      Level : C_Int;
-      Data  : access Attribute_Data) return C_Int
-     with Import, Convention => Stdcall,
-          External_Name => "GetFileAttributesExW";
 
    function Get_Disk_Free_Space_Ex
      (Directory       : System.Address;

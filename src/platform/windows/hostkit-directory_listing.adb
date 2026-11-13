@@ -22,39 +22,8 @@ package body Hostkit.Directory_Listing is
 
    subtype C_DWord is Interfaces.C.unsigned_long;
 
-   type File_Time is record
-      Low  : C_DWord;
-      High : C_DWord;
-   end record with Convention => C;
-
-   type Wide_Name is array (1 .. 260) of Wide_Character with Convention => C;
-   type Short_Name is array (1 .. 14) of Wide_Character with Convention => C;
-
-   --  WIN32_FIND_DATAW; Reserved_0 is the reparse tag of a reparse point.
-   type Find_Data is record
-      Attributes     : C_DWord;
-      Creation_Time  : File_Time;
-      Access_Time    : File_Time;
-      Write_Time     : File_Time;
-      Size_High      : C_DWord;
-      Size_Low       : C_DWord;
-      Reserved_0     : C_DWord;
-      Reserved_1     : C_DWord;
-      File_Name      : Wide_Name;
-      Alternate_Name : Short_Name;
-   end record with Convention => C;
-
-   Attribute_Directory     : constant C_DWord := 16#10#;
-   Attribute_Reparse_Point : constant C_DWord := 16#400#;
-   Tag_Symlink             : constant C_DWord := 16#A000_000C#;
-   Tag_Mount_Point         : constant C_DWord := 16#A000_0003#;
-   Error_File_Not_Found    : constant C_DWord := 2;
-   Error_No_More_Files     : constant C_DWord := 18;
-
-   function Find_First_File (Name : System.Address; Data : access Find_Data) return System.Address
-     with Import, Convention => Stdcall, External_Name => "FindFirstFileW";
-   function Find_Next_File (Handle : System.Address; Data : access Find_Data) return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "FindNextFileW";
+   Error_File_Not_Found : constant C_DWord := 2;
+   Error_No_More_Files  : constant C_DWord := 18;
 
    function List (Path : String; Entries : out Entry_Vectors.Vector) return Boolean is
       Data    : aliased Find_Data;
@@ -79,10 +48,10 @@ package body Hostkit.Directory_Listing is
             declare
                Name : constant String := Hostkit.Windows_Paths.To_UTF_8 (Units);
                Kind : constant Entry_Kind :=
-                 (if (Data.Attributes and Attribute_Reparse_Point) /= 0
-                    and then Data.Reserved_0 in Tag_Symlink | Tag_Mount_Point
+                 (if (Data.Attributes and File_Attribute_Reparse_Point) /= 0
+                    and then Is_Link_Tag (Data.Reparse_Tag)
                   then Symbolic_Link
-                  elsif (Data.Attributes and Attribute_Directory) /= 0 then Directory
+                  elsif (Data.Attributes and File_Attribute_Directory) /= 0 then Directory
                   else Regular_File);
             begin
                if Name /= "." and then Name /= ".." then

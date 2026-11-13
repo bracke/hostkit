@@ -2,6 +2,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Posix;
 
 package body Hostkit.Lease_Files is
    use type Ada.Streams.Stream_Element_Offset;
@@ -76,14 +77,7 @@ package body Hostkit.Lease_Files is
      with Import, Convention => C, External_Name => "pwrite";
    function C_Geteuid return C_U32
      with Import, Convention => C, External_Name => "geteuid";
-   function Errno_Location return System.Address
-     with Import, Convention => C, External_Name => "__error";
-
-   function Errno return C_Int is
-      Value : C_Int with Import, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    procedure Reset (Item : out Lease) is
    begin

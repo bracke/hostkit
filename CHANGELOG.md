@@ -208,6 +208,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- **Linux and macOS share their identical bodies** from `src/platform/posix`
+  (clock, command line, environment, signals) and one errno binding
+  (private `Hostkit.Posix`); what differs between the two -- the errno
+  symbol and the signal numbers -- is in each host's private
+  `Hostkit.Posix_Abi`. The Windows bodies take `WIN32_FIND_DATAW`,
+  `WIN32_FILE_ATTRIBUTE_DATA`, `FindFirstFileW`/`FindNextFileW`,
+  `GetFileAttributesExW` and the link reparse tags from `Hostkit.Win32`
+  rather than each declaring its own. No behaviour changes.
 - **A Windows permission edit is an edit.** `Metadata.Set_Permissions` and a
   permission `Update_Entry_Metadata` used to replace the DACL with three
   protected ACEs, dropping SYSTEM's, the Administrators' and every inherited
@@ -247,6 +255,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **Windows: `Spawn.Start` with `Replace_Environment` and an empty
+  `Environment` gives the child an empty environment**, as Linux and macOS
+  do. It passed no block at all, which `CreateProcessW` reads as "inherit",
+  so the child got the parent's whole environment.
 - **A failed `Fs.Delete_Tree_No_Follow` keeps its errno (POSIX).** A folder
   the walk could not open was then asked for its statx through the -1
   descriptor, turning the open's `EACCES` into `EBADF`; each failing call's

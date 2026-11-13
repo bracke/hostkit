@@ -5,6 +5,8 @@ with Interfaces.C;
 
 with System;
 
+with Hostkit.Posix;
+
 package body Hostkit.Spawn is
 
    use Ada.Strings.Unbounded;
@@ -63,8 +65,7 @@ package body Hostkit.Spawn is
      with Import => True, Convention => C, External_Name => "read";
    function C_Signal (Sig : C_Int; Handler : System.Address) return System.Address
      with Import => True, Convention => C, External_Name => "signal";
-   function Errno_Location return System.Address
-     with Import => True, Convention => C, External_Name => "__error";
+   function Errno return C_Int renames Hostkit.Posix.Errno;
    function Getpgrp return C_Int
      with Import => True, Convention => C, External_Name => "getpgrp";
    function Setsid return C_Int
@@ -113,18 +114,7 @@ package body Hostkit.Spawn is
 
    SIG_DFL : constant System.Address := System.Null_Address;
 
-   function Errno return C_Int;
    function To_Native (Item : Hostkit.Descriptors.Descriptor) return C_Int;
-
-   -----------
-   -- Errno --
-   -----------
-
-   function Errno return C_Int is
-      Value : C_Int with Import => True, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
 
    ---------------
    -- To_Native --

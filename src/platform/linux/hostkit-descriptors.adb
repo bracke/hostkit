@@ -3,6 +3,8 @@ with Interfaces.C;
 
 with System;
 
+with Hostkit.Posix;
+
 package body Hostkit.Descriptors is
 
    use type Interfaces.C.int;
@@ -76,31 +78,13 @@ package body Hostkit.Descriptors is
    function C_Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "dup2";
 
-   --  errno is a macro over a per-thread location; __errno_location is the
-   --  function it expands to on glibc. Reading a global named "errno" would
-   --  link on some hosts and read the wrong thread's value on all of them.
-   function Errno_Location return System.Address
-     with Import => True, Convention => C, External_Name => "__errno_location";
-
-   function Errno return C_Int;
-   --  The current thread's errno.
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    function To_Descriptor (Fd : C_Int) return Descriptor
    is (if Fd < 0 then Invalid else Descriptor (Fd));
 
    function To_Fd (Item : Descriptor) return C_Int
    is (C_Int (Item));
-
-   -----------
-   -- Errno --
-   -----------
-
-   function Errno return C_Int is
-      Value : C_Int
-        with Import => True, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
 
    --------------
    -- Is_Valid --

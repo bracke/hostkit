@@ -132,6 +132,40 @@ private package Hostkit.Win32 is
    end record
      with Convention => C;
 
+   --  WIN32_FILE_ATTRIBUTE_DATA, as GetFileAttributesExW gives it.
+   type Attribute_Data is record
+      Attributes    : DWORD := 0;
+      Creation_Time : Filetime;
+      Access_Time   : Filetime;
+      Modified_Time : Filetime;
+      Size_High     : DWORD := 0;
+      Size_Low      : DWORD := 0;
+   end record
+     with Convention => C;
+
+   --  cFileName and cAlternateFileName of WIN32_FIND_DATAW: MAX_PATH and 14
+   --  UTF-16 units, NUL-terminated within.
+   type Find_Name is array (1 .. 260) of Wide_Character
+     with Convention => C;
+   type Find_Short_Name is array (1 .. 14) of Wide_Character
+     with Convention => C;
+
+   --  WIN32_FIND_DATAW. Reparse_Tag is dwReserved0, which holds the entry's
+   --  reparse tag when its attributes have File_Attribute_Reparse_Point.
+   type Find_Data is record
+      Attributes     : DWORD := 0;
+      Creation_Time  : Filetime;
+      Access_Time    : Filetime;
+      Write_Time     : Filetime;
+      Size_High      : DWORD := 0;
+      Size_Low       : DWORD := 0;
+      Reparse_Tag    : Interfaces.Unsigned_32 := 0;
+      Reserved_1     : DWORD := 0;
+      File_Name      : Find_Name := [others => Wide_Character'Val (0)];
+      Alternate_Name : Find_Short_Name := [others => Wide_Character'Val (0)];
+   end record
+     with Convention => C;
+
    --  Getting a layout wrong here does not fail loudly; it reads the wrong
    --  field and reports plausible nonsense. Pin the sizes, so the compiler
    --  catches any drift on any host.
@@ -143,6 +177,12 @@ private package Hostkit.Win32 is
    pragma Compile_Time_Error
      (Attribute_Tag_Info'Size /= 8 * 8,
       "Win32 FILE_ATTRIBUTE_TAG_INFO must be 8 bytes");
+   pragma Compile_Time_Error
+     (Attribute_Data'Size /= 36 * 8,
+      "Win32 WIN32_FILE_ATTRIBUTE_DATA must be 36 bytes");
+   pragma Compile_Time_Error
+     (Find_Data'Size /= 592 * 8,
+      "Win32 WIN32_FIND_DATAW must be 592 bytes");
 
    --  The calling thread's last error code.
    --
@@ -263,6 +303,36 @@ private package Hostkit.Win32 is
    --  @return Nonzero on success.
    function Set_File_Attributes (Name : System.Address; Attributes : DWORD) return BOOL
      with Import, Convention => Stdcall, External_Name => "SetFileAttributesW";
+
+   --  GetFileAttributesExW.
+   --
+   --  @param Name The path, NUL-terminated UTF-16.
+   --  @param Level The GET_FILEEX_INFO_LEVELS; 0 is GetFileExInfoStandard,
+   --    which fills an Attribute_Data.
+   --  @param Data Receives the attributes, times and size.
+   --  @return Nonzero on success.
+   function Get_File_Attributes_Ex
+     (Name  : System.Address;
+      Level : Interfaces.C.int;
+      Data  : access Attribute_Data)
+      return BOOL
+     with Import, Convention => Stdcall, External_Name => "GetFileAttributesExW";
+
+   --  FindFirstFileW.
+   --
+   --  @param Name The path or pattern, NUL-terminated UTF-16.
+   --  @param Data Receives the first entry found.
+   --  @return The search handle, or Invalid_Handle_Value.
+   function Find_First_File (Name : System.Address; Data : access Find_Data) return HANDLE
+     with Import, Convention => Stdcall, External_Name => "FindFirstFileW";
+
+   --  FindNextFileW.
+   --
+   --  @param Object A FindFirstFileW handle.
+   --  @param Data Receives the next entry found.
+   --  @return Nonzero on success; zero with ERROR_NO_MORE_FILES at the end.
+   function Find_Next_File (Object : HANDLE; Data : access Find_Data) return BOOL
+     with Import, Convention => Stdcall, External_Name => "FindNextFileW";
 
    --  FindClose.
    --

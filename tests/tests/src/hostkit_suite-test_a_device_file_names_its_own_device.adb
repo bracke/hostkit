@@ -8,6 +8,7 @@ is
 begin
    --  Windows has no device nodes to ask about.
    if Hostkit.Host.Current not in Hostkit.Host.Linux | Hostkit.Host.MacOS then
+      Skip ("Test_A_Device_File_Names_Its_Own_Device", "this host has no device nodes");
       return;
    end if;
    declare

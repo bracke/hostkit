@@ -114,37 +114,72 @@ procedure Check_Hostkit is
    end Require_Win32_Call;
 
    --  A unit with per-OS bodies needs one for every host, or the build for the
-   --  missing host fails -- and it fails on that host's runner, not here.
+   --  missing host fails -- and it fails on that host's runner, not here. A
+   --  body in src/platform/posix is Linux's and macOS's both, so it needs a
+   --  Windows and an unsupported one beside it, and must not also be in the
+   --  Linux or macOS folder: two bodies of one unit in one build is an error
+   --  only the host building both can see. A unit whose spec sits beside its
+   --  body (Hostkit.Posix) belongs to those hosts alone and needs no others.
    procedure Require_A_Body_Per_Host is
-      Hosts  : constant array (1 .. 3) of Unbounded_String :=
-        [To_Unbounded_String ("macos"),
-         To_Unbounded_String ("windows"),
-         To_Unbounded_String ("unsupported")];
-      Search : Ada.Directories.Search_Type;
-      Item   : Ada.Directories.Directory_Entry_Type;
+      type Host_List is array (Positive range <>) of Unbounded_String;
+
+      --  Every body in From must have a namesake in each of Needed and none
+      --  in any of Refused.
+      procedure Require (From : String; Needed : Host_List; Refused : Host_List) is
+         Search : Ada.Directories.Search_Type;
+         Item   : Ada.Directories.Directory_Entry_Type;
+      begin
+         Ada.Directories.Start_Search
+           (Search, Root & "/src/platform/" & From, "*.adb");
+
+         while Ada.Directories.More_Entries (Search) loop
+            Ada.Directories.Get_Next_Entry (Search, Item);
+
+            declare
+               Name : constant String := Ada.Directories.Simple_Name (Item);
+               Own_Unit : constant Boolean :=
+                 Ada.Directories.Exists
+                   (Root & "/src/platform/" & From & "/" & Name (Name'First .. Name'Last - 1) & "s");
+            begin
+               for Host of Needed loop
+                  exit when Own_Unit;
+                  if not Ada.Directories.Exists
+                           (Root & "/src/platform/" & To_String (Host) & "/" & Name)
+                  then
+                     Error
+                       (Name & " has a " & From & " body but none for "
+                        & To_String (Host) & "; every host needs one");
+                  end if;
+               end loop;
+
+               for Host of Refused loop
+                  if Ada.Directories.Exists
+                       (Root & "/src/platform/" & To_String (Host) & "/" & Name)
+                  then
+                     Error
+                       (Name & " has a " & From & " body and a "
+                        & To_String (Host) & " one; " & To_String (Host)
+                        & " builds both");
+                  end if;
+               end loop;
+            end;
+         end loop;
+
+         Ada.Directories.End_Search (Search);
+      end Require;
    begin
-      Ada.Directories.Start_Search
-        (Search, Root & "/src/platform/linux", "*.adb");
-
-      while Ada.Directories.More_Entries (Search) loop
-         Ada.Directories.Get_Next_Entry (Search, Item);
-
-         declare
-            Name : constant String := Ada.Directories.Simple_Name (Item);
-         begin
-            for Host of Hosts loop
-               if not Ada.Directories.Exists
-                        (Root & "/src/platform/" & To_String (Host) & "/" & Name)
-               then
-                  Error
-                    (Name & " has a Linux body but none for "
-                     & To_String (Host) & "; every host needs one");
-               end if;
-            end loop;
-         end;
-      end loop;
-
-      Ada.Directories.End_Search (Search);
+      Require
+        ("linux",
+         [To_Unbounded_String ("macos"),
+          To_Unbounded_String ("windows"),
+          To_Unbounded_String ("unsupported")],
+         []);
+      Require
+        ("posix",
+         [To_Unbounded_String ("windows"),
+          To_Unbounded_String ("unsupported")],
+         [To_Unbounded_String ("linux"),
+          To_Unbounded_String ("macos")]);
    end Require_A_Body_Per_Host;
 
    --  And every one of those bodies must parse, here, whatever host this is.
@@ -166,8 +201,9 @@ procedure Check_Hostkit is
       Alr : constant String :=
         Project_Tools.Processes.Locate_Command ("alr");
 
-      Hosts : constant array (1 .. 4) of Unbounded_String :=
+      Hosts : constant array (1 .. 5) of Unbounded_String :=
         [To_Unbounded_String ("linux"),
+         To_Unbounded_String ("posix"),
          To_Unbounded_String ("macos"),
          To_Unbounded_String ("windows"),
          To_Unbounded_String ("unsupported")];
@@ -367,7 +403,7 @@ begin
       "Statfs  : constant String := ""statfs"";",
       "Apple silicon macOS must bind statfs");
    Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetDiskFreeSpaceExW");
-   Require_Binding ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExW");
+   Require_Win32_Call ("src/platform/windows/hostkit-metadata.adb", "GetFileAttributesExW", "Get_File_Attributes_Ex");
 
    --  Ownership. The Windows pair is what makes Metadata.Set_Ownership a
    --  different operation from Fs.Set_Owner, so losing it is losing a feature
@@ -470,8 +506,8 @@ begin
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetCurrentDirectoryW");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "_wfopen");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeleteFileW");
-   Require_Binding ("src/platform/windows/hostkit-directory_listing.adb", "FindFirstFileW");
-   Require_Binding ("src/platform/windows/hostkit-directory_listing.adb", "FindNextFileW");
+   Require_Win32_Call ("src/platform/windows/hostkit-directory_listing.adb", "FindFirstFileW", "Find_First_File");
+   Require_Win32_Call ("src/platform/windows/hostkit-directory_listing.adb", "FindNextFileW", "Find_Next_File");
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "mkdir");
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "getcwd");
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "fopen");
@@ -489,7 +525,7 @@ begin
      ("src/platform/macos/hostkit-fs.adb",
       "External_Name => Hostkit.Darwin_Symbols.Lstat;",
       "src/platform/macos/hostkit-fs.adb must bind Darwin_Symbols.Lstat");
-   Require_Binding ("src/platform/windows/hostkit-fs.adb", "GetFileAttributesExW");
+   Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetFileAttributesExW", "Get_File_Attributes_Ex");
    Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetFileInformationByHandle", "Get_File_Information");
    Require_Win32_Call ("src/platform/windows/hostkit-fs.adb", "GetSecurityInfo", "Get_Security_Info");
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DuplicateToken");

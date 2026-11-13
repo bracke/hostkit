@@ -1,7 +1,7 @@
 with Interfaces.C.Strings;
 with Interfaces.C;
 
-with System;
+with Hostkit.Posix;
 
 package body Hostkit.Locks is
 
@@ -41,21 +41,7 @@ package body Hostkit.Locks is
      with Import => True, Convention => C, External_Name => "close";
    function C_Flock (Fd : C_Int; Operation : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "flock";
-   function Errno_Location return System.Address
-     with Import => True, Convention => C, External_Name => "__errno_location";
-
-   function Errno return C_Int;
-   --  The current thread's errno.
-
-   -----------
-   -- Errno --
-   -----------
-
-   function Errno return C_Int is
-      Value : C_Int with Import => True, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    -------------
    -- Acquire --

@@ -192,9 +192,10 @@ package body Hostkit.Spawn is
    --  The process handle is kept in the Id field, not the process id. Windows
    --  needs the handle to wait or to read an exit code, and a process id there
    --  is only a number -- reusable the moment the process goes, exactly like a
-   --  POSIX pid. Process_Id below reports the handle for want of anywhere else
-   --  to keep it, which is a wart this host forces and which is why the field
-   --  is opaque.
+   --  POSIX pid. The real process id goes in the Group field, which this host
+   --  has no other use for -- it has no process groups -- and Process_Id below
+   --  reports it from there. That double duty is a wart this host forces, and
+   --  is why the fields are opaque.
 
    function Outcome_For_Error (Code : C_DWord) return Spawn_Outcome;
 
@@ -293,9 +294,13 @@ package body Hostkit.Spawn is
       Information : aliased Process_Information;
 
       Environment_Block : Unbounded_String;
-      Use_Environment   : constant Boolean :=
-        With_Options.Replace_Environment
-        and then not With_Options.Environment.Is_Empty;
+
+      --  A replacement environment is passed whenever one is asked for, empty
+      --  or not. A null block is not "no variables": CreateProcessW reads it as
+      --  "inherit this process's", so an empty replacement used to hand the
+      --  child the parent's whole environment -- the opposite of what was asked,
+      --  and of what Linux and macOS do with the same request.
+      Use_Environment : constant Boolean := With_Options.Replace_Environment;
    begin
       Item := Invalid_Process;
 
@@ -362,12 +367,17 @@ package body Hostkit.Spawn is
 
       --  The environment block is one buffer of NAME=VALUE, each terminated by
       --  a NUL, with a second NUL at the end -- not an array of pointers as on
-      --  POSIX.
+      --  POSIX. An empty block is still two NULs: the documented terminator is
+      --  an empty string's NUL followed by the block's, and a lone NUL leaves
+      --  the host reading past the end of the buffer for the second.
       if Use_Environment then
          for Entry_Text of With_Options.Environment loop
             Append (Environment_Block, To_String (Entry_Text));
             Append (Environment_Block, Character'Val (0));
          end loop;
+         if With_Options.Environment.Is_Empty then
+            Append (Environment_Block, Character'Val (0));
+         end if;
          Append (Environment_Block, Character'Val (0));
       end if;
 

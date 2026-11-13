@@ -2,6 +2,7 @@ with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Posix;
 
 package body Hostkit.Metadata_Copy is
    use Ada.Strings.Unbounded;
@@ -78,14 +79,7 @@ package body Hostkit.Metadata_Copy is
      (Directory_Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
       Times : access Timespec_Array; Flags : C_Int) return C_Int
      with Import, Convention => C, External_Name => "utimensat";
-   function Errno_Location return System.Address
-     with Import, Convention => C, External_Name => "__error";
-
-   function Errno return C_Int is
-      Value : C_Int with Import, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    procedure Free (Item : in out Interfaces.C.Strings.chars_ptr) is
    begin

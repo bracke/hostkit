@@ -11,3 +11,4 @@ Test_A_Disposition_Round_Trips: this host has no SIGPIPE
 Test_A_Child_Can_Own_A_Terminal: no pseudo-terminal sessions and signals here
 Test_The_Open_File_Limit_Is_What_Stops_An_Open: Windows has no open-file limit to lower
 Test_A_Taken_Signal_Is_Gone_And_A_Replaced_Disposition_Is_Said: this host records no window changes
+Test_A_Device_File_Names_Its_Own_Device: this host has no device nodes

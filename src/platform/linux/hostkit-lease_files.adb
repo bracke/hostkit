@@ -4,6 +4,7 @@ with System;
 
 with Hostkit.Host;
 with Hostkit.Linux_Abi;
+with Hostkit.Posix;
 
 package body Hostkit.Lease_Files is
    use type Ada.Streams.Stream_Element_Offset;
@@ -75,14 +76,7 @@ package body Hostkit.Lease_Files is
      (Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr; Flags, Mask : C_U32;
       Info : access Statx_Record) return C_Int
      with Import, Convention => C, External_Name => "statx";
-   function Errno_Location return System.Address
-     with Import, Convention => C, External_Name => "__errno_location";
-
-   function Errno return C_Int is
-      Value : C_Int with Import, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    procedure Reset (Item : out Lease) is
    begin

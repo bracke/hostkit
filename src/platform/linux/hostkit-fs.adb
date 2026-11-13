@@ -15,6 +15,7 @@ with Hostkit.Filesystem_Rules;
 with Hostkit.Host;
 with Hostkit.Fs.Instants;
 with Hostkit.Linux_Abi;
+with Hostkit.Posix;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -844,19 +845,9 @@ package body Hostkit.Fs is
         (Fd : C_Int; Name : Interfaces.C.Strings.chars_ptr; Flags, Mask : C_U32;
          Info : access Statx_Record) return C_Int
         with Import, Convention => C, External_Name => "statx";
-      function Errno_Location return System.Address
-        with Import, Convention => C, External_Name => "__errno_location";
+      function Errno return C_Int renames Hostkit.Posix.Errno;
 
-      function Errno return C_Int is
-         Value : C_Int with Import, Address => Errno_Location;
-      begin
-         return Value;
-      end Errno;
-      procedure Set_Errno (Code : C_Int) is
-         Value : C_Int with Import, Address => Errno_Location;
-      begin
-         Value := Code;
-      end Set_Errno;
+      procedure Set_Errno (Code : C_Int) renames Hostkit.Posix.Set_Errno;
       procedure Clear_Errno is
       begin
          Set_Errno (0);
@@ -1283,14 +1274,7 @@ package body Hostkit.Fs is
       function C_Read (Fd : C_Int; Buffer : System.Address; Count : Interfaces.C.size_t)
         return Interfaces.C.long
         with Import, Convention => C, External_Name => "read";
-      function Errno_Location return System.Address
-        with Import, Convention => C, External_Name => "__errno_location";
-
-      function Errno return C_Int is
-         Value : C_Int with Import, Address => Errno_Location;
-      begin
-         return Value;
-      end Errno;
+      function Errno return C_Int renames Hostkit.Posix.Errno;
 
       procedure Close (Fd : in out C_Int) is
          Ignored : C_Int;

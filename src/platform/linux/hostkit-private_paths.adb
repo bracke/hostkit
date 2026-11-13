@@ -2,10 +2,10 @@ with Ada.Strings;
 with Ada.Strings.Fixed;
 with Interfaces.C;
 with Interfaces.C.Strings;
-with System;
 
 with Hostkit.Host;
 with Hostkit.Linux_Abi;
+with Hostkit.Posix;
 
 package body Hostkit.Private_Paths is
    use type Interfaces.C.int;
@@ -68,14 +68,7 @@ package body Hostkit.Private_Paths is
       Mask         : C_U32;
       Buffer       : access Statx_Record) return C_Int
      with Import, Convention => C, External_Name => "statx";
-   function Errno_Location return System.Address
-     with Import, Convention => C, External_Name => "__errno_location";
-
-   function Errno return C_Int is
-      Value : C_Int with Import, Address => Errno_Location;
-   begin
-      return Value;
-   end Errno;
+   function Errno return C_Int renames Hostkit.Posix.Errno;
 
    function Entry_Info
      (Fd : C_Int; Wanted_Type : C_U16) return Boolean

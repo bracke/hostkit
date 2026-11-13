@@ -3,6 +3,8 @@ with Interfaces.C;
 with System;
 with System.Atomic_Operations.Exchange;
 
+with Hostkit.Posix_Abi;
+
 package body Hostkit.Signals is
 
    use type Interfaces.C.int;
@@ -10,24 +12,12 @@ package body Hostkit.Signals is
 
    subtype C_Int is Interfaces.C.int;
 
-   --  macOS signal numbers, from sys/signal.h. The first sixteen agree with
-   --  Linux; from there the two diverge and this is where a shared table would
-   --  go wrong. SIGSTOP is 17 here and 19 on Linux, SIGCHLD 20 here and 17
-   --  there -- so a Linux table used on macOS would stop a job when it meant
-   --  to be told a child had exited.
-   SIGHUP    : constant C_Int := 1;
-   SIGINT    : constant C_Int := 2;
-   SIGQUIT   : constant C_Int := 3;
-   SIGKILL   : constant C_Int := 9;
-   SIGPIPE   : constant C_Int := 13;
-   SIGTERM   : constant C_Int := 15;
-   SIGSTOP   : constant C_Int := 17;
-   SIGTSTP   : constant C_Int := 18;
-   SIGCONT   : constant C_Int := 19;
-   SIGCHLD   : constant C_Int := 20;
-   SIGTTIN   : constant C_Int := 21;
-   SIGTTOU   : constant C_Int := 22;
-   SIGWINCH  : constant C_Int := 28;
+   --  The host's signal numbers (SIGINT, SIGCHLD and the rest). The first
+   --  sixteen agree between Linux and macOS; from there the two diverge --
+   --  SIGSTOP is 17 on macOS and 19 on Linux, SIGCHLD 20 there and 17 here --
+   --  so the numbers come from each host's own Hostkit.Posix_Abi, and only the
+   --  logic over them is shared.
+   use Hostkit.Posix_Abi;
 
    --  signal(2) dispositions. These are addresses, not integers: SIG_DFL is 0
    --  and SIG_IGN is 1, but both are compared and passed as function pointers.
@@ -79,7 +69,7 @@ package body Hostkit.Signals is
    function Is_Supported (Item : Signal) return Boolean is
       pragma Unreferenced (Item);
    begin
-      --  macOS defines every signal this enumeration names.
+      --  Linux and macOS both define every signal this enumeration names.
       return True;
    end Is_Supported;
 
