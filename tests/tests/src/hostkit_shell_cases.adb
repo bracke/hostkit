@@ -21,6 +21,7 @@ with Hostkit.Host;
 with Hostkit.Process;
 with Hostkit.Signals;
 with Hostkit.Spawn;
+with Hostkit.Spawn.Supervision;
 with Hostkit.Terminal_Control;
 with Hostkit.Terminal_Control.Differences;
 
@@ -187,6 +188,11 @@ package body Hostkit_Shell_Cases is
    is separate;
 
    procedure Test_Polling_Reports_A_Child_Still_Running
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A supervisor ends a worker that will not stop, and learns it is gone.
+   procedure Test_A_Supervised_Child_Ends_When_Told
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -652,6 +658,9 @@ package body Hostkit_Shell_Cases is
       Register_Routine
         (T, Test_Polling_Reports_A_Child_Still_Running'Access,
          "spawn : a poll reports a running child without blocking");
+      Register_Routine
+        (T, Test_A_Supervised_Child_Ends_When_Told'Access,
+         "spawn : a supervised child ends when told, and is seen to have ended");
       Register_Routine
         (T, Test_Signal_Names_And_Numbers_Agree'Access,
          "signals : names and numbers agree and round-trip");
