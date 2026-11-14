@@ -79,6 +79,27 @@ begin
       Assert (not Shape ("cmd", Args ("/c", "start", "", "")), "an empty file is not");
       Assert (not Shape ("notcmd.exe", Args ("/c", "start", "", "f")), "another program is not");
       Assert (not Shape ("cmd", Args ("/k", "start", "", "f")), "/k is not");
+
+      --  The file the shape opens, wherever it sits in the arguments.
+      declare
+         Path : Ada.Strings.Unbounded.Unbounded_String;
+      begin
+         Assert (Hostkit.Process.Has_Shell_Start_Shape ("cmd", Args ("/c", "start", "", "x&calc"), Path)
+                 and then Ada.Strings.Unbounded.To_String (Path) = "x&calc",
+                 "the shape's file is its last argument");
+         Assert (not Hostkit.Process.Has_Shell_Start_Shape ("cmd", Args ("/c", "start", "title", "f"), Path)
+                 and then Ada.Strings.Unbounded.To_String (Path) = "",
+                 "no shape, no file");
+         Assert (Hostkit.Process.Shell_Start_Target ("cmd", Args ("/c", "start", "", "f"), Path)
+                 = (Hostkit.Host.Current = Hostkit.Host.Windows),
+                 "the opener's file is taken from it only on Windows");
+         Assert (Ada.Strings.Unbounded.To_String (Path)
+                 = (if Hostkit.Host.Current = Hostkit.Host.Windows then "f" else ""),
+                 "the file is the shape's own on Windows, nothing elsewhere");
+         Assert (not Hostkit.Process.Shell_Start_Target ("xdg-open", Args ("f", Count => 1), Path)
+                 and then Ada.Strings.Unbounded.To_String (Path) = "",
+                 "another opener is not the shell's start");
+      end;
    end;
 
    Assert (Hostkit.Fs.Drive_Root_Length ("C:\Users") = 3 and then Hostkit.Fs.Drive_Root_Length ("D:/") = 3,

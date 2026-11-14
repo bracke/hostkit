@@ -34,6 +34,12 @@ Built with [Alire](https://alire.ada.dev/) (`alr`), pinned to `gnat_native = "=1
    belongs to the consumer. No policy, formats, domain rules, or UI. Adding a
    host-neutral helper here is the most common wrong change.
 
+   **The one deliberate exception:** `Hostkit.Desktop_Entries`, the freedesktop
+   Desktop Entry reader. What the desktop lists as its applications is a host
+   service, and every program that starts what the desktop lists (files' Open
+   With, launcher) must read those entries the same way. Do not take it as a
+   precedent: any other format still belongs to its consumer.
+
 2. **"Cannot tell" is not "fine".** When a host cannot express a question, the answer
    is a deliberate `False`/refusal, **not** an optimistic default. Do not "fix" such an
    answer to return `True`, and do not let a consumer store it as a clean result — that

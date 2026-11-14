@@ -567,6 +567,33 @@ package body Hostkit.Process is
         and then To_String (Arguments (4)) /= "";
    end Has_Shell_Start_Shape;
 
+   function Shell_Start_Target
+     (Program   : String;
+      Arguments : String_Vectors.Vector;
+      Path      : out UString)
+      return Boolean
+   is
+      use type Hostkit.Host.Kind;
+   begin
+      Path := Null_Unbounded_String;
+      return Hostkit.Host.Current = Hostkit.Host.Windows and then Has_Shell_Start_Shape (Program, Arguments, Path);
+   end Shell_Start_Target;
+
+   function Has_Shell_Start_Shape
+     (Program   : String;
+      Arguments : String_Vectors.Vector;
+      Path      : out UString)
+      return Boolean is
+   begin
+      --  The file is the fourth argument, after /c, start and the title.
+      Path := Null_Unbounded_String;
+      if not Has_Shell_Start_Shape (Program, Arguments) then
+         return False;
+      end if;
+      Path := Arguments (4);
+      return True;
+   end Has_Shell_Start_Shape;
+
    function Default_Opener
      (Mime_Type  : String;
       Path_Token : String;

@@ -437,6 +437,32 @@ package Hostkit.Process is
       Arguments : String_Vectors.Vector)
       return Boolean;
 
+   --  Is_Shell_Start, and the file the command opens: what a caller hands
+   --  Open_Native (or Open_Native_Outcome) in place of running the command,
+   --  without knowing the shape's argument positions.
+   --
+   --  @param Program The program a command runs.
+   --  @param Arguments Its arguments.
+   --  @param Path The file it opens; "" when the result is False.
+   --  @return True for the Windows opener's shape on Windows.
+   function Shell_Start_Target
+     (Program   : String;
+      Arguments : String_Vectors.Vector;
+      Path      : out UString)
+      return Boolean;
+
+   --  Has_Shell_Start_Shape, and the file the command opens, on any host.
+   --
+   --  @param Program The program a command runs.
+   --  @param Arguments Its arguments.
+   --  @param Path The file it opens; "" when the result is False.
+   --  @return True for the shape.
+   function Has_Shell_Start_Shape
+     (Program   : String;
+      Arguments : String_Vectors.Vector;
+      Path      : out UString)
+      return Boolean;
+
    --  The terminal to open a folder in. TERMINAL first, when it names a
    --  program this host runs (a name there it cannot run is ignored, not
    --  launched); else the first the host has of its usual ones: on Linux the

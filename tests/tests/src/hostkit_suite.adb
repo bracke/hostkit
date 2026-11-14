@@ -456,6 +456,16 @@ package body Hostkit_Suite is
 
    procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
+   --  A desktop entry's values read as the specification has them: string
+   --  and list escapes, locales, Exec split into arguments and its field
+   --  codes expanded, OnlyShowIn and NotShowIn.
+   procedure Test_Desktop_Entry_Values (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   --  Desktop entry files read and scanned: what is listed, what a strict
+   --  reading refuses, localized values, ids from subfolders, masking by
+   --  an earlier folder, links and bounds.
+   procedure Test_Desktop_Entry_Files (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
    procedure Test_Run_Reports_Exit_Status (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    procedure Test_Launch_Does_Not_Wait (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
@@ -786,6 +796,12 @@ package body Hostkit_Suite is
         (T, Test_Default_Opener'Access, "process : the default opener names the file by the caller's token");
       Register_Routine
         (T, Test_Host_Tables'Access, "host : errno, volume places, mount kinds, portable opener, Windows roots");
+      Register_Routine
+        (T, Test_Desktop_Entry_Values'Access,
+         "desktop entries : escapes, lists, locales, Exec splitting, field codes and desktop filters");
+      Register_Routine
+        (T, Test_Desktop_Entry_Files'Access,
+         "desktop entries : files are read strictly and scanned by id in folder precedence");
       Register_Routine
         (T, Test_Writes_Are_Made_Durable'Access,
          "durability : what was written is put on the device, or it is said that it cannot be");

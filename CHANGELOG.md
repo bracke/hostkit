@@ -17,6 +17,30 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Desktop_Entries`**: the one reading of freedesktop Desktop
+  Entry files, which files (Open With) and launcher each had a copy of --
+  and the copies disagreed: launcher passed an unknown string escape on to
+  the program and took a second file code, where files refused the entry.
+  Strict, as files read them: malformed lines and group headers, duplicate
+  keys and groups, invalid booleans and escapes, and a localized value
+  without its base key make a file no entry; Name, Icon and Comment take
+  the best value for the locales given (`Locale_Candidates`,
+  `Message_Locale_Candidates`); OnlyShowIn and NotShowIn are decoded lists
+  checked against every current desktop (`Shown_In`); TryExec must be
+  runnable; Exec is split by its own quoting rules (`Split_Exec`) and its
+  field codes expanded for a launch on some targets (`Expand_Field_Codes`,
+  `Command_For`, `Takes_One_Target`), %i %c %k included; Terminal, Path and
+  MimeType are read. `Scan` walks "applications" folders
+  (`Application_Folders`, from `Fs.Application_Data_Directories`) by
+  desktop-file id in precedence order -- a hidden entry masks a later
+  folder's -- reading linked entries but never descending into a linked
+  folder, with every file, line, list and walk bounded. The same on every
+  host: a format, here by exception so that every program that starts
+  what the desktop lists reads it the same way.
+- **`Process.Shell_Start_Target`**, and `Has_Shell_Start_Shape` with the
+  file: the Windows opener's shape (`cmd /c start "" <file>`) and the file
+  it opens, so a caller opening that file with `Open_Native` no longer
+  needs to know the shape's argument positions.
 - **`Process.Terminal_Program_Prefix`**: the one table of the arguments
   that hand a program to a terminal -- `-e` for xterm's family (and tilix,
   terminology), `-x` for xfce4-terminal and terminator, `--` for

@@ -61,6 +61,7 @@ interface. The question to ask of a new subprogram is:
 | `Hostkit.Locks` | Advisory file locks |
 | `Hostkit.Lease_Files` | No-follow, identity-bound lease files combining process-held locks with durable positioned I/O |
 | `Hostkit.Regular_Files` | Opening a file only when the opened descriptor is a regular file (optionally refusing a final link), creating one exclusively past GNAT's Windows path limit, and writing holes into a sparse copy |
+| `Hostkit.Desktop_Entries` | Reading freedesktop Desktop Entry files and scanning the applications folders the way the desktop does -- the one format kept here, so every program that starts what the desktop lists agrees on it |
 | `Hostkit.Directory_Write_Access` | Lending a read-only directory its owner write bit for a rename, changed and restored through one held descriptor |
 
 Three of those answers exist because a shell asked and the honest answer was
