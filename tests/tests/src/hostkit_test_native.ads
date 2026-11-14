@@ -65,6 +65,22 @@ package Hostkit_Test_Native is
    --    but Windows).
    function Drop_Backup_Privileges return Boolean;
 
+   --  What waiting for a child's exit, without collecting it, came to.
+   --  Exited: it has exited and its status is still there for whoever
+   --  collects it. Not_A_Child: there is no such child to wait for -- one
+   --  already collected, by this process's own reaper or another waiter.
+   --  Cannot_Wait: the host has no such wait (Windows), or it failed.
+   type Exit_Wait is (Exited, Not_A_Child, Cannot_Wait);
+
+   --  Wait until the child Process_Id has exited, leaving it uncollected:
+   --  waitid (P_PID, Process_Id, WEXITED | WNOWAIT) on POSIX, so a test can
+   --  know a child is done without taking the status a later wait is to
+   --  find -- which waiting by Hostkit.Spawn.Wait would.
+   --
+   --  @param Process_Id The child.
+   --  @return Exited, Not_A_Child or Cannot_Wait, as above.
+   function Await_Exit_Uncollected (Process_Id : Integer) return Exit_Wait;
+
 private
 
    type Exclusive_Hold is limited record

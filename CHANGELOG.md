@@ -22,7 +22,8 @@ recently enough to matter to somebody pinning it; the history before that is in
   terminology), `-x` for xfce4-terminal and terminator, `--` for
   gnome-terminal, kgx, ptyxis and foot, `start --` for wezterm, nothing for
   kitty and Windows Terminal, `/k` for cmd -- and False for PowerShell,
-  macOS's `open` and anything unknown. Matched by program name (no folder,
+  macOS's `open` and the shells (an unlisted terminal: `-e` on POSIX, see
+  Changed). Matched by program name (no folder,
   no `.exe`, any case), so every program running a desktop entry's
   `Terminal=true` agrees on it; launcher's own copy lacked kitty and tilix.
 - **Windows names that are not UTF-16 list, and round-trip.** NTFS keeps an
@@ -216,7 +217,21 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
-- **Linux and macOS share their identical bodies** from `src/platform/posix`
+- **`Process.Terminal_Program_Prefix` falls back to `-e` on POSIX.** st,
+  lxterminal and qterminal take `-e`; mate-terminal and sakura take `-x`.
+  A terminal not listed is handed `-e` on Linux and macOS, as consumers did
+  before the table existed, instead of being refused; PowerShell, `open` and
+  the command-line shells (sh, bash, zsh, fish, ...) are still refused, and
+  so is an unlisted terminal on Windows.
+- **POSIX shell commands run under `/bin/sh`, not `$SHELL`.**
+  `Shell.Executable` -- what `Process.Run_Shell_Command` runs -- is
+  `/bin/sh` on POSIX: commands are quoted for sh, and fish, nushell and tcsh
+  read a quoted backslash or a spliced quote their own way. The user's own
+  shell, for opening an interactive one, is the new
+  `Shell.Interactive_Executable`. The spec's COMSPEC wording now says what
+  the body does (the build's host decides, never the environment).
+
+ from `src/platform/posix`
   (clock, command line, environment, signals) and one errno binding
   (private `Hostkit.Posix`); what differs between the two -- the errno
   symbol and the signal numbers -- is in each host's private
@@ -262,6 +277,23 @@ recently enough to matter to somebody pinning it; the history before that is in
   giving up on the identity.
 
 ### Fixed
+
+- **cmd no longer expands `%NAME%` in a quoted argument.** cmd expands
+  `%NAME%` on its command line inside double quotes too, and has no escape
+  for `%` there, so `Shell.Quote` on Windows (now `Shell.Cmd_Quote`, with
+  `Shell.Sh_Quote` beside it; both host-independent, so testable anywhere)
+  refuses an argument holding `%`, a line break or a NUL: it returns "",
+  `Shell.Command_Line` and `Process.Terminal_Command` return "" in turn, and
+  `Run_Shell_Command` refuses an empty command. `Shell.Can_Quote` asks
+  first. cmd is started `/V:OFF`, so delayed expansion cannot read `!NAME!`
+  either. A caller with such an argument starts the program directly.
+- **`Metadata.Keep_Id` leaves an id as it is.** `Set_Ownership` takes
+  `Keep_Id` (and `Update_Entry_Metadata` `Keep_Id_Field`) for the user or
+  the group: (uid_t) -1 / (gid_t) -1 to chown on POSIX, that half left out
+  of the write on Windows. Keeping both asks the host for nothing at all,
+  since a chown that changes nothing still clears set-user-id and
+  set-group-id, and on Linux the file's capabilities -- now documented on
+  `Set_Ownership`, `Update_Entry_Metadata` and `Fs.Set_Owner`.
 
 - **A relative path read from a `\\?\` base has its dots resolved.**
   `Path_Text.Absolute ("..\x", "\\?\C:\dir")` returned

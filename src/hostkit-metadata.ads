@@ -35,6 +35,17 @@ package Hostkit.Metadata is
    --  and always fits Natural, but the type is the same.
    type Account_Id is mod 2**32;
 
+   --  "Leave this one as it is": given to Set_Ownership as the user or the
+   --  group, that id of the file is not changed. It is (uid_t) -1 and
+   --  (gid_t) -1, which chown(2) reads the same way on POSIX and which no
+   --  account has; Windows mints only Natural ids, so it names no SID there
+   --  either, and the owner or the primary group is left out of the write.
+   Keep_Id : constant Account_Id := Account_Id'Last;
+
+   --  Keep_Id as Update_Entry_Metadata takes it, for Value or Group of an
+   --  Update_Ownership.
+   Keep_Id_Field : constant Identity_Field := Identity_Field (Keep_Id);
+
    --  Account_Id'Image without its leading space: "4294967294".
    function Account_Image (Id : Account_Id) return String is
      (Account_Id'Image (Id) (2 .. Account_Id'Image (Id)'Last));
@@ -127,6 +138,15 @@ package Hostkit.Metadata is
    --  Owner_Name and Group_Name are used only on hosts whose native ownership
    --  API needs names as well as the ids Hostkit reported. Max_Previous lets a
    --  narrower caller refuse an undo value it could not retain losslessly.
+   --
+   --  An ownership update takes Keep_Id_Field for Value or Group to leave
+   --  that id as it is; with both, nothing is written and it succeeds. On
+   --  Linux and macOS any ownership change by a process without the
+   --  privilege -- even one to the ids the file already has -- clears the
+   --  set-user-id and set-group-id bits (Linux: of a non-directory, and the
+   --  set-group-id bit only where group execute is set), and Linux drops
+   --  the file's capabilities too, so a caller that has nothing to change
+   --  should not ask.
    --
    --  A permission update edits as Set_Permissions does. With Access_Text --
    --  a Previous_Access or Applied_Access an earlier update reported -- it
@@ -374,11 +394,19 @@ package Hostkit.Metadata is
    --  the caller did not mean.
    --
    --  Changing an owner is privileged on POSIX, so an unprivileged process
-   --  normally gets False for anything but a no-op.
+   --  normally gets False for anything but a no-op -- or a change of group to
+   --  one it belongs to, with Keep_Id for the user.
+   --
+   --  Keep_Id leaves the user or the group as it is; Keep_Id for both writes
+   --  nothing, and is True where File_Ownership can read Path's. A chown on
+   --  Linux or macOS, even one that changes nothing, clears the
+   --  set-user-id and set-group-id bits when the caller is unprivileged, and
+   --  Linux drops the file's capabilities (security.capability) -- so ask
+   --  only for what changes.
    --
    --  @param Path Path whose ownership is changed.
-   --  @param User_Id New owning user id.
-   --  @param Group_Id New owning group id.
+   --  @param User_Id New owning user id, or Keep_Id.
+   --  @param Group_Id New owning group id, or Keep_Id.
    --  @return True when the host applied it.
    function Set_Ownership
      (Path     : String;

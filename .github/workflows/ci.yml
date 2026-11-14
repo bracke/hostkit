@@ -106,6 +106,10 @@ jobs:
           #  test that quietly stopped running here would go unseen. Another
           #  skip fails the run, and so does a listed test that ran. Both macOS
           #  runners share one list.
+          #  How many times longer a bound on elapsed time may be here than on
+          #  a developer's machine (read by the tests that time a wait): the
+          #  hosted Windows and macOS runners are the slow, loaded ones.
+          HOSTKIT_TEST_TIME_SCALE: ${{ (runner.os == 'macOS' || runner.os == 'Windows') && '2' || '1' }}
           HOSTKIT_TEST_EXPECTED_SKIPS: expected-skips-${{ runner.os == 'Linux' && 'linux' || runner.os == 'macOS' && 'macos' || 'windows' }}.txt
         run: |
           alr --non-interactive build

@@ -1,3 +1,5 @@
+with Hostkit_Test_Native;
+
 separate (Hostkit_Shell_Cases)
 procedure Test_A_Launch_Leaves_A_Spawned_Childs_Status_Alone
   (T : in out AUnit.Test_Cases.Test_Case'Class)
@@ -17,19 +19,38 @@ is
       return Arguments;
    end Told;
 
-   --  Wait until the companion told Marker has written it -- the last thing
-   --  it does -- and then a moment more for it to have exited. Its exit is
-   --  what the scenario needs; waiting for it by Spawn.Wait would collect
-   --  it, which is the one thing the spawned child must not be until the end.
-   procedure Await_Exit (Marker : String) is
-      Done : constant String := Hostkit.Fs.Join (Room, Marker) & ".done";
+   --  Wait until the companion told Marker has exited. Its exit is what the
+   --  scenario needs; waiting for it by Spawn.Wait would collect it, which
+   --  is the one thing the spawned child must not be until the end. So the
+   --  wait is waitid's WNOWAIT (Hostkit_Test_Native), on the process id the
+   --  companion wrote beside its answer -- the last thing it does. A launched
+   --  child the reaper has already collected is done too (Not_A_Child); the
+   --  spawned one must not be. Windows has no reaping and no such wait, and
+   --  gives the companion a moment after its answer instead.
+   procedure Await_Exit (Marker : String; Collected_Is_Fine : Boolean) is
+      Done   : constant String := Hostkit.Fs.Join (Room, Marker) & ".done";
+      File   : Ada.Text_IO.File_Type;
+      Pid    : Integer;
+      Waited : Hostkit_Test_Native.Exit_Wait;
    begin
       for Attempt in 1 .. 400 loop
          exit when Ada.Directories.Exists (Done);
          delay 0.05;
       end loop;
       Assert (Ada.Directories.Exists (Done), "the companion told " & Marker & " never finished");
-      delay 0.25;
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, Done);
+      Ada.Text_IO.Skip_Line (File);
+      Pid := Integer'Value (Ada.Text_IO.Get_Line (File));
+      Ada.Text_IO.Close (File);
+      Waited := Hostkit_Test_Native.Await_Exit_Uncollected (Pid);
+      case Waited is
+         when Hostkit_Test_Native.Exited =>
+            null;
+         when Hostkit_Test_Native.Not_A_Child =>
+            Assert (Collected_Is_Fine, "the companion told " & Marker & " was collected before its time");
+         when Hostkit_Test_Native.Cannot_Wait =>
+            delay 0.25;
+      end case;
    end Await_Exit;
 begin
    Assert (Hostkit.Spawn.Start (Companion ("where_started"), Told ("spawned"), Options, Child)
@@ -43,12 +64,13 @@ begin
    --  its own to collect while the spawned child's status is there for the
    --  taking -- a reaper that collected any finished child would take it.
    --  On a loaded runner a fixed delay could end before the children did,
-   --  and the test would pass with that bug.
-   Await_Exit ("spawned");
+   --  and the test would pass with that bug; Await_Exit waits for the exit
+   --  itself.
+   Await_Exit ("spawned", Collected_Is_Fine => False);
    Assert (Hostkit.Process.Launch (Companion ("where_started"), Told ("first")), "the first launch did not start");
-   Await_Exit ("first");
+   Await_Exit ("first", Collected_Is_Fine => True);
    Assert (Hostkit.Process.Launch (Companion ("where_started"), Told ("second")), "the second launch did not start");
-   Await_Exit ("second");
+   Await_Exit ("second", Collected_Is_Fine => True);
 
    Assert (Hostkit.Spawn.Wait (Child, Hostkit.Spawn.Wait_Block, Result),
            "waiting for the spawned child failed");

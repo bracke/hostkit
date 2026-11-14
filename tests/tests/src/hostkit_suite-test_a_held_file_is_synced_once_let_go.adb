@@ -15,6 +15,28 @@ is
    Started : Ada.Real_Time.Time;
    Waited  : Ada.Real_Time.Time_Span;
    Result  : Hostkit.Durability.Outcome := Hostkit.Durability.Failed;
+   --  When the second holder let go: written by its task, read once the
+   --  block that waits for the task has ended.
+   Released : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+
+   --  How much slower than a developer's machine the runner may be: CI sets
+   --  HOSTKIT_TEST_TIME_SCALE (2 on its Windows and macOS runners), and a
+   --  bound on elapsed time is that many times as long. 1 when unset.
+   function Time_Scale return Positive is
+   begin
+      return Positive'Value (Hostkit.Environment.Value ("HOSTKIT_TEST_TIME_SCALE", "1"));
+   exception
+      when others =>
+         return 1;
+   end Time_Scale;
+
+   procedure Clean_Up is
+   begin
+      Hostkit_Test_Native.Release (Held);
+      if Ada.Directories.Exists (Path) then
+         Ada.Directories.Delete_File (Path);
+      end if;
+   end Clean_Up;
 begin
    --  Only Windows refuses an open because another holder did not share
    --  writing (a virus scanner on a file just written), and only there does
@@ -57,9 +79,13 @@ begin
    --  same file meets only the test's own hold, so here the bound can be
    --  tight. Sync_File's whole retry schedule is 1.1 s (ten waits of 20 ms
    --  times the attempt); let go at 0.15 s, it opens the file at the attempt
-   --  after that, about 0.2 s in. A bound under the schedule's length is
-   --  what tells a sync that tried again once the file was free from one
-   --  that waited its retries out regardless -- 5 s could never.
+   --  after that, under 0.1 s later. A sync that waited its retries out
+   --  regardless would end some 0.95 s after the release. So the bound is
+   --  counted from the release, not from the start -- a runner slow to
+   --  start the holder no longer eats into it -- and is 0.4 s times the
+   --  runner's time scale: still under 0.95 s at the scale of 2 CI's
+   --  Windows runner sets, which is what tells the two apart (5 s never
+   --  could).
    Assert (Hostkit_Test_Native.Hold_Against_Writers (Path, Held), "the file is held against writers again");
    Started := Ada.Real_Time.Clock;
    declare
@@ -68,19 +94,29 @@ begin
       begin
          delay 0.15;
          Hostkit_Test_Native.Release (Held);
+         Released := Ada.Real_Time.Clock;
       end Holder;
    begin
       Result := Hostkit.Durability.Sync_File (Path);
       Waited := Ada.Real_Time.Clock - Started;
    end;
-   Ada.Directories.Delete_File (Path);
-   Assert
-     (Result = Hostkit.Durability.Synced,
-      "a file held a second time is synced once let go: " & Hostkit.Durability.Outcome'Image (Result));
-   Assert
-     (Waited >= Ada.Real_Time.Milliseconds (100),
-      "the second sync waited for the holder too");
-   Assert
-     (Waited < Ada.Real_Time.Milliseconds (800),
-      "and tried again soon after it let go, rather than waiting out its whole 1.1 s of retries");
+   declare
+      After_Release : constant Ada.Real_Time.Time_Span := (Started + Waited) - Released;
+   begin
+      Clean_Up;
+      Assert
+        (Result = Hostkit.Durability.Synced,
+         "a file held a second time is synced once let go: " & Hostkit.Durability.Outcome'Image (Result));
+      Assert
+        (Waited >= Ada.Real_Time.Milliseconds (100),
+         "the second sync waited for the holder too");
+      Assert
+        (After_Release < Ada.Real_Time.Milliseconds (400 * Time_Scale),
+         "and tried again soon after it let go, rather than waiting out its whole 1.1 s of retries; it took"
+         & Duration'Image (Ada.Real_Time.To_Duration (After_Release)) & " s after the release");
+   end;
+exception
+   when others =>
+      Clean_Up;
+      raise;
 end Test_A_Held_File_Is_Synced_Once_Let_Go;

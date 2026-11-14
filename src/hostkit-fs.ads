@@ -205,6 +205,12 @@ package Hostkit.Fs is
    --  POSIX ownership is a pair of numbers and a privileged operation; Windows has
    --  no such pair, and an owner there is a SID in a security descriptor. False on
    --  Windows means it was not done, not that it succeeded silently.
+   --
+   --  On POSIX -1 for User or Group leaves that id as it is, as chown(2) reads
+   --  it, and any chown -- even to the ids the file has -- clears the set-user-id
+   --  and set-group-id bits when the caller is unprivileged (and, on Linux, the
+   --  file's capabilities). Hostkit.Metadata.Set_Ownership with Keep_Id is the
+   --  call that leaves a file alone when there is nothing to change.
    --  @return True when the host applied it
    function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean;
 

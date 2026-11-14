@@ -591,9 +591,14 @@ package body Hostkit.Metadata is
             Refuse (E_Inval);
             return Answer;
          end if;
-         Answer.Success := C_Fchownat
-           (Fd, Empty, C_U32 (Value), C_U32 (Group),
-            At_Empty_Path + C_Int (At_Symlink_Nofollow)) = 0;
+         --  Keep_Id_Field is (uid_t) -1 and (gid_t) -1, which fchownat leaves
+         --  as they are; with both kept it is not called, since a chown that
+         --  changes nothing still clears set-id bits and capabilities.
+         Answer.Success :=
+           (Value = Keep_Id_Field and then Group = Keep_Id_Field)
+           or else C_Fchownat
+             (Fd, Empty, C_U32 (Value), C_U32 (Group),
+              At_Empty_Path + C_Int (At_Symlink_Nofollow)) = 0;
       else
          Answer.Previous := Identity_Field (Info.Mode and Permission_Mask);
          declare
@@ -829,6 +834,19 @@ package body Hostkit.Metadata is
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Status : C_Int;
    begin
+      --  Keep_Id is (uid_t) -1 and (gid_t) -1, which chown leaves as they
+      --  are. With both kept nothing is asked of chown at all: a chown that
+      --  changes nothing still clears set-id bits (and capabilities on Linux).
+      if User_Id = Keep_Id and then Group_Id = Keep_Id then
+         Interfaces.C.Strings.Free (C_Path);
+         declare
+            Ignored_User, Ignored_Group : Account_Id;
+            Readable : Boolean;
+         begin
+            File_Ownership (Path, Ignored_User, Ignored_Group, Readable);
+            return Readable;
+         end;
+      end if;
       Status := Chown (C_Path, C_U32 (User_Id), C_U32 (Group_Id));
       Interfaces.C.Strings.Free (C_Path);
       return Status = 0;

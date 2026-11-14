@@ -2363,8 +2363,22 @@ package body Hostkit.Metadata is
       Information : C_DWord := 0;
       Status      : C_DWord;
    begin
+      --  Keep_Id for both: nothing to write, as long as there is a file.
+      --  Keep_Id for one is not Natural, so it names no SID and that half
+      --  is left out of the write below.
+      if User_Id = Keep_Id and then Group_Id = Keep_Id then
+         declare
+            Ignored_User, Ignored_Group : Account_Id;
+            Readable : Boolean;
+         begin
+            File_Ownership (Path, Ignored_User, Ignored_Group, Readable);
+            return Readable;
+         end;
+      end if;
+
       --  Only a SID this process has already seen can be named again: the
       --  identity the caller holds is a relative identifier, not a SID.
+      --  A Keep_Id beside an id never handed out is not a request either.
       if not Have_Owner and then not Have_Group then
          return False;
       end if;

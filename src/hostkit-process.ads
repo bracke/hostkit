@@ -123,7 +123,12 @@ package Hostkit.Process is
       return Boolean;
 
    --  Run Command through the host's shell -- see Hostkit.Shell for what that means
-   --  and how it is quoted.
+   --  and how it is quoted. That is Shell.Executable: /bin/sh on POSIX, whatever the
+   --  user's SHELL, since the command is quoted for sh; cmd on Windows, started as
+   --  "cmd /V:OFF /S /C", so delayed expansion cannot read !NAME! in it either.
+   --
+   --  An empty Command -- what Shell.Command_Line gives for an argument the shell
+   --  would change -- is refused: False, and nothing runs.
    --
    --  @param Command The command line, already quoted as the shell expects.
    --  @param Wait True to run it to completion, False to start it and return.
@@ -449,7 +454,9 @@ package Hostkit.Process is
    --
    --  @param Terminal The terminal's program.
    --  @param Directory The folder to open it in.
-   --  @return The command line, quoted for the host's shell.
+   --  @return The command line, quoted for the host's shell; "" when the shell
+   --    cannot be handed Terminal or Directory unchanged (Shell.Quote refuses
+   --    it -- a % in a Windows path), which Run_Shell_Command then refuses.
    function Terminal_Command (Terminal : String; Directory : String) return String;
 
    --  The arguments that hand a program to Terminal to run, put before the
@@ -458,16 +465,23 @@ package Hostkit.Process is
    --  ".exe", any case -- so a full path names the same terminal.
    --
    --  "-e" for xterm's family (x-terminal-emulator, xterm, uxterm, konsole,
-   --  alacritty, urxvt, rxvt, ghostty, tilix, terminology); "-x" for
-   --  xfce4-terminal and terminator, whose "-e" takes one string for a shell;
-   --  "--" for gnome-terminal, kgx, ptyxis and foot; "start --" for wezterm;
-   --  nothing for kitty and Windows Terminal (wt), which run what follows
-   --  their options; "/k" for cmd. PowerShell and macOS's `open` cannot be
-   --  handed a program and its arguments, nor can a terminal not listed.
+   --  alacritty, urxvt, rxvt, ghostty, tilix, terminology, st, lxterminal,
+   --  qterminal); "-x" for xfce4-terminal, terminator, mate-terminal and
+   --  sakura, whose "-e" takes one string for a shell; "--" for
+   --  gnome-terminal, kgx, ptyxis and foot; "start --" for wezterm; nothing
+   --  for kitty and Windows Terminal (wt), which run what follows their
+   --  options; "/k" for cmd.
+   --
+   --  A terminal not listed is handed "-e" on a POSIX host, the convention
+   --  xterm set and nearly every X and Wayland terminal follows; on Windows,
+   --  which has no such convention, it is refused. PowerShell (pwsh,
+   --  powershell), macOS's `open` and the command-line shells (sh, bash,
+   --  dash, zsh, fish, ksh, mksh, csh, tcsh, nu) are refused on every host:
+   --  they cannot be handed a program and its arguments this way.
    --
    --  @param Terminal The terminal's program, as Default_Terminal names it.
    --  @param Prefix The arguments before the program; empty when False.
-   --  @return Whether Terminal is known to run a program it is handed.
+   --  @return Whether Terminal can be handed a program this way.
    function Terminal_Program_Prefix
      (Terminal : String;
       Prefix   : out String_Vectors.Vector)

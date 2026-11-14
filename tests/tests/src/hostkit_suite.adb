@@ -414,6 +414,23 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Keep_Id leaves that id of a file as it is, and keeping both asks the
+   --  host for nothing -- not even a chown that would clear set-user-id.
+   procedure Test_A_Kept_Id_Is_Left_As_It_Is
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A command line quoted for sh is run by sh, whatever the user's SHELL.
+   procedure Test_Sh_Runs_What_Was_Quoted_For_It
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  What cmd would change inside quotes -- %NAME%, a line break -- is
+   --  refused rather than quoted.
+   procedure Test_Cmd_Quoting_Refuses_What_Cmd_Would_Change
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  A file someone holds without sharing writes is synced once they let
    --  go: Windows' Sync_File waits a sharing violation out.
    procedure Test_A_Held_File_Is_Synced_Once_Let_Go
@@ -856,6 +873,15 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_An_Unchanged_Ownership_Needs_No_Right'Access,
          "metadata : giving a file the owner and group it has needs no right to change them");
+      Register_Routine
+        (T, Test_A_Kept_Id_Is_Left_As_It_Is'Access,
+         "metadata : a kept user or group is left as it is, and keeping both changes nothing");
+      Register_Routine
+        (T, Test_Sh_Runs_What_Was_Quoted_For_It'Access,
+         "shell : a command quoted for sh runs as quoted whatever SHELL names");
+      Register_Routine
+        (T, Test_Cmd_Quoting_Refuses_What_Cmd_Would_Change'Access,
+         "shell : an argument cmd would expand or cut short is refused, not quoted");
       Register_Routine
         (T, Test_Read_Only_File_Syncs_Promptly'Access,
          "durability : a read-only file syncs at once, without waiting out write retries");

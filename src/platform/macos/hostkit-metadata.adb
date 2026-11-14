@@ -703,8 +703,12 @@ package body Hostkit.Metadata is
            and then Answer.Previous <= Max_Previous
            and then Answer.Previous_Group <= Max_Previous
          then
-            Answer.Success := C_Fchown
-              (Fd, C_U32 (Value), C_U32 (Group)) = 0;
+            --  Keep_Id_Field is (uid_t) -1 and (gid_t) -1, which fchown
+            --  leaves as they are; with both kept it is not called, since a
+            --  chown that changes nothing still clears set-id bits.
+            Answer.Success :=
+              (Value = Keep_Id_Field and then Group = Keep_Id_Field)
+              or else C_Fchown (Fd, C_U32 (Value), C_U32 (Group)) = 0;
          else
             GNAT.OS_Lib.Set_Errno (E_Inval);
          end if;
@@ -891,6 +895,19 @@ package body Hostkit.Metadata is
         Interfaces.C.Strings.New_String (Path);
       Result : C_Int;
    begin
+      --  Keep_Id is (uid_t) -1 and (gid_t) -1, which chown leaves as they
+      --  are. With both kept nothing is asked of chown at all: a chown that
+      --  changes nothing still clears set-id bits (and capabilities on Linux).
+      if User_Id = Keep_Id and then Group_Id = Keep_Id then
+         Interfaces.C.Strings.Free (C_Path);
+         declare
+            Ignored_User, Ignored_Group : Account_Id;
+            Readable : Boolean;
+         begin
+            File_Ownership (Path, Ignored_User, Ignored_Group, Readable);
+            return Readable;
+         end;
+      end if;
       Result := C_Chown (C_Path, C_U32 (User_Id), C_U32 (Group_Id));
       Interfaces.C.Strings.Free (C_Path);
       return Result = 0;

@@ -47,14 +47,25 @@ begin
    Check ("kitty", "");
    Check ("wt", "");
    Check ("cmd", "/k");
+   Check ("st", "-e");
+   Check ("lxterminal", "-e");
+   Check ("qterminal", "-e");
+   Check ("mate-terminal", "-x");
+   Check ("sakura", "-x");
 
-   --  Those that cannot be handed a program and its arguments, and those
-   --  not known at all, are refused.
+   --  Those that cannot be handed a program and its arguments are refused
+   --  on every host: a shell would read "-e" as an option of its own.
    Check ("pwsh", "(none)");
    Check ("powershell", "(none)");
    Check ("open", "(none)");
-   Check ("hostkit-no-such-terminal", "(none)");
+   Check ("bash", "(none)");
+   Check ("/usr/bin/fish", "(none)");
    Check ("", "(none)");
+
+   --  A terminal not listed follows xterm's "-e" on a POSIX host, where
+   --  nearly every one does; Windows has no such convention to fall back on.
+   Check ("hostkit-no-such-terminal", (if Hostkit.Host.Current = Hostkit.Host.Windows then "(none)" else "-e"));
+   Check ("/usr/local/bin/Cool-Retro-Term", (if Hostkit.Host.Current = Hostkit.Host.Windows then "(none)" else "-e"));
 
    --  A terminal is known by its program name alone: a folder, ".exe" and
    --  case do not change it, on any host.

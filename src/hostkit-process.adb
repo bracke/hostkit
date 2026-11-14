@@ -247,8 +247,11 @@ package body Hostkit.Process is
          --  the line we built. Without /S, cmd applies a rule of its own -- with more
          --  than two quotes in the line it strips the first and the last -- which cuts
          --  through the middle of the quoting and spills an argument onto the line.
+         --  /V:OFF: delayed expansion would read !NAME! inside the quotes as a
+         --  variable, and a registry default (DelayedExpansion) can turn it on.
+         --  %NAME% has no such switch; Shell.Cmd_Quote refuses % instead.
          return Hostkit.Native.Run_Command_Line
-                  ("""" & Shell & """ /S /C """ & Command & """", Wait, Exit_Status);
+                  ("""" & Shell & """ /V:OFF /S /C """ & Command & """", Wait, Exit_Status);
       end if;
 
       declare
@@ -736,10 +739,18 @@ package body Hostkit.Process is
       end case;
       --  The others start where they are started. "cd /d" on cmd, because a
       --  plain cd does not cross to another drive.
-      return
-        (if Hostkit.Shell.Is_Command_Shell then "cd /d " else "cd ")
-        & Hostkit.Shell.Quote (Directory)
-        & " && " & Hostkit.Shell.Quote (Terminal);
+      declare
+         Quoted_Directory : constant String := Hostkit.Shell.Quote (Directory);
+         Quoted_Terminal  : constant String := Hostkit.Shell.Quote (Terminal);
+      begin
+         if Quoted_Directory = "" or else Quoted_Terminal = "" then
+            --  Text the shell would change (Shell.Cmd_Quote): no command.
+            return "";
+         end if;
+         return
+           (if Hostkit.Shell.Is_Command_Shell then "cd /d " else "cd ")
+           & Quoted_Directory & " && " & Quoted_Terminal;
+      end;
    end Terminal_Command;
 
    function Terminal_Program_Prefix
@@ -747,6 +758,8 @@ package body Hostkit.Process is
       Prefix   : out String_Vectors.Vector)
       return Boolean
    is
+      use type Hostkit.Host.Kind;
+
       --  The terminal's own name: no folder (either separator, so a Windows
       --  path reads the same on any host), no ".exe", any case.
       function Simple (Path : String) return String is
@@ -779,11 +792,11 @@ package body Hostkit.Process is
    begin
       Prefix.Clear;
       if Name in "x-terminal-emulator" | "xterm" | "uxterm" | "konsole" | "alacritty" | "urxvt" | "rxvt"
-        | "ghostty" | "tilix" | "terminology"
+        | "ghostty" | "tilix" | "terminology" | "st" | "lxterminal" | "qterminal"
       then
          --  xterm's "-e program args...", which the Debian alternative must accept.
          Add ("-e");
-      elsif Name in "xfce4-terminal" | "terminator" then
+      elsif Name in "xfce4-terminal" | "terminator" | "mate-terminal" | "sakura" then
          --  Their "-e" takes one string for a shell; "-x" takes the rest as argv.
          Add ("-x");
       elsif Name in "gnome-terminal" | "kgx" | "ptyxis" | "foot" then
@@ -797,8 +810,23 @@ package body Hostkit.Process is
       elsif Name in "kitty" | "wt" then
          --  The program follows their options directly.
          null;
-      else
+      elsif Name = ""
+        or else Name in "pwsh" | "powershell" | "open"
+          | "sh" | "bash" | "dash" | "zsh" | "fish" | "ksh" | "mksh" | "csh" | "tcsh" | "nu"
+      then
+         --  Not a terminal that runs what it is handed: PowerShell and `open`
+         --  take no program and its arguments, and to a shell "-e" means
+         --  something else entirely (sh's errexit, with the program read as a
+         --  script).
          return False;
+      elsif Hostkit.Host.Current = Hostkit.Host.Windows then
+         --  No convention among Windows terminals to fall back on.
+         return False;
+      else
+         --  An X or Wayland terminal not listed: "-e" is the convention xterm
+         --  set and nearly every one follows, and a terminal handed nothing
+         --  would open without the program at all.
+         Add ("-e");
       end if;
       return True;
    end Terminal_Program_Prefix;

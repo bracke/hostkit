@@ -114,8 +114,11 @@ is
 
    --  The ownership update: the previous owner and group into Answer, then
    --  Value and Group set as owner and primary group, each by the account
-   --  its name resolves to, where it changes.
+   --  its name resolves to, where it changes. Keep_Id_Field keeps that one
+   --  as it is, as an id equal to the previous one does.
    procedure Change_Ownership is
+      Keep_Owner : constant Boolean := Value = Keep_Id_Field;
+      Keep_Group : constant Boolean := Group = Keep_Id_Field;
    begin
       Answer.Previous := Identity_Field (Identity_Of (Owner));
       Answer.Previous_Group := Identity_Field (Identity_Of (Primary_Group));
@@ -123,8 +126,8 @@ is
       Remember (Primary_Group, Natural (Answer.Previous_Group));
       if Answer.Previous > Max_Previous
         or else Answer.Previous_Group > Max_Previous
-        or else Value > Identity_Field (Natural'Last)
-        or else Group > Identity_Field (Natural'Last)
+        or else (Value > Identity_Field (Natural'Last) and then not Keep_Owner)
+        or else (Group > Identity_Field (Natural'Last) and then not Keep_Group)
       then
          --  An id no SID here was given, or a previous one the caller
          --  could not keep to undo with.
@@ -133,8 +136,8 @@ is
          declare
             Owner_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
             Group_Sid : aliased Sid_Buffer := [others => Interfaces.C.nul];
-            Borrow_Owner : constant Boolean := Answer.Previous = Value;
-            Borrow_Group : constant Boolean := Answer.Previous_Group = Group;
+            Borrow_Owner : constant Boolean := Keep_Owner or else Answer.Previous = Value;
+            Borrow_Group : constant Boolean := Keep_Group or else Answer.Previous_Group = Group;
             Have_Owner : constant Boolean := Borrow_Owner or else
               Resolve_Account (Owner_Name, Value, Owner_Sid);
             Have_Group : constant Boolean := Borrow_Group or else

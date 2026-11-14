@@ -165,4 +165,12 @@ package body Hostkit_Test_Native is
       return Ok;
    end Drop_Backup_Privileges;
 
+   --  Windows keeps a process's exit code for anyone holding its handle;
+   --  there is no reaping to avoid, and no waitid to wait with.
+   function Await_Exit_Uncollected (Process_Id : Integer) return Exit_Wait is
+      pragma Unreferenced (Process_Id);
+   begin
+      return Cannot_Wait;
+   end Await_Exit_Uncollected;
+
 end Hostkit_Test_Native;
