@@ -39,7 +39,6 @@ begin
       Result := Hostkit.Durability.Sync_File (Path);
       Waited := Ada.Real_Time.Clock - Started;
    end;
-   Ada.Directories.Delete_File (Path);
    Assert
      (Result = Hostkit.Durability.Synced,
       "a file held for a moment is synced once let go: " & Hostkit.Durability.Outcome'Image (Result));
@@ -47,10 +46,41 @@ begin
      (Waited >= Ada.Real_Time.Milliseconds (100),
       "the sync waited for the holder rather than reaching the file past it");
    --  The upper bound is loose on purpose: a loaded runner, and a virus
-   --  scanner that holds the file a while longer, both stretch the wait
-   --  without anything being wrong, and a second's bound failed on them. It
-   --  still catches a sync that went on waiting long after the file was free.
+   --  scanner that holds the file just written a while longer, both stretch
+   --  the wait without anything being wrong, and a second's bound failed on
+   --  them. It catches only a sync that hangs.
    Assert
      (Waited < Ada.Real_Time.Milliseconds (5_000),
-      "and tried again once it let go, rather than waiting on long past it");
+      "and tried again once it let go, rather than hanging on");
+
+   --  The scanner's hold is on a file just written; the second sync of the
+   --  same file meets only the test's own hold, so here the bound can be
+   --  tight. Sync_File's whole retry schedule is 1.1 s (ten waits of 20 ms
+   --  times the attempt); let go at 0.15 s, it opens the file at the attempt
+   --  after that, about 0.2 s in. A bound under the schedule's length is
+   --  what tells a sync that tried again once the file was free from one
+   --  that waited its retries out regardless -- 5 s could never.
+   Assert (Hostkit_Test_Native.Hold_Against_Writers (Path, Held), "the file is held against writers again");
+   Started := Ada.Real_Time.Clock;
+   declare
+      task Holder;
+      task body Holder is
+      begin
+         delay 0.15;
+         Hostkit_Test_Native.Release (Held);
+      end Holder;
+   begin
+      Result := Hostkit.Durability.Sync_File (Path);
+      Waited := Ada.Real_Time.Clock - Started;
+   end;
+   Ada.Directories.Delete_File (Path);
+   Assert
+     (Result = Hostkit.Durability.Synced,
+      "a file held a second time is synced once let go: " & Hostkit.Durability.Outcome'Image (Result));
+   Assert
+     (Waited >= Ada.Real_Time.Milliseconds (100),
+      "the second sync waited for the holder too");
+   Assert
+     (Waited < Ada.Real_Time.Milliseconds (800),
+      "and tried again soon after it let go, rather than waiting out its whole 1.1 s of retries");
 end Test_A_Held_File_Is_Synced_Once_Let_Go;

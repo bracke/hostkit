@@ -70,7 +70,11 @@ package Hostkit.Path_Text is
    --  drive or share, and "C:dir" in Base when Base is on C: and at C:'s root
    --  otherwise -- the text does not say where that drive's current folder
    --  is. A path in the \\?\ or \\.\ form is returned as it is, as Windows
-   --  takes "." and ".." there as names.
+   --  takes "." and ".." there as names. A relative Path read from a Base in
+   --  that form keeps Base's components as they are, but has its own dots
+   --  resolved against them -- Windows would not, and "..\x" from
+   --  "\\?\C:\dir" would name a folder called ".." -- with the prefix and its
+   --  root as the root: "\\?\C:\x".
    --
    --  No link is followed and nothing is asked of a disk: "link/.." is the
    --  folder holding "link", where the host would read the folder holding

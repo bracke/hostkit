@@ -742,6 +742,67 @@ package body Hostkit.Process is
         & " && " & Hostkit.Shell.Quote (Terminal);
    end Terminal_Command;
 
+   function Terminal_Program_Prefix
+     (Terminal : String;
+      Prefix   : out String_Vectors.Vector)
+      return Boolean
+   is
+      --  The terminal's own name: no folder (either separator, so a Windows
+      --  path reads the same on any host), no ".exe", any case.
+      function Simple (Path : String) return String is
+         First  : Integer := Path'First;
+         Result : String (1 .. Path'Length);
+         Length : Natural := 0;
+      begin
+         for I in Path'Range loop
+            if Path (I) in '/' | '\' then
+               First := I + 1;
+            end if;
+         end loop;
+         for I in First .. Path'Last loop
+            Length := Length + 1;
+            Result (Length) :=
+              (if Path (I) in 'A' .. 'Z' then Character'Val (Character'Pos (Path (I)) + 32) else Path (I));
+         end loop;
+         if Length > 4 and then Result (Length - 3 .. Length) = ".exe" then
+            Length := Length - 4;
+         end if;
+         return Result (1 .. Length);
+      end Simple;
+
+      Name : constant String := Simple (Terminal);
+
+      procedure Add (Item : String) is
+      begin
+         Prefix.Append (To_Unbounded_String (Item));
+      end Add;
+   begin
+      Prefix.Clear;
+      if Name in "x-terminal-emulator" | "xterm" | "uxterm" | "konsole" | "alacritty" | "urxvt" | "rxvt"
+        | "ghostty" | "tilix" | "terminology"
+      then
+         --  xterm's "-e program args...", which the Debian alternative must accept.
+         Add ("-e");
+      elsif Name in "xfce4-terminal" | "terminator" then
+         --  Their "-e" takes one string for a shell; "-x" takes the rest as argv.
+         Add ("-x");
+      elsif Name in "gnome-terminal" | "kgx" | "ptyxis" | "foot" then
+         Add ("--");
+      elsif Name = "wezterm" then
+         Add ("start");
+         Add ("--");
+      elsif Name = "cmd" then
+         --  Run the program, then stay open as a terminal does.
+         Add ("/k");
+      elsif Name in "kitty" | "wt" then
+         --  The program follows their options directly.
+         null;
+      else
+         return False;
+      end if;
+      return True;
+   end Terminal_Program_Prefix;
+
    function Open_Native (Path : String) return Boolean is
    begin
       return Hostkit.Native.Open_Native (Path) = Opened;

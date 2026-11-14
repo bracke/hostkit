@@ -55,7 +55,16 @@ is
       Row ("c:x", "C:\dir", "C:\dir\x"),
       Row ("D:x", "C:\dir", "D:\x"),
       Row ("\\?\C:\a\..\b", "/x", "\\?\C:\a\..\b"),
-      Row ("..\b", "\\?\C:\a", "\\?\C:\a\..\b"),
+      Row ("..\b", "\\?\C:\a", "\\?\C:\b"),
+      Row ("..\x", "\\?\C:\dir", "\\?\C:\x"),
+      Row (".\x\.\y\..", "\\?\C:\dir", "\\?\C:\dir\x"),
+      Row ("..\..\..\x", "\\?\C:\a\b", "\\?\C:\x"),
+      Row ("x", "\\?\C:\a\..\b", "\\?\C:\a\..\b\x"),
+      Row ("..\x", "\\?\C:\a\..", "\\?\C:\a\x"),
+      Row ("\top\..\y", "\\?\C:\dir", "\\?\C:\y"),
+      Row ("..\..\x", "\\?\UNC\server\share\dir", "\\?\UNC\server\share\x"),
+      Row ("C:..\x", "\\?\C:\dir\sub", "\\?\C:\dir\x"),
+      Row ("", "\\?\C:\a\..\b", "\\?\C:\a\..\b"),
       Row ("\\.\pipe\x", "", "\\.\pipe\x")];
 begin
    for Item of Rows loop

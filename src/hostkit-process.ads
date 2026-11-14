@@ -452,4 +452,25 @@ package Hostkit.Process is
    --  @return The command line, quoted for the host's shell.
    function Terminal_Command (Terminal : String; Directory : String) return String;
 
+   --  The arguments that hand a program to Terminal to run, put before the
+   --  program and its own arguments: what a desktop entry's Terminal=true
+   --  needs. Terminal is matched by its program name alone -- no folder, no
+   --  ".exe", any case -- so a full path names the same terminal.
+   --
+   --  "-e" for xterm's family (x-terminal-emulator, xterm, uxterm, konsole,
+   --  alacritty, urxvt, rxvt, ghostty, tilix, terminology); "-x" for
+   --  xfce4-terminal and terminator, whose "-e" takes one string for a shell;
+   --  "--" for gnome-terminal, kgx, ptyxis and foot; "start --" for wezterm;
+   --  nothing for kitty and Windows Terminal (wt), which run what follows
+   --  their options; "/k" for cmd. PowerShell and macOS's `open` cannot be
+   --  handed a program and its arguments, nor can a terminal not listed.
+   --
+   --  @param Terminal The terminal's program, as Default_Terminal names it.
+   --  @param Prefix The arguments before the program; empty when False.
+   --  @return Whether Terminal is known to run a program it is handed.
+   function Terminal_Program_Prefix
+     (Terminal : String;
+      Prefix   : out String_Vectors.Vector)
+      return Boolean;
+
 end Hostkit.Process;

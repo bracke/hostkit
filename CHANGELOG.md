@@ -17,6 +17,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Process.Terminal_Program_Prefix`**: the one table of the arguments
+  that hand a program to a terminal -- `-e` for xterm's family (and tilix,
+  terminology), `-x` for xfce4-terminal and terminator, `--` for
+  gnome-terminal, kgx, ptyxis and foot, `start --` for wezterm, nothing for
+  kitty and Windows Terminal, `/k` for cmd -- and False for PowerShell,
+  macOS's `open` and anything unknown. Matched by program name (no folder,
+  no `.exe`, any case), so every program running a desktop entry's
+  `Terminal=true` agrees on it; launcher's own copy lacked kitty and tilix.
 - **Windows names that are not UTF-16 list, and round-trip.** NTFS keeps an
   unpaired surrogate in a name; every UTF-16 to UTF-8 conversion in the
   Windows bodies raised on one, so a single such name left a whole folder
@@ -255,6 +263,13 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **A relative path read from a `\\?\` base has its dots resolved.**
+  `Path_Text.Absolute ("..\x", "\\?\C:\dir")` returned
+  `\\?\C:\dir\..\x`, which Win32 does not normalise in the long form and so
+  read as a folder named `..`. The base's own components are still kept as
+  written, but the relative part's `.` and `..` are resolved against them,
+  the prefix and its root standing as the root (`\\?\C:\x`); a
+  drive-relative `C:x` is read from a long-form base on that drive too.
 - **`Process.Launch` no longer takes a spawned child's exit status (POSIX).**
   Its reaper -- and `Open_Native`'s -- collected with `waitpid` on any child,
   so a child that `Spawn` or `Run_Captured` was tracking could be collected

@@ -447,6 +447,8 @@ package body Hostkit_Suite is
 
    procedure Test_Terminal (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
+   procedure Test_Terminal_Program_Prefix (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
    procedure Test_Folds_Name_Case (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    procedure Test_Current_User_Account (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
@@ -872,6 +874,9 @@ package body Hostkit_Suite is
         (T, Test_Launch_Does_Not_Wait'Access, "process : Launch starts and does not wait");
       Register_Routine (T, Test_Is_Runnable'Access, "process : a path or a name is runnable only if it can start");
       Register_Routine (T, Test_Terminal'Access, "process : the default terminal and how it is opened in a folder");
+      Register_Routine
+        (T, Test_Terminal_Program_Prefix'Access,
+         "process : each terminal is handed a program with its own arguments, known by its name alone");
       Register_Routine
         (T, Test_Folds_Name_Case'Access, "fs : whether a volume folds name case is what it does");
       Register_Routine

@@ -193,20 +193,29 @@ package body Hostkit.Path_Text is
 
    --  Path with its "." and ".." components resolved and its empty ones
    --  dropped, the root kept as written.
-   function Resolved (Path : String) return String is
+   --
+   --  A path in the \\?\ or \\.\ form is Windows' to read as written, so
+   --  its components are names, "." and ".." among them -- all of them when
+   --  Relative_First is 0, else those that start before Relative_First: the
+   --  base a relative path was joined onto. The relative part's own dots,
+   --  from Relative_First on, are still resolved, against that base, with
+   --  the prefix and its root as the root: Windows will not do it for them.
+   function Resolved (Path : String; Relative_First : Natural := 0) return String is
       use Ada.Strings.Unbounded;
       type Bounds is record
-         First : Positive;
-         Last  : Natural;
+         First   : Positive;
+         Last    : Natural;
+         Literal : Boolean;
       end record;
       Root_Last : constant Natural := Path'First + Root_Length (Path) - 1;
       Sep       : constant Character := Style_Of (Path);
-      Kept      : array (1 .. Path'Length) of Bounds := [others => (First => 1, Last => 0)];
+      Long      : constant Boolean := Is_Long_Or_Device (Path);
+      Kept      : array (1 .. Path'Length) of Bounds := [others => (First => 1, Last => 0, Literal => False)];
       Count     : Natural := 0;
       Start     : Positive := Root_Last + 1;
       Result    : Unbounded_String;
    begin
-      if Is_Long_Or_Device (Path) then
+      if Long and then Relative_First = 0 then
          return From_One (Path, Path'First, Path'Last);
       end if;
       for Index in Root_Last + 1 .. Path'Last + 1 loop
@@ -214,14 +223,23 @@ package body Hostkit.Path_Text is
             declare
                Part : constant String := Path (Start .. Index - 1);
             begin
-               if Part = ".." and then Count > 0 and then Path (Kept (Count).First .. Kept (Count).Last) /= ".." then
+               if Long and then Start < Relative_First then
+                  --  The long base's own: a name, whatever it says.
+                  if Part /= "" then
+                     Count := Count + 1;
+                     Kept (Count) := (First => Start, Last => Index - 1, Literal => True);
+                  end if;
+               elsif Part = ".."
+                 and then Count > 0
+                 and then (Kept (Count).Literal or else Path (Kept (Count).First .. Kept (Count).Last) /= "..")
+               then
                   Count := Count - 1;
                elsif Part = "" or else Part = "." or else (Part = ".." and then Root_Last >= Path'First) then
                   --  Nothing, or the root's own "..", which is the root.
                   null;
                else
                   Count := Count + 1;
-                  Kept (Count) := (First => Start, Last => Index - 1);
+                  Kept (Count) := (First => Start, Last => Index - 1, Literal => False);
                end if;
             end;
             Start := Index + 1;
@@ -239,6 +257,25 @@ package body Hostkit.Path_Text is
       end if;
       return To_String (Result);
    end Resolved;
+
+   --  Relative joined onto Base and resolved: where Base is in the long or
+   --  device form, the relative part's dots are resolved against it.
+   function Resolved_Join (Base : String; Relative : String) return String is
+      Whole : constant String := Joined (Base, Relative);
+   begin
+      return Resolved (Whole, Relative_First => Whole'Last - Relative'Length + 1);
+   end Resolved_Join;
+
+   --  The drive letter Path is on, "C:\dir" or "\\?\C:\dir" alike, or ' '
+   --  for none.
+   function Drive_Of (Path : String) return Character is
+      Letter : constant Natural := (if Is_Long_Or_Device (Path) then Path'First + 4 else Path'First);
+   begin
+      if Letter < Path'Last and then Path (Letter + 1) = ':' and then Path (Letter) in 'A' .. 'Z' | 'a' .. 'z' then
+         return Path (Letter);
+      end if;
+      return ' ';
+   end Drive_Of;
 
    function Absolute (Path : String; Base : String) return String is
       Windows_Base : constant Boolean := Hostkit.Fs.Has_Windows_Root (Base);
@@ -268,21 +305,24 @@ package body Hostkit.Path_Text is
                Last      : constant Natural :=
                  (if Is_Separator_In (Base, Base_Root (Base_Root'Last)) then Base_Root'Last - 1 else Base_Root'Last);
             begin
-               return Resolved (Base_Root (Base_Root'First .. Last) & Path);
+               declare
+                  Whole : constant String := Base_Root (Base_Root'First .. Last) & Path;
+               begin
+                  return Resolved (Whole, Relative_First => Whole'Last - Path'Length + 1);
+               end;
             end;
          elsif Root > 0 then
             return Resolved (Path);
          elsif Drive_Relative then
             if Windows_Base
-              and then Base (Base'First + 1) = ':'
-              and then Ada.Characters.Handling.To_Upper (Base (Base'First))
+              and then Ada.Characters.Handling.To_Upper (Drive_Of (Base))
                        = Ada.Characters.Handling.To_Upper (Path (First))
             then
-               return Resolved (Joined (Base, Path (First + 2 .. Path'Last)));
+               return Resolved_Join (Base, Path (First + 2 .. Path'Last));
             end if;
             return Resolved (Path (First .. First + 1) & '\' & Path (First + 2 .. Path'Last));
          end if;
-         return Resolved (Joined (Base, Path));
+         return Resolved_Join (Base, Path);
       end;
    end Absolute;
 
