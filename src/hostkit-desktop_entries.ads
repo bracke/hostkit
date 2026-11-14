@@ -70,8 +70,17 @@ package Hostkit.Desktop_Entries is
    --  @return The postfixes; empty for "".
    function Locale_Candidates (Locale : String) return String_Vectors.Vector;
 
-   --  Locale_Candidates for the locale messages are shown in: the first of
-   --  LC_ALL, LC_MESSAGES and LANG that is set to something.
+   --  The locale messages are shown in, as the environment spells it: the
+   --  first of LC_ALL, LC_MESSAGES and LANG (POSIX's precedence) that is set
+   --  to something, blanks around it trimmed, otherwise unchanged, so the
+   --  codeset (".UTF-8") and modifier ("@latin") survive. The one reading of
+   --  those variables: a consumer's interface catalogs follow the same one
+   --  as the localized keys read here.
+   --
+   --  @return That value, or "" when none of them is set.
+   function Message_Locale return String;
+
+   --  Locale_Candidates for Message_Locale.
    --
    --  @return The postfixes; empty when none of them is set.
    function Message_Locale_Candidates return String_Vectors.Vector;

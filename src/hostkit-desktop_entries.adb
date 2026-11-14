@@ -107,16 +107,18 @@ package body Hostkit.Desktop_Entries is
       return Result;
    end Locale_Candidates;
 
-   function Message_Locale_Candidates return String_Vectors.Vector is
+   function Message_Locale return String is
       function Set (Name : String) return String is
         (Trim_Blanks (Hostkit.Environment.Value (Name, Default => "")));
 
       LC_All      : constant String := Set ("LC_ALL");
       LC_Messages : constant String := Set ("LC_MESSAGES");
    begin
-      return Locale_Candidates
-        (if LC_All /= "" then LC_All elsif LC_Messages /= "" then LC_Messages else Set ("LANG"));
-   end Message_Locale_Candidates;
+      return (if LC_All /= "" then LC_All elsif LC_Messages /= "" then LC_Messages else Set ("LANG"));
+   end Message_Locale;
+
+   function Message_Locale_Candidates return String_Vectors.Vector is
+     (Locale_Candidates (Message_Locale));
 
    function Current_Desktops return String is
      (Hostkit.Environment.Value ("XDG_CURRENT_DESKTOP", Default => ""));

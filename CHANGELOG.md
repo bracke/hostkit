@@ -17,6 +17,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Desktop_Entries.Message_Locale`**: the first of LC_ALL,
+  LC_MESSAGES and LANG that is set, trimmed and otherwise as written -- the
+  reading `Message_Locale_Candidates` makes, now public so a consumer's
+  interface catalogs follow the same variables in the same order as the
+  localized keys (files had its own copy).
+
 - **`Hostkit.Desktop_Entries`**: the one reading of freedesktop Desktop
   Entry files, which files (Open With) and launcher each had a copy of --
   and the copies disagreed: launcher passed an unknown string escape on to
