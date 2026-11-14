@@ -341,6 +341,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Entry_Is_Absent answers True only for nothing there and raises when the
+   --  host will not say, so a removal is never taken as done by a refusal.
+   procedure Test_An_Absent_Entry_Is_Told_From_A_Refusal
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  Size_Of, Modification_Time_Of and the owner's access answer as
    --  Ada.Directories and GNAT.OS_Lib do, for files, folders and links.
    procedure Test_Size_And_Modification_Time_Agree_With_Ada_Directories
@@ -853,6 +859,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Kind_Of_A_Long_Path'Access,
          "fs : an entry's kind is read past the Windows path limit");
+      Register_Routine
+        (T, Test_An_Absent_Entry_Is_Told_From_A_Refusal'Access,
+         "fs : an absent entry is told apart from a lookup the host refuses");
       Register_Routine
         (T, Test_Size_And_Modification_Time_Agree_With_Ada_Directories'Access,
          "fs : size, modification time and owner access agree with Ada.Directories and GNAT.OS_Lib");

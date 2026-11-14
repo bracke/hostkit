@@ -42,6 +42,22 @@ package Hostkit.Fs is
    --    or cannot be asked about.
    function Kind_Of (Path : String) return Entry_Kind;
 
+   --  Whether nothing at all is at Path -- no entry, and no link (dangling
+   --  or not) in its place -- told apart from the host not saying. Kind_Of
+   --  and Is_Link answer Missing_Entry and False for both; a caller that
+   --  takes "gone" as done (a removal it need not retry) must ask this.
+   --
+   --  POSIX asks lstat (statx without following on Linux); Windows asks
+   --  GetFileAttributesExW of the long form, which reads a link as itself.
+   --
+   --  @param Path Path to look at.
+   --  @return True when nothing is there: ENOENT, ENOTDIR, ELOOP or
+   --    ENAMETOOLONG on POSIX, a missing file, folder, drive or share on
+   --    Windows; False when an entry or a link is there.
+   --  @exception Ada.Directories.Use_Error The host will not say (a folder on
+   --    the way may not be searched, the volume refused, a device not ready).
+   function Entry_Is_Absent (Path : String) return Boolean;
+
    --  The size of the ordinary file at Path, as Ada.Directories.Size says it,
    --  without its limits: GNAT's Windows runtime cannot ask about a path past
    --  260 characters, where this asks with the \\?\ form.

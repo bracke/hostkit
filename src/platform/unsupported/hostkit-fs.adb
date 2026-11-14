@@ -33,6 +33,19 @@ package body Hostkit.Fs is
          return Missing_Entry;
    end Kind_Of;
 
+   --  GNAT's Exists cannot tell a refusal from nothing, and "cannot tell" is
+   --  not "nothing there": only an empty path is known absent; an entry
+   --  Exists sees is there; anything else the host will not say.
+   function Entry_Is_Absent (Path : String) return Boolean is
+   begin
+      if Path = "" then
+         return True;
+      elsif Ada.Directories.Exists (Path) then
+         return False;
+      end if;
+      raise Ada.Directories.Use_Error with Path & ": this host cannot tell nothing from a refusal";
+   end Entry_Is_Absent;
+
    --  GNAT's own, with its limits; no link is known here (Is_Link), so
    --  Follow_Links changes nothing.
    function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is

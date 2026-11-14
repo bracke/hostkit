@@ -276,6 +276,18 @@ package body Hostkit.Fs is
          Size       => Joined (Data.Size_High, Data.Size_Low));
    end Facts_Of;
 
+   function Entry_Is_Absent (Path : String) return Boolean is
+   begin
+      declare
+         Unused : constant Entry_Facts := Facts_Of (Path, Follow_Links => False);
+      begin
+         return False;
+      end;
+   exception
+      when Ada.Directories.Name_Error =>
+         return True;
+   end Entry_Is_Absent;
+
    function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
       Facts : constant Entry_Facts := Facts_Of (Path, Follow_Links);
    begin

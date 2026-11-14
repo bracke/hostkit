@@ -139,6 +139,18 @@ package body Hostkit.Fs is
    Statx_Want_Mtime : constant C_Unsigned := 16#40#;
    Statx_Want_Size  : constant C_Unsigned := 16#200#;
 
+   function Entry_Is_Absent (Path : String) return Boolean is
+   begin
+      declare
+         Unused : constant Statx_Record := Stat_Entry (Path, False, Statx_Want_Type);
+      begin
+         return False;
+      end;
+   exception
+      when Ada.Directories.Name_Error =>
+         return True;
+   end Entry_Is_Absent;
+
    function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
       Info : constant Statx_Record := Stat_Entry (Path, Follow_Links, Statx_Want_Type + Statx_Want_Size);
       Kind : constant C_U16 := Info.Mode and File_Type_Mask;

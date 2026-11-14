@@ -17,6 +17,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Fs.Entry_Is_Absent`**: whether nothing at all is at a path
+  (no entry, no link in its place), told apart from the host not saying.
+  `Kind_Of` and `Is_Link` answer `Missing_Entry` and `False` for both, so a
+  caller that took "gone" as done (a removal it need not retry) took a
+  refused lookup -- EACCES on a folder on the way, EIO -- for success. POSIX
+  asks lstat (statx without following on Linux), Windows
+  GetFileAttributesExW of the long form; a refusal raises
+  `Ada.Directories.Use_Error`.
 - **`Hostkit.Desktop_Entries.Message_Locale`**: the first of LC_ALL,
   LC_MESSAGES and LANG that is set, trimmed and otherwise as written -- the
   reading `Message_Locale_Candidates` makes, now public so a consumer's

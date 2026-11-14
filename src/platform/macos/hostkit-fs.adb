@@ -188,6 +188,18 @@ package body Hostkit.Fs is
       return Info;
    end Stat_Entry;
 
+   function Entry_Is_Absent (Path : String) return Boolean is
+   begin
+      declare
+         Unused : constant Stat_Record := Stat_Entry (Path, False);
+      begin
+         return False;
+      end;
+   exception
+      when Ada.Directories.Name_Error =>
+         return True;
+   end Entry_Is_Absent;
+
    function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
       Info : constant Stat_Record := Stat_Entry (Path, Follow_Links);
       Kind : constant C_U16 := Info.Mode and File_Type_Mask;
