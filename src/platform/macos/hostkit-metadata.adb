@@ -158,6 +158,10 @@ package body Hostkit.Metadata is
      (Path : Interfaces.C.Strings.chars_ptr;
       Flags : C_Int) return C_Int
      with Import, Convention => C, External_Name => "open";
+   function C_Openat
+     (Fd : C_Int; Pathname : Interfaces.C.Strings.chars_ptr;
+      Flags : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "openat";
 
    function C_Close (Fd : C_Int) return C_Int
      with Import, Convention => C, External_Name => "close";
@@ -545,7 +549,9 @@ package body Hostkit.Metadata is
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
       Group_Name     : String := "";
-      Access_Text    : String := "") return Metadata_Update_Result
+      Access_Text    : String := "";
+      Beneath_Root   : String := "";
+      Relative_Path  : String := "") return Metadata_Update_Result
    is
       --  The mode is the whole access record here.
       pragma Unreferenced (Owner_Name, Group_Name, Access_Text);
@@ -653,11 +659,95 @@ package body Hostkit.Metadata is
       end Link_Fallback;
 
       C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+        Interfaces.C.Strings.Null_Ptr;
       Fd     : C_Int := -1;
       Info   : aliased Stat_Record;
       Answer : Metadata_Update_Result;
       Ignored : C_Int;
+
+      function Open_Beneath return C_Int is
+         Held  : C_Int := -1;
+         Start : Positive := Relative_Path'First;
+         procedure Drop (Item : in out C_Int) is
+         begin
+            if Item >= 0 then
+               Ignored := C_Close (Item);
+               Item := -1;
+            end if;
+         end Drop;
+         procedure Open_Part (Part : String; Last : Boolean) is
+            C_Part : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String (Part);
+            Child : C_Int;
+            Error : Integer;
+         begin
+            Child := C_Openat
+              (Held, C_Part,
+               (if Last then O_Evtonly else O_Rdonly + O_Directory)
+               + O_Nofollow + O_Cloexec);
+            Interfaces.C.Strings.Free (C_Part);
+            if Child < 0 then
+               Error := GNAT.OS_Lib.Errno;
+               Drop (Held);
+               GNAT.OS_Lib.Set_Errno (Error);
+            else
+               Drop (Held);
+               Held := Child;
+            end if;
+         exception
+            when others =>
+               Safe_Free (C_Part);
+               Drop (Held);
+         end Open_Part;
+      begin
+         if (for some C of Beneath_Root => C = ASCII.NUL)
+           or else (for some C of Relative_Path => C = ASCII.NUL)
+         then
+            GNAT.OS_Lib.Set_Errno (E_Inval);
+            return -1;
+         elsif Relative_Path'Length > 0
+           and then Relative_Path (Relative_Path'First) = '/'
+         then
+            GNAT.OS_Lib.Set_Errno (E_Inval);
+            return -1;
+         end if;
+         declare
+            C_Root : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String
+                (if Beneath_Root = "" then "." else Beneath_Root);
+         begin
+            Held := C_Open
+              (C_Root,
+               (if Relative_Path = "" then O_Evtonly else O_Rdonly + O_Directory)
+               + O_Nofollow + O_Cloexec);
+            Interfaces.C.Strings.Free (C_Root);
+         exception
+            when others =>
+               Safe_Free (C_Root);
+               return -1;
+         end;
+         if Held < 0 or else Relative_Path = "" then
+            return Held;
+         end if;
+         for Index in Relative_Path'First .. Relative_Path'Last + 1 loop
+            if Index > Relative_Path'Last or else Relative_Path (Index) = '/' then
+               declare
+                  Part : constant String := Relative_Path (Start .. Index - 1);
+               begin
+                  if Part = ".." then
+                     Drop (Held);
+                     GNAT.OS_Lib.Set_Errno (E_Inval);
+                     return -1;
+                  elsif Part /= "" and then Part /= "." then
+                     Open_Part (Part, Index > Relative_Path'Last);
+                     exit when Held < 0;
+                  end if;
+               end;
+               Start := Index + 1;
+            end if;
+         end loop;
+         return Held;
+      end Open_Beneath;
 
       procedure Close is
       begin
@@ -667,10 +757,15 @@ package body Hostkit.Metadata is
          end if;
       end Close;
    begin
-      Fd := C_Open (C_Path, O_Evtonly + O_Nofollow + O_Cloexec);
-      Interfaces.C.Strings.Free (C_Path);
+      if Beneath_Root = "" then
+         C_Path := Interfaces.C.Strings.New_String (Path);
+         Fd := C_Open (C_Path, O_Evtonly + O_Nofollow + O_Cloexec);
+         Interfaces.C.Strings.Free (C_Path);
+      else
+         Fd := Open_Beneath;
+      end if;
       if Fd < 0 then
-         if Kind = Update_Permissions then
+         if Kind = Update_Permissions and then Beneath_Root = "" then
             return Link_Fallback (Expected, Check_Expected);
          end if;
          return Answer;
@@ -731,11 +826,18 @@ package body Hostkit.Metadata is
                   Safe_Free (Held);
             end;
          end if;
-         if not Answer.Success then
+         if not Answer.Success and then Beneath_Root = "" then
             Answer := Link_Fallback (Answer.Identity, True);
          end if;
       end if;
-      Close;
+      declare
+         Error : constant Integer := GNAT.OS_Lib.Errno;
+      begin
+         Close;
+         if not Answer.Success then
+            GNAT.OS_Lib.Set_Errno (Error);
+         end if;
+      end;
       return Answer;
    exception
       when others =>
@@ -769,6 +871,42 @@ package body Hostkit.Metadata is
          Safe_Free (C_Path);
          return (others => <>);
    end Entry_Revision_Of;
+
+   function Status_Of
+     (Path         : String;
+      Follow_Links : Boolean) return Entry_Status
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Stat_Record;
+      Status : C_Int;
+   begin
+      Status :=
+        (if Follow_Links
+         then C_Stat (C_Path, Info'Access)
+         else C_Lstat (C_Path, Info'Access));
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 or else Info.Size < 0 then
+         return (others => <>);
+      end if;
+      return
+        (Available        => True,
+         Size             => Identity_Field (Info.Size),
+         Modified_Seconds => Long_Long_Integer (Info.Modified_Time.Seconds),
+         Mode             => Natural (Info.Mode),
+         User_Id          => Account_Id (Info.User_Id),
+         Group_Id         => Account_Id (Info.Group_Id));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Status_Of;
+
+   function Entry_Status_Of (Path : String) return Entry_Status is
+     (Status_Of (Path, Follow_Links => False));
+
+   function File_Status_Of (Path : String) return Entry_Status is
+     (Status_Of (Path, Follow_Links => True));
 
    function Same_File (Left : String; Right : String) return Boolean is
       L_Buffer : aliased Stat_Record;

@@ -4,8 +4,18 @@ procedure Test_Entry_Identity_And_Revision_Do_Not_Follow_Links
 is
    pragma Unreferenced (T);
    use type Hostkit.Metadata.Identity_Field;
-   Original : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity");
-   Link     : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-link");
+   Original : constant String :=
+     Ada.Directories.Compose
+       (Scratch,
+        (if Hostkit.Host.Current = Hostkit.Host.Windows
+         then "hk-entry-identity.exe"
+         else "hk-entry-identity"));
+   Link     : constant String :=
+     Ada.Directories.Compose
+       (Scratch,
+        (if Hostkit.Host.Current = Hostkit.Host.Windows
+         then "hk-entry-identity-link.txt"
+         else "hk-entry-identity-link"));
    Missing  : constant String := Ada.Directories.Compose (Scratch, "hk-entry-identity-missing");
 
    function Same
@@ -29,9 +39,12 @@ begin
         Hostkit.Metadata.Entry_Identity_Of (Original);
       Revision : constant Hostkit.Metadata.Entry_Revision :=
         Hostkit.Metadata.Entry_Revision_Of (Original);
+      Status   : constant Hostkit.Metadata.Entry_Status :=
+        Hostkit.Metadata.Entry_Status_Of (Original);
    begin
       Assert (Identity.Available, "a newly-created entry has a stable host identity");
       Assert (Revision.Available, "a newly-created entry has a no-follow revision");
+      Assert (Status.Available, "a newly-created entry has portable no-follow status");
       --  Put_Line ends the line with CR LF on Windows, so ask the file.
       Assert (Revision.Size = Hostkit.Metadata.Identity_Field (Ada.Directories.Size (Original)),
               "a newly-created entry's revision has its size");
@@ -39,8 +52,27 @@ begin
               "a missing entry has no invented identity");
       Assert (not Hostkit.Metadata.Entry_Revision_Of (Missing).Available,
               "a missing entry has no invented revision");
+      Assert (not Hostkit.Metadata.Entry_Status_Of (Missing).Available,
+              "a missing entry has no invented portable status");
 
       if Hostkit.Fs.Create_Link (Original, Link) then
+         declare
+            Link_Status : constant Hostkit.Metadata.Entry_Status :=
+              Hostkit.Metadata.Entry_Status_Of (Link);
+            File_Status : constant Hostkit.Metadata.Entry_Status :=
+              Hostkit.Metadata.File_Status_Of (Link);
+         begin
+            Assert
+              (Link_Status.Available
+               and then Link_Status.Mode / 8#10000# mod 16 = 10,
+               "a link's portable status describes the link itself");
+            Assert
+              (File_Status.Available
+               and then File_Status.Mode / 8#10000# mod 16 = 8
+               and then File_Status.Size = Status.Size
+               and then File_Status.Mode = Status.Mode,
+               "a followed portable status describes the link target");
+         end;
          Assert
            (not Same (Identity, Hostkit.Metadata.Entry_Identity_Of (Link)),
             "a link's identity is its own, not its target's");

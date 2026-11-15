@@ -1,6 +1,6 @@
 name = "hostkit"
 description = "The host's own way: spawning, shells, links, executability"
-version = "0.1.0-dev"
+version = "0.2.0-dev"
 
 authors = ["Bent Bracke"]
 maintainers = ["Bent Bracke <bent@bracke.dk>"]

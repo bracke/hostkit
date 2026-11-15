@@ -34,6 +34,7 @@ package body Hostkit.Metadata is
    --  O_NOFOLLOW differs on arm, powerpc and m68k; the x86 value there is
    --  O_LARGEFILE, and the held entry would be a link's target.
    Machine_O_Nofollow : constant C_Int := Hostkit.Linux_Abi.O_Nofollow (Hostkit.Host.Machine_Name);
+   Machine_O_Directory : constant C_Int := Hostkit.Linux_Abi.O_Directory (Hostkit.Host.Machine_Name);
 
    At_FDCWD : constant C_Int := -100;
    At_Symlink_Nofollow : constant C_Unsigned := 16#100#;
@@ -99,6 +100,12 @@ package body Hostkit.Metadata is
      (Pathname : Interfaces.C.Strings.chars_ptr;
       Flags    : C_Int) return C_Int
      with Import, Convention => C, External_Name => "open";
+
+   function C_Openat
+     (Fd       : C_Int;
+      Pathname : Interfaces.C.Strings.chars_ptr;
+      Flags    : C_Int) return C_Int
+     with Import, Convention => C, External_Name => "openat";
 
    function C_Close (Fd : C_Int) return C_Int
      with Import, Convention => C, External_Name => "close";
@@ -502,11 +509,14 @@ package body Hostkit.Metadata is
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
       Group_Name     : String := "";
-      Access_Text    : String := "") return Metadata_Update_Result
+      Access_Text    : String := "";
+      Beneath_Root   : String := "";
+      Relative_Path  : String := "") return Metadata_Update_Result
    is
       --  The mode is the whole access record here.
       pragma Unreferenced (Owner_Name, Group_Name, Access_Text);
       O_Path        : constant C_Int := 16#20_0000#;
+      O_Directory   : constant C_Int := Machine_O_Directory;
       O_Nofollow    : constant C_Int := Machine_O_Nofollow;
       O_Cloexec     : constant C_Int := 16#08_0000#;
       At_Empty_Path : constant C_Int := 16#1000#;
@@ -521,12 +531,100 @@ package body Hostkit.Metadata is
       Wanted        : constant C_Unsigned :=
         Statx_Ino or Statx_Mode or Statx_Uid or Statx_Gid;
       C_Path        : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
+        Interfaces.C.Strings.Null_Ptr;
       Empty         : Interfaces.C.Strings.chars_ptr :=
         Interfaces.C.Strings.New_String ("");
       Fd            : C_Int := -1;
       Info          : aliased Statx_Record;
       Answer        : Metadata_Update_Result;
+
+      function Open_Beneath return C_Int is
+         Held  : C_Int := -1;
+         Start : Positive := Relative_Path'First;
+
+         procedure Open_Part (Part : String; Last : Boolean) is
+            C_Part : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String (Part);
+            Child  : C_Int;
+            Error  : Integer;
+            Ignored : C_Int;
+         begin
+            Child := C_Openat
+              (Held, C_Part,
+               O_Path + O_Nofollow + O_Cloexec
+               + (if Last then 0 else O_Directory));
+            Interfaces.C.Strings.Free (C_Part);
+            if Child < 0 then
+               Error := GNAT.OS_Lib.Errno;
+               Ignored := C_Close (Held);
+               Held := -1;
+               GNAT.OS_Lib.Set_Errno (Error);
+            else
+               Ignored := C_Close (Held);
+               Held := Child;
+            end if;
+         exception
+            when others =>
+               Safe_Free (C_Part);
+               if Held >= 0 then
+                  Ignored := C_Close (Held);
+                  Held := -1;
+               end if;
+         end Open_Part;
+      begin
+         if (for some C of Beneath_Root => C = ASCII.NUL)
+           or else (for some C of Relative_Path => C = ASCII.NUL)
+         then
+            GNAT.OS_Lib.Set_Errno (E_Inval);
+            return -1;
+         elsif Relative_Path'Length > 0
+           and then Relative_Path (Relative_Path'First) = '/'
+         then
+            GNAT.OS_Lib.Set_Errno (E_Inval);
+            return -1;
+         end if;
+         declare
+            C_Root : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String
+                (if Beneath_Root = "" then "." else Beneath_Root);
+         begin
+            Held := C_Open
+              (C_Root, O_Path + O_Nofollow + O_Cloexec
+               + (if Relative_Path = "" then 0 else O_Directory));
+            Interfaces.C.Strings.Free (C_Root);
+         exception
+            when others =>
+               Safe_Free (C_Root);
+               return -1;
+         end;
+         if Held < 0 or else Relative_Path = "" then
+            return Held;
+         end if;
+         for Index in Relative_Path'First .. Relative_Path'Last + 1 loop
+            if Index > Relative_Path'Last or else Relative_Path (Index) = '/' then
+               declare
+                  Part : constant String := Relative_Path (Start .. Index - 1);
+                  Last : constant Boolean := Index > Relative_Path'Last;
+               begin
+                  if Part = ".." then
+                     declare
+                        Ignored : C_Int := C_Close (Held);
+                        pragma Unreferenced (Ignored);
+                     begin
+                        Held := -1;
+                     end;
+                     GNAT.OS_Lib.Set_Errno (E_Inval);
+                     return -1;
+                  elsif Part /= "" and then Part /= "." then
+                     Open_Part (Part, Last);
+                     exit when Held < 0;
+                  end if;
+               end;
+               Start := Index + 1;
+            end if;
+         end loop;
+         return Held;
+      end Open_Beneath;
 
       procedure Close is
          Ignored : C_Int;
@@ -548,8 +646,13 @@ package body Hostkit.Metadata is
       --  failures do: a link is ELOOP, as O_NOFOLLOW refuses one; another
       --  entry than Expected is ENOENT, the one asked about being gone from
       --  the path (Windows says the same); an id out of range is EINVAL.
-      Fd := C_Open (C_Path, O_Path + O_Nofollow + O_Cloexec);
-      Interfaces.C.Strings.Free (C_Path);
+      if Beneath_Root = "" then
+         C_Path := Interfaces.C.Strings.New_String (Path);
+         Fd := C_Open (C_Path, O_Path + O_Nofollow + O_Cloexec);
+         Interfaces.C.Strings.Free (C_Path);
+      else
+         Fd := Open_Beneath;
+      end if;
       if Fd < 0
         or else Statx
           (Fd, Empty, C_Unsigned (At_Empty_Path) or At_Symlink_Nofollow,
@@ -654,6 +757,47 @@ package body Hostkit.Metadata is
          Safe_Free (C_Path);
          return (others => <>);
    end Entry_Revision_Of;
+
+   function Status_Of
+     (Path         : String;
+      Follow_Links : Boolean) return Entry_Status
+   is
+      C_Path : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.New_String (Path);
+      Info   : aliased Statx_Record;
+      Wanted : constant C_Unsigned :=
+        Statx_Mode or Statx_Uid or Statx_Gid or Statx_Mtime or Statx_Size;
+      Status : C_Int;
+   begin
+      Status :=
+        Statx
+          (At_FDCWD,
+           C_Path,
+           (if Follow_Links then 0 else At_Symlink_Nofollow),
+           Wanted,
+           Info'Access);
+      Interfaces.C.Strings.Free (C_Path);
+      if Status /= 0 or else (Info.Mask and Wanted) /= Wanted then
+         return (others => <>);
+      end if;
+      return
+        (Available        => True,
+         Size             => Identity_Field (Info.Size),
+         Modified_Seconds => Long_Long_Integer (Info.Modified_Time.Seconds),
+         Mode             => Natural (Info.Mode),
+         User_Id          => Account_Id (Info.User_Id),
+         Group_Id         => Account_Id (Info.Group_Id));
+   exception
+      when others =>
+         Safe_Free (C_Path);
+         return (others => <>);
+   end Status_Of;
+
+   function Entry_Status_Of (Path : String) return Entry_Status is
+     (Status_Of (Path, Follow_Links => False));
+
+   function File_Status_Of (Path : String) return Entry_Status is
+     (Status_Of (Path, Follow_Links => True));
 
    function Same_File (Left : String; Right : String) return Boolean is
       L_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Left);

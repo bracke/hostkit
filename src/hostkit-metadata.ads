@@ -110,6 +110,26 @@ package Hostkit.Metadata is
    function Entry_Identity_Of (Path : String) return Entry_Identity;
    function Entry_Revision_Of (Path : String) return Entry_Revision;
 
+   --  Portable metadata for Path itself, without following a symbolic link.
+   --  A successful result is one coherent native observation: implementations
+   --  must not combine fields fetched through independently resolved pathnames.
+   type Entry_Status is record
+      Available        : Boolean := False;
+      Size             : Identity_Field := 0;
+      Modified_Seconds : Long_Long_Integer := 0;
+      Mode             : Natural := 0;
+      User_Id          : Account_Id := 0;
+      Group_Id         : Account_Id := 0;
+   end record;
+
+   function Entry_Status_Of (Path : String) return Entry_Status;
+
+   --  Portable metadata for the file Path resolves to, following symbolic
+   --  links.  Like Entry_Status_Of, a successful result is one coherent
+   --  native observation rather than a realpath query followed by a second
+   --  pathname lookup.
+   function File_Status_Of (Path : String) return Entry_Status;
+
    type Metadata_Update_Kind is (Update_Permissions, Update_Ownership);
 
    type Metadata_Update_Result is record
@@ -138,6 +158,9 @@ package Hostkit.Metadata is
    --  Owner_Name and Group_Name are used only on hosts whose native ownership
    --  API needs names as well as the ids Hostkit reported. Max_Previous lets a
    --  narrower caller refuse an undo value it could not retain losslessly.
+   --  When Beneath_Root is nonempty, Relative_Path is opened component by
+   --  component below that directory, refusing links and parent traversal;
+   --  Path remains the diagnostic spelling and is not used for that open.
    --
    --  An ownership update takes Keep_Id_Field for Value or Group to leave
    --  that id as it is; with both, nothing is written and it succeeds. On
@@ -163,7 +186,9 @@ package Hostkit.Metadata is
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
       Group_Name     : String := "";
-      Access_Text    : String := "") return Metadata_Update_Result;
+      Access_Text    : String := "";
+      Beneath_Root   : String := "";
+      Relative_Path  : String := "") return Metadata_Update_Result;
 
    --  What a filesystem has room for. All byte and inode counts saturate: a value
    --  beyond this host's range is clamped to 'Last rather than wrapping.

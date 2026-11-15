@@ -14,6 +14,18 @@ package body Hostkit.Metadata is
       return (others => <>);
    end Entry_Revision_Of;
 
+   function Entry_Status_Of (Path : String) return Entry_Status is
+      pragma Unreferenced (Path);
+   begin
+      return (others => <>);
+   end Entry_Status_Of;
+
+   function File_Status_Of (Path : String) return Entry_Status is
+      pragma Unreferenced (Path);
+   begin
+      return (others => <>);
+   end File_Status_Of;
+
    function Update_Entry_Metadata
      (Path           : String;
       Expected       : Entry_Identity;
@@ -24,11 +36,13 @@ package body Hostkit.Metadata is
       Max_Previous   : Identity_Field;
       Owner_Name     : String := "";
       Group_Name     : String := "";
-      Access_Text    : String := "") return Metadata_Update_Result
+      Access_Text    : String := "";
+      Beneath_Root   : String := "";
+      Relative_Path  : String := "") return Metadata_Update_Result
    is
       pragma Unreferenced
         (Path, Expected, Check_Expected, Kind, Value, Group, Max_Previous,
-         Owner_Name, Group_Name, Access_Text);
+         Owner_Name, Group_Name, Access_Text, Beneath_Root, Relative_Path);
    begin
       return (others => <>);
    end Update_Entry_Metadata;

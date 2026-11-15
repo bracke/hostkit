@@ -35,6 +35,16 @@ begin
      (Result.Previous = Hostkit.Metadata.Identity_Field (Owner)
       and then Result.Previous_Group = Hostkit.Metadata.Identity_Field (Group),
       "and reports them as they were");
+   Result := Hostkit.Metadata.Update_Entry_Metadata
+     (Path, (others => <>), False, Hostkit.Metadata.Update_Ownership,
+      Hostkit.Metadata.Identity_Field (Owner),
+      Hostkit.Metadata.Identity_Field (Group),
+      Hostkit.Metadata.Identity_Field'Last,
+      Beneath_Root => Scratch,
+      Relative_Path => "hostkit-same-owner");
+   Assert
+     (Result.Success,
+      "giving unchanged ownership beneath a root needs no WRITE_OWNER");
    Assert (Hostkit.Metadata.Set_Exact_Permissions (Path, 8#644#), "the file is made deletable");
    Ada.Directories.Delete_File (Path);
 end Test_An_Unchanged_Ownership_Needs_No_Right;
