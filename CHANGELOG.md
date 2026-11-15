@@ -17,6 +17,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Desktop_Entries.Locale_Variable`**: which variable decides a
+  locale category -- the first of LC_ALL, the category's own and LANG that
+  is set -- the one reading of POSIX's precedence. `Message_Locale` is its
+  value for LC_MESSAGES; a consumer reading LC_TIME or LC_NUMERIC asks the
+  same function instead of spelling the order again.
 - **`Hostkit.Fs.Entry_Is_Absent`**: whether nothing at all is at a path
   (no entry, no link in its place), told apart from the host not saying.
   `Kind_Of` and `Is_Link` answer `Missing_Entry` and `False` for both, so a

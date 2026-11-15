@@ -187,16 +187,17 @@ begin
    Assert (not Entries.Shown_In ("", "KDE\q;", "GNOME"), "a list that does not decode hides the entry");
 
    --  The message locale: LC_ALL, else LC_MESSAGES, else LANG, as the
-   --  environment spells it; the candidates follow it. Every variable is
-   --  put back, on a failed assertion too.
+   --  environment spells it; the candidates follow it; the same precedence
+   --  decides every category (Locale_Variable). Every variable is put back,
+   --  on a failed assertion too.
    declare
       type Saved is record
          Value : Unbounded_String;
          Found : Boolean;
       end record;
-      subtype Variable is Positive range 1 .. 3;
+      subtype Variable is Positive range 1 .. 4;
       function Name (Index : Variable) return String is
-        (case Index is when 1 => "LC_ALL", when 2 => "LC_MESSAGES", when 3 => "LANG");
+        (case Index is when 1 => "LC_ALL", when 2 => "LC_MESSAGES", when 3 => "LANG", when 4 => "LC_TIME");
       Before : array (Variable) of Saved;
 
       procedure Restore is
@@ -216,18 +217,29 @@ begin
       end loop;
       Hostkit.Environment.Clear ("LC_ALL");
       Hostkit.Environment.Clear ("LC_MESSAGES");
+      Hostkit.Environment.Clear ("LC_TIME");
       Hostkit.Environment.Set ("LANG", " da_DK.UTF-8 ");
       Assert (Entries.Message_Locale = "da_DK.UTF-8", "LANG alone, blanks trimmed");
+      Assert (Entries.Locale_Variable ("LC_TIME") = "LANG", "LANG decides a category nothing else sets");
       Hostkit.Environment.Set ("LC_MESSAGES", "sr_RS@latin");
       Assert (Entries.Message_Locale = "sr_RS@latin", "LC_MESSAGES before LANG, modifier kept");
       Assert (Image (Entries.Message_Locale_Candidates) = "[sr_RS@latin][sr_RS][sr@latin][sr]",
               "the candidates follow the message locale");
       Hostkit.Environment.Set ("LC_ALL", "de_AT");
       Assert (Entries.Message_Locale = "de_AT", "LC_ALL before both");
+      Assert (Entries.Locale_Variable ("LC_TIME") = "LC_ALL", "LC_ALL decides every category");
+      Hostkit.Environment.Clear ("LC_ALL");
+      Hostkit.Environment.Set ("LC_TIME", "  ");
+      Assert (Entries.Locale_Variable ("LC_TIME") = "LANG", "a category set to blanks is not set");
+      Hostkit.Environment.Set ("LC_TIME", "fi_FI");
+      Assert (Entries.Locale_Variable ("LC_TIME") = "LC_TIME", "the category's own variable before LANG");
+      Assert (Entries.Locale_Variable ("LC_MESSAGES") = "LC_MESSAGES", "and each category reads its own");
+      Hostkit.Environment.Clear ("LC_TIME");
       Hostkit.Environment.Clear ("LC_ALL");
       Hostkit.Environment.Clear ("LC_MESSAGES");
       Hostkit.Environment.Clear ("LANG");
       Assert (Entries.Message_Locale = "", "none set");
+      Assert (Entries.Locale_Variable ("LC_TIME") = "", "no variable decides");
       Restore;
    exception
       when others =>

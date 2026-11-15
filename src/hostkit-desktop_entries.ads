@@ -70,12 +70,20 @@ package Hostkit.Desktop_Entries is
    --  @return The postfixes; empty for "".
    function Locale_Candidates (Locale : String) return String_Vectors.Vector;
 
+   --  Which variable decides a locale category, by POSIX's precedence: the
+   --  first of LC_ALL, Category and LANG that is set to something other than
+   --  blanks. The one reading of that precedence, for messages and for every
+   --  other category a consumer formats by.
+   --
+   --  @param Category The category's variable ("LC_MESSAGES", "LC_TIME").
+   --  @return "LC_ALL", Category or "LANG", or "" when none of them is set.
+   function Locale_Variable (Category : String) return String;
+
    --  The locale messages are shown in, as the environment spells it: the
-   --  first of LC_ALL, LC_MESSAGES and LANG (POSIX's precedence) that is set
-   --  to something, blanks around it trimmed, otherwise unchanged, so the
-   --  codeset (".UTF-8") and modifier ("@latin") survive. The one reading of
-   --  those variables: a consumer's interface catalogs follow the same one
-   --  as the localized keys read here.
+   --  value of Locale_Variable ("LC_MESSAGES"), blanks around it trimmed,
+   --  otherwise unchanged, so the codeset (".UTF-8") and modifier ("@latin")
+   --  survive. A consumer's interface catalogs follow the same reading as
+   --  the localized keys read here.
    --
    --  @return That value, or "" when none of them is set.
    function Message_Locale return String;

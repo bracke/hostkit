@@ -107,14 +107,20 @@ package body Hostkit.Desktop_Entries is
       return Result;
    end Locale_Candidates;
 
-   function Message_Locale return String is
-      function Set (Name : String) return String is
-        (Trim_Blanks (Hostkit.Environment.Value (Name, Default => "")));
+   --  Name's value with the blanks around it trimmed, "" when it is not set.
+   function Set (Name : String) return String is
+     (Trim_Blanks (Hostkit.Environment.Value (Name, Default => "")));
 
-      LC_All      : constant String := Set ("LC_ALL");
-      LC_Messages : constant String := Set ("LC_MESSAGES");
+   function Locale_Variable (Category : String) return String is
+     (if Set ("LC_ALL") /= "" then "LC_ALL"
+      elsif Set (Category) /= "" then Category
+      elsif Set ("LANG") /= "" then "LANG"
+      else "");
+
+   function Message_Locale return String is
+      Name : constant String := Locale_Variable ("LC_MESSAGES");
    begin
-      return (if LC_All /= "" then LC_All elsif LC_Messages /= "" then LC_Messages else Set ("LANG"));
+      return (if Name = "" then "" else Set (Name));
    end Message_Locale;
 
    function Message_Locale_Candidates return String_Vectors.Vector is
