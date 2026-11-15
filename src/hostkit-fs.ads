@@ -51,11 +51,13 @@ package Hostkit.Fs is
    --  GetFileAttributesExW of the long form, which reads a link as itself.
    --
    --  @param Path Path to look at.
-   --  @return True when nothing is there: ENOENT, ENOTDIR, ELOOP or
-   --    ENAMETOOLONG on POSIX, a missing file, folder, drive or share on
-   --    Windows; False when an entry or a link is there.
+   --  @return True when nothing is there: ENOENT or ENOTDIR on POSIX, or
+   --    ENAMETOOLONG for a name longer than any entry can bear; a missing
+   --    file, folder, drive or share on Windows. False when an entry or a
+   --    link is there.
    --  @exception Ada.Directories.Use_Error The host will not say (a folder on
-   --    the way may not be searched, the volume refused, a device not ready).
+   --    the way may not be searched, the volume refused, a device not ready,
+   --    a path past PATH_MAX, a link loop on the way).
    function Entry_Is_Absent (Path : String) return Boolean;
 
    --  The size of the ordinary file at Path, as Ada.Directories.Size says it,

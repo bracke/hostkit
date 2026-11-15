@@ -158,10 +158,32 @@ package body Hostkit.Fs is
    S_IFDIR : constant C_U16 := 8#040000#;
    S_IFLNK : constant C_U16 := 8#120000#;
 
+   --  Whether some component of Path is longer than any name can be
+   --  (NAME_MAX, 255 bytes on Linux and macOS): no entry can bear it, so
+   --  ENAMETOOLONG then says nothing is there. A whole path past PATH_MAX
+   --  may still name an entry that the host will not look up by that path.
+   function Has_Overlong_Component (Path : String) return Boolean is
+      Name_Max : constant := 255;
+      Run      : Natural := 0;
+   begin
+      for C of Path loop
+         if C = '/' then
+            Run := 0;
+         else
+            Run := Run + 1;
+            if Run > Name_Max then
+               return True;
+            end if;
+         end if;
+      end loop;
+      return False;
+   end Has_Overlong_Component;
+
    --  stat(2), or lstat(2) for a final link not followed, of Path; the
-   --  failures as the spec's Name_Error and Use_Error. ENOENT, ENOTDIR, ELOOP
-   --  and ENAMETOOLONG say nothing is reachable there; anything else (EACCES
-   --  on a folder on the way, EIO) that the host would not say.
+   --  failures as the spec's Name_Error and Use_Error. ENOENT and ENOTDIR say
+   --  nothing is reachable there, as do a name too long for any entry and a
+   --  followed final link that loops; anything else (EACCES on a folder on
+   --  the way, EIO, a path past PATH_MAX) that the host would not say.
    function Stat_Entry (Path : String; Follow_Links : Boolean) return Stat_Record is
       E_Noent       : constant := 2;
       E_Notdir      : constant := 20;
@@ -180,7 +202,14 @@ package body Hostkit.Fs is
       Error := GNAT.OS_Lib.Errno;
       Interfaces.C.Strings.Free (C_Path);
       if Status /= 0 then
-         if Error in E_Noent | E_Notdir | E_Nametoolong | E_Loop then
+         --  ENOENT and ENOTDIR: nothing there. ENAMETOOLONG only for a name
+         --  no entry can bear; ELOOP only past a final link followed (it
+         --  loops, as a dangling one points nowhere) -- on the way, or with
+         --  the final link not followed, the host just will not say.
+         if Error in E_Noent | E_Notdir
+           or else (Error = E_Nametoolong and then Has_Overlong_Component (Path))
+           or else (Error = E_Loop and then Follow_Links)
+         then
             raise Ada.Directories.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
          end if;
          raise Ada.Directories.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);

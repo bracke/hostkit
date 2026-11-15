@@ -20,6 +20,35 @@ begin
    Write_File (Inside, "here");
    Assert (Hostkit.Fs.Entry_Is_Absent (Ada.Directories.Compose (Folder, "nothing")), "nothing there is absent");
    Assert (Hostkit.Fs.Entry_Is_Absent (""), "no path at all names nothing");
+   --  A name longer than any entry can bear names nothing; a path past
+   --  PATH_MAX made of ordinary names is one the host will not look up, not
+   --  proof that nothing is there. Windows reads both through \\?\.
+   Assert
+     (Hostkit.Fs.Entry_Is_Absent (Ada.Directories.Compose (Folder, [1 .. 300 => 'n'])),
+      "a name longer than NAME_MAX is absent");
+   if Hostkit.Host.Current /= Hostkit.Host.Windows then
+      declare
+         Long_Path : Ada.Strings.Unbounded.Unbounded_String :=
+           Ada.Strings.Unbounded.To_Unbounded_String (Folder);
+         Refused_Long : Boolean := False;
+      begin
+         while Ada.Strings.Unbounded.Length (Long_Path) <= 5_000 loop
+            Ada.Strings.Unbounded.Append (Long_Path, "/" & [1 .. 200 => 'd']);
+         end loop;
+         begin
+            declare
+               Answer : constant Boolean :=
+                 Hostkit.Fs.Entry_Is_Absent (Ada.Strings.Unbounded.To_String (Long_Path));
+            begin
+               Assert (not Answer, "a path past PATH_MAX is not taken for absence");
+            end;
+         exception
+            when Ada.Directories.Use_Error =>
+               Refused_Long := True;
+         end;
+         Assert (Refused_Long, "a path past PATH_MAX is a lookup the host will not make");
+      end;
+   end if;
    Assert (not Hostkit.Fs.Entry_Is_Absent (File), "a file is not absent");
    Assert (not Hostkit.Fs.Entry_Is_Absent (Folder), "nor is a folder");
    if Hostkit.Fs.Create_Link (Ada.Directories.Compose (Folder, "missing-target"), Dangling) then
