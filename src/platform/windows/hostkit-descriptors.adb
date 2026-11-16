@@ -11,6 +11,7 @@ package body Hostkit.Descriptors is
    use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
+   use type Interfaces.Unsigned_64;
    use type Interfaces.Unsigned_8;
    use type Ada.Streams.Stream_Element_Offset;
    use type System.Address;
