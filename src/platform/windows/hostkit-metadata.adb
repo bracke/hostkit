@@ -32,6 +32,7 @@ package body Hostkit.Metadata is
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_long_long;
+   use type Interfaces.Integer_64;
    use type Interfaces.Unsigned_8;
    use type Interfaces.Unsigned_64;
    use type System.Address;
