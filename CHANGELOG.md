@@ -321,6 +321,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Fixed
 
+- **`Spawn.Group_New` owns a process tree on Windows.** The child is started
+  suspended, assigned to a Job Object and then resumed; after its leader has
+  ended, `Spawn.Release` terminates descendants still in that job. A shell,
+  language server or other supervised helper can therefore leave no child
+  behind merely because Windows has no POSIX process-group identifier.
+
 - **cmd no longer expands `%NAME%` in a quoted argument.** cmd expands
   `%NAME%` on its command line inside double quotes too, and has no escape
   for `%` there, so `Shell.Quote` on Windows (now `Shell.Cmd_Quote`, with

@@ -3,6 +3,7 @@ with Interfaces.C;
 
 with System;
 
+with Hostkit.Linux_Abi;
 with Hostkit.Posix;
 
 package body Hostkit.Descriptors is
@@ -11,10 +12,13 @@ package body Hostkit.Descriptors is
    use type Interfaces.C.long;
    use type Interfaces.C.unsigned;
    use type Interfaces.C.Strings.chars_ptr;
+   use type Interfaces.Unsigned_64;
    use type Ada.Streams.Stream_Element_Offset;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_Long is Interfaces.C.long;
+   subtype Statx_Record is Hostkit.Linux_Abi.Statx_Record;
+   subtype Identity_Field is Hostkit.File_Identities.Identity_Field;
 
    --  Linux, asm-generic/fcntl.h. Written in octal as the header does, so a
    --  reader can compare them with it directly. These are NOT the macOS values
@@ -40,6 +44,7 @@ package body Hostkit.Descriptors is
    --  errno values this package distinguishes. Everything else is an error.
    E_Intr       : constant C_Int := 4;
    E_Again      : constant C_Int := 11;
+   E_Spipe      : constant C_Int := 29;
    E_Pipe       : constant C_Int := 32;
    E_Wouldblock : constant C_Int := E_Again;  --  same value on Linux
 
@@ -77,6 +82,16 @@ package body Hostkit.Descriptors is
      with Import => True, Convention => C, External_Name => "ttyname";
    function C_Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "dup2";
+   function C_Lseek (Fd : C_Int; Offset : C_Long; Origin : C_Int)
+      return C_Long
+     with Import => True, Convention => C, External_Name => "lseek";
+   function C_Statx
+     (Fd    : C_Int;
+      Path  : Interfaces.C.Strings.chars_ptr;
+      Flags : Interfaces.C.unsigned;
+      Mask  : Interfaces.C.unsigned;
+      Info  : access Statx_Record) return C_Int
+     with Import => True, Convention => C, External_Name => "statx";
 
    function Errno return C_Int renames Hostkit.Posix.Errno;
 
@@ -441,6 +456,8 @@ package body Hostkit.Descriptors is
 
       case Mode is
          when Open_Read            => Flags := O_Rdonly;
+         when Open_Read_Non_Blocking => Flags := O_Rdonly + O_Nonblock;
+         when Open_Read_For_Following => Flags := O_Rdonly + O_Nonblock;
          when Open_Write_Truncate  =>
                Flags := C_Int
                  (Interfaces.C.unsigned (O_Wronly)
@@ -475,6 +492,103 @@ package body Hostkit.Descriptors is
 
       return True;
    end Open_File;
+
+   function Identity_Of
+     (Item : Descriptor) return Hostkit.File_Identities.Entry_Identity
+   is
+      Empty_Name   : Interfaces.C.Strings.chars_ptr :=
+        Interfaces.C.Strings.Null_Ptr;
+      Item_Info    : aliased Statx_Record;
+      Item_Status  : C_Int;
+   begin
+      if not Is_Valid (Item) then
+         return (others => <>);
+      end if;
+
+      Empty_Name := Interfaces.C.Strings.New_String ("");
+      Item_Status := C_Statx
+        (To_Fd (Item), Empty_Name,
+         Interfaces.C.unsigned (Hostkit.Linux_Abi.At_Empty_Path),
+         Hostkit.Linux_Abi.Statx_Ino or Hostkit.Linux_Abi.Statx_Btime,
+         Item_Info'Access);
+      Interfaces.C.Strings.Free (Empty_Name);
+
+      if Item_Status /= 0
+        or else (Item_Info.Mask and Hostkit.Linux_Abi.Statx_Ino) = 0
+      then
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Identity_Field (Item_Info.Device_Major) * 2 ** 32
+           + Identity_Field (Item_Info.Device_Minor),
+         File_Number     => Identity_Field (Item_Info.Inode),
+         Generation_High =>
+           (if (Item_Info.Mask and Hostkit.Linux_Abi.Statx_Btime) /= 0
+            then Identity_Field'Mod (Item_Info.Birth_Time.Seconds)
+            else 0),
+         Generation_Low  =>
+           (if (Item_Info.Mask and Hostkit.Linux_Abi.Statx_Btime) /= 0
+            then Identity_Field (Item_Info.Birth_Time.Nanoseconds)
+            else 0));
+   exception
+      when others =>
+         if Empty_Name /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (Empty_Name);
+         end if;
+         return (others => <>);
+   end Identity_Of;
+
+   function Positioning_Of (Item : Descriptor) return Positioning_Kind is
+      Seek_Cur : constant C_Int := 1;
+   begin
+      if not Is_Valid (Item) then
+         return Positioning_Unknown;
+      elsif C_Lseek (To_Fd (Item), 0, Seek_Cur) >= 0 then
+         return Positioning_Seekable;
+      elsif Errno = E_Spipe then
+         return Positioning_Sequential;
+      else
+         return Positioning_Unknown;
+      end if;
+   exception
+      when others =>
+         return Positioning_Unknown;
+   end Positioning_Of;
+
+   function Advance
+     (Item  : Descriptor;
+      Count : Long_Long_Integer) return Advance_Outcome
+   is
+      Seek_Cur : constant C_Int := 1;
+   begin
+      if not Is_Valid (Item) or else Count < 0 then
+         return Advance_Failed;
+      elsif C_Lseek (To_Fd (Item), C_Long (Count), Seek_Cur) >= 0 then
+         return Advance_Complete;
+      elsif Errno = E_Spipe then
+         return Advance_Not_Seekable;
+      else
+         return Advance_Failed;
+      end if;
+   exception
+      when others =>
+         return Advance_Failed;
+   end Advance;
+
+   function Set_Position
+     (Item     : Descriptor;
+      Position : Long_Long_Integer) return Boolean
+   is
+      Seek_Set : constant C_Int := 0;
+   begin
+      return Is_Valid (Item)
+        and then Position >= 0
+        and then C_Lseek (To_Fd (Item), C_Long (Position), Seek_Set) >= 0;
+   exception
+      when others =>
+         return False;
+   end Set_Position;
 
    -----------------
    -- Is_Terminal --

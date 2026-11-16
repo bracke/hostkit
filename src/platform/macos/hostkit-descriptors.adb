@@ -3,6 +3,8 @@ with Interfaces.C;
 
 with System;
 
+with Hostkit.Darwin_Abi;
+with Hostkit.Darwin_Symbols;
 with Hostkit.Posix;
 
 package body Hostkit.Descriptors is
@@ -15,6 +17,7 @@ package body Hostkit.Descriptors is
 
    subtype C_Int is Interfaces.C.int;
    subtype C_Long is Interfaces.C.long;
+   subtype Identity_Field is Hostkit.File_Identities.Identity_Field;
 
    --  macOS, sys/fcntl.h. Written in hexadecimal as that header does. These
    --  are NOT the Linux values and the difference is not cosmetic: Linux
@@ -44,6 +47,7 @@ package body Hostkit.Descriptors is
    --  here and 11 on Linux; reading the Linux value would misreport a
    --  would-block as an error and lose the last buffer of a pipeline.
    E_Intr       : constant C_Int := 4;
+   E_Spipe      : constant C_Int := 29;
    E_Again      : constant C_Int := 35;
    E_Pipe       : constant C_Int := 32;
    E_Wouldblock : constant C_Int := E_Again;  --  same value on macOS
@@ -87,6 +91,13 @@ package body Hostkit.Descriptors is
      with Import => True, Convention => C, External_Name => "ttyname";
    function C_Dup2 (Old_Fd, New_Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "dup2";
+   function C_Lseek (Fd : C_Int; Offset : C_Long; Origin : C_Int)
+      return C_Long
+     with Import => True, Convention => C, External_Name => "lseek";
+   function C_Fstat
+     (Fd : C_Int; Info : access Hostkit.Darwin_Abi.Stat_Record) return C_Int
+     with Import => True, Convention => C,
+          External_Name => Hostkit.Darwin_Symbols.Fstat;
 
    function Errno return C_Int renames Hostkit.Posix.Errno;
 
@@ -451,6 +462,8 @@ package body Hostkit.Descriptors is
 
       case Mode is
          when Open_Read            => Flags := O_Rdonly;
+         when Open_Read_Non_Blocking => Flags := O_Rdonly + O_Nonblock;
+         when Open_Read_For_Following => Flags := O_Rdonly + O_Nonblock;
          when Open_Write_Truncate  =>
                Flags := C_Int
                  (Interfaces.C.unsigned (O_Wronly)
@@ -485,6 +498,76 @@ package body Hostkit.Descriptors is
 
       return True;
    end Open_File;
+
+   function Identity_Of
+     (Item : Descriptor) return Hostkit.File_Identities.Entry_Identity
+   is
+      Info : aliased Hostkit.Darwin_Abi.Stat_Record;
+   begin
+      if not Is_Valid (Item) or else C_Fstat (To_Fd (Item), Info'Access) /= 0 then
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Identity_Field'Mod (Info.Device),
+         File_Number     => Identity_Field (Info.Inode),
+         Generation_High => Identity_Field'Mod (Info.Birth_Time.Seconds),
+         Generation_Low  => Identity_Field'Mod (Info.Birth_Time.Nanoseconds));
+   exception
+      when others =>
+         return (others => <>);
+   end Identity_Of;
+
+   function Positioning_Of (Item : Descriptor) return Positioning_Kind is
+      Seek_Cur : constant C_Int := 1;
+   begin
+      if not Is_Valid (Item) then
+         return Positioning_Unknown;
+      elsif C_Lseek (To_Fd (Item), 0, Seek_Cur) >= 0 then
+         return Positioning_Seekable;
+      elsif Errno = E_Spipe then
+         return Positioning_Sequential;
+      else
+         return Positioning_Unknown;
+      end if;
+   exception
+      when others =>
+         return Positioning_Unknown;
+   end Positioning_Of;
+
+   function Advance
+     (Item  : Descriptor;
+      Count : Long_Long_Integer) return Advance_Outcome
+   is
+      Seek_Cur : constant C_Int := 1;
+   begin
+      if not Is_Valid (Item) or else Count < 0 then
+         return Advance_Failed;
+      elsif C_Lseek (To_Fd (Item), C_Long (Count), Seek_Cur) >= 0 then
+         return Advance_Complete;
+      elsif Errno = E_Spipe then
+         return Advance_Not_Seekable;
+      else
+         return Advance_Failed;
+      end if;
+   exception
+      when others =>
+         return Advance_Failed;
+   end Advance;
+
+   function Set_Position
+     (Item     : Descriptor;
+      Position : Long_Long_Integer) return Boolean
+   is
+      Seek_Set : constant C_Int := 0;
+   begin
+      return Is_Valid (Item)
+        and then Position >= 0
+        and then C_Lseek (To_Fd (Item), C_Long (Position), Seek_Set) >= 0;
+   exception
+      when others =>
+         return False;
+   end Set_Position;
 
    -----------------
    -- Is_Terminal --

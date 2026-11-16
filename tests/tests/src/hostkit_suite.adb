@@ -38,6 +38,7 @@ with Hostkit.Process;
 with Hostkit.Private_Paths;
 with Hostkit.Regular_Files;
 with Hostkit.Shell;
+with Hostkit.Spawn;
 with Hostkit.Trash;
 with Hostkit.Watch;
 with Hostkit.Windows_Command_Line;
@@ -505,6 +506,8 @@ package body Hostkit_Suite is
    --  A group whose leader ends well takes what it left running with it:
    --  a program sent to the background does not run on after it.
    procedure Test_Group_Ends_With_Leader (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+   procedure Test_Spawn_Group_Release_Ends_Descendants
+     (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    --  A clean wrapper holds no environment of the caller's: what the
    --  program can read of its parent says nothing it was not given.
@@ -1014,6 +1017,9 @@ package body Hostkit_Suite is
          "process : stopped as a group, a program takes what it started with it");
       Register_Routine
         (T, Test_Group_Ends_With_Leader'Access, "process : a group's leader ending ends what it left running");
+      Register_Routine
+        (T, Test_Spawn_Group_Release_Ends_Descendants'Access,
+         "spawn : releasing a Windows group ends what its leader left running");
       Register_Routine
         (T, Test_Clean_Wrapper'Access, "process : a clean wrapper holds none of the caller's environment");
       Register_Routine

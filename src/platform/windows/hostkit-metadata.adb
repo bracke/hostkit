@@ -20,6 +20,7 @@ with System.Storage_Elements;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
+   use type Hostkit.File_Identities.Entry_Identity;
    use type Hostkit.Fs.Entry_Kind;
    use Hostkit.Win32;
 

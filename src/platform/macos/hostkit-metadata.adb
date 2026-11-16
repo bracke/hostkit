@@ -8,6 +8,7 @@ with Hostkit.Darwin_Symbols;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
+   use type Hostkit.File_Identities.Entry_Identity;
    use type Ada.Calendar.Time;
    use type Interfaces.C.int;
    use type Interfaces.C.long;

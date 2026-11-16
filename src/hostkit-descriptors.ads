@@ -1,6 +1,7 @@
 private with Interfaces;
 
 with Ada.Streams;
+with Hostkit.File_Identities;
 
 --  Open files, pipes, and the ends of them a child inherits.
 --
@@ -245,6 +246,16 @@ package Hostkit.Descriptors is
      ( --  Existing file, read only. Fails when absent.
       Open_Read,
 
+      --  Existing file, read only, with reads that would wait returning
+      --  Transfer_Would_Block.  On POSIX this property is part of the open
+      --  itself, so opening an idle FIFO never waits for a writer.
+      Open_Read_Non_Blocking,
+
+      --  Existing file, read only, with the open itself guaranteed not to
+      --  wait for a special-file peer. POSIX uses O_NONBLOCK; Windows opens
+      --  synchronously and callers use Wait_For_Readable before reading.
+      Open_Read_For_Following,
+
       --  Create or truncate, write only.
       Open_Write_Truncate,
 
@@ -273,6 +284,40 @@ package Hostkit.Descriptors is
      (Path : String;
       Mode : Open_Mode;
       Item : out Descriptor) return Boolean;
+
+   --  Stable identity of the object held open by Item.  Unlike a pathname
+   --  query this cannot be redirected by replacing and restoring a name
+   --  around the observation.  Available is False when the host cannot
+   --  identify the object.
+   function Identity_Of
+     (Item : Descriptor) return Hostkit.File_Identities.Entry_Identity;
+
+   type Positioning_Kind is
+     (Positioning_Seekable,
+      Positioning_Sequential,
+      Positioning_Unknown);
+
+   --  How the opened object itself supports reading positions.  This is a
+   --  descriptor fact, not a prior classification of a replaceable pathname.
+   function Positioning_Of (Item : Descriptor) return Positioning_Kind;
+
+   type Advance_Outcome is
+     (Advance_Complete,
+      Advance_Not_Seekable,
+      Advance_Failed);
+
+   --  Move a seekable descriptor forward without reading.  This is used to
+   --  pass an input record whose read failed; a pipe or terminal reports
+   --  Advance_Not_Seekable rather than pretending the record was skipped.
+   function Advance
+     (Item  : Descriptor;
+      Count : Long_Long_Integer) return Advance_Outcome;
+
+   --  Set the next byte position of a seekable descriptor.  False includes
+   --  pipes, terminals, invalid positions and host failures.
+   function Set_Position
+     (Item     : Descriptor;
+      Position : Long_Long_Integer) return Boolean;
 
    --  Whether this descriptor refers to a terminal.
    --

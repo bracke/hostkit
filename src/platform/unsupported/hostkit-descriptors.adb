@@ -112,6 +112,38 @@ package body Hostkit.Descriptors is
       return False;
    end Open_File;
 
+   function Identity_Of
+     (Item : Descriptor) return Hostkit.File_Identities.Entry_Identity
+   is
+      pragma Unreferenced (Item);
+   begin
+      return (others => <>);
+   end Identity_Of;
+
+   function Positioning_Of (Item : Descriptor) return Positioning_Kind is
+      pragma Unreferenced (Item);
+   begin
+      return Positioning_Unknown;
+   end Positioning_Of;
+
+   function Advance
+     (Item  : Descriptor;
+      Count : Long_Long_Integer) return Advance_Outcome
+   is
+      pragma Unreferenced (Item, Count);
+   begin
+      return Advance_Failed;
+   end Advance;
+
+   function Set_Position
+     (Item     : Descriptor;
+      Position : Long_Long_Integer) return Boolean
+   is
+      pragma Unreferenced (Item, Position);
+   begin
+      return False;
+   end Set_Position;
+
    function Is_Terminal (Item : Descriptor) return Boolean is
       pragma Unreferenced (Item);
    begin

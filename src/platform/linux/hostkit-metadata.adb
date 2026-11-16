@@ -12,6 +12,7 @@ with Hostkit.Linux_Abi;
 with Hostkit.Metadata.Natural_Ids;
 
 package body Hostkit.Metadata is
+   use type Hostkit.File_Identities.Entry_Identity;
    use Ada.Strings.Unbounded;
    use type Ada.Calendar.Time;
    use type Interfaces.C.int;

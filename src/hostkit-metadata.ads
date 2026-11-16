@@ -1,5 +1,6 @@
 with Ada.Calendar;
 with Interfaces;
+with Hostkit.File_Identities;
 
 --  What the filesystem says about a file, when the hosts do not say it the same way.
 --
@@ -24,7 +25,7 @@ with Interfaces;
 --  only means anything for the ids this package handed out.
 package Hostkit.Metadata is
 
-   subtype Identity_Field is Interfaces.Unsigned_64;
+   subtype Identity_Field is Hostkit.File_Identities.Identity_Field;
 
    --  A numeric user or group id: uid_t and gid_t are unsigned 32-bit on
    --  every POSIX host this crate has a body for, and every value is a real
@@ -81,13 +82,7 @@ package Hostkit.Metadata is
    --  two reads of one entry compare equal, and only a reuse of the inode
    --  on that volume goes unseen. Available is False only when the entry
    --  could not be read or the host gives no file number.
-   type Entry_Identity is record
-      Available       : Boolean := False;
-      Volume          : Identity_Field := 0;
-      File_Number     : Identity_Field := 0;
-      Generation_High : Identity_Field := 0;
-      Generation_Low  : Identity_Field := 0;
-   end record;
+   subtype Entry_Identity is Hostkit.File_Identities.Entry_Identity;
 
    --  Metadata used to tell whether an entry changed without following it.
    --  Fields that a host does not have are zero; Available says whether the

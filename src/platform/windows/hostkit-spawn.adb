@@ -27,6 +27,7 @@ package body Hostkit.Spawn is
 
    Startf_Use_Std_Handles : constant C_DWord := 16#0000_0100#;
    Create_Unicode_Environment : constant C_DWord := 16#0000_0400#;
+   Create_Suspended           : constant C_DWord := 16#0000_0004#;
 
    --  A startup record with an attribute list on the end of it, which is the
    --  only way to hand a child a pseudo-console.
@@ -151,6 +152,32 @@ package body Hostkit.Spawn is
       Information        : access Process_Information)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
+
+   --  A Job Object is Windows' process-tree primitive. Starting suspended and
+   --  assigning before resume closes the race in which a child could create a
+   --  descendant before it belongs to the tree.
+   function Create_Job_Object
+     (Attributes : System.Address;
+      Name       : System.Address) return System.Address
+     with Import => True, Convention => Stdcall, External_Name => "CreateJobObjectW";
+
+   function Assign_Process_To_Job_Object
+     (Job     : System.Address;
+      Process : System.Address) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "AssignProcessToJobObject";
+
+   function Terminate_Job_Object
+     (Job       : System.Address;
+      Exit_Code : C_DWord) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "TerminateJobObject";
+
+   function Terminate_Process
+     (Process   : System.Address;
+      Exit_Code : C_DWord) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "TerminateProcess";
+
+   function Resume_Thread (Thread : System.Address) return C_DWord
+     with Import => True, Convention => Stdcall, External_Name => "ResumeThread";
 
    --  An exit code as this host gives it, in the range Ada asks for.
    --
@@ -301,14 +328,34 @@ package body Hostkit.Spawn is
       --  child the parent's whole environment -- the opposite of what was asked,
       --  and of what Linux and macOS do with the same request.
       Use_Environment : constant Boolean := With_Options.Replace_Environment;
+
+      Job : System.Address :=
+        (if With_Options.Group = Group_New
+         then Create_Job_Object (System.Null_Address, System.Null_Address)
+         else System.Null_Address);
+
+      procedure Close_Job is
+         Ignored : Interfaces.C.int;
+         pragma Unreferenced (Ignored);
+      begin
+         if Job /= System.Null_Address then
+            Ignored := Close_Handle (Job);
+            Job := System.Null_Address;
+         end if;
+      end Close_Job;
    begin
       Item := Invalid_Process;
+
+      if With_Options.Group = Group_New and then Job = System.Null_Address then
+         return Spawn_Failed;
+      end if;
 
       --  Asked for something this host does not have. Refused rather than
       --  started without it: a child that could be interrupted through its
       --  terminal on one host and not on another is the difference this crate
       --  exists to make visible.
       if With_Options.Controlling_Terminal /= Hostkit.Descriptors.Invalid then
+         Close_Job;
          return Spawn_Failed;
       end if;
 
@@ -317,6 +364,7 @@ package body Hostkit.Spawn is
       --  directory that does not exist" of Spawn_Failed: refused, rather than
       --  started somewhere else.
       if With_Options.Working_Directory /= Null_Unbounded_String and then not Dir_Usable then
+         Close_Job;
          return Spawn_Failed;
       end if;
 
@@ -389,7 +437,8 @@ package body Hostkit.Spawn is
             else "" & Wide_Character'Val (0));
 
          Flags : constant C_DWord :=
-           (if Use_Environment then Create_Unicode_Environment else 0);
+           (if Use_Environment then Create_Unicode_Environment else 0)
+           + (if Job /= System.Null_Address then Create_Suspended else 0);
 
          Started : Interfaces.C.int;
       begin
@@ -410,6 +459,7 @@ package body Hostkit.Spawn is
                use System.Storage_Elements;
             begin
                if Needed = 0 then
+                  Close_Job;
                   return Spawn_Failed;
                end if;
 
@@ -434,6 +484,7 @@ package body Hostkit.Spawn is
                   if Initialize_Attribute_List
                        (Room'Address, 1, 0, Needed'Access) = 0
                   then
+                     Close_Job;
                      return Spawn_Failed;
                   end if;
 
@@ -449,6 +500,7 @@ package body Hostkit.Spawn is
                         System.Null_Address, System.Null_Address) = 0
                   then
                      Delete_Attribute_List (Room'Address);
+                     Close_Job;
                      return Spawn_Failed;
                   end if;
 
@@ -479,11 +531,16 @@ package body Hostkit.Spawn is
                      Startup            => Extended'Access,
                      Information        => Information'Access);
 
-                  Delete_Attribute_List (Room'Address);
-
-                  if Started = 0 then
-                     return Outcome_For_Error (Get_Last_Error);
-                  end if;
+                  declare
+                     Error_Code : constant C_DWord :=
+                       (if Started = 0 then Get_Last_Error else 0);
+                  begin
+                     Delete_Attribute_List (Room'Address);
+                     if Started = 0 then
+                        Close_Job;
+                        return Outcome_For_Error (Error_Code);
+                     end if;
+                  end;
                end;
             end;
 
@@ -515,10 +572,32 @@ package body Hostkit.Spawn is
                --  close-on-exec report pipe the POSIX bodies use: there is no
                --  fork and therefore no moment at which the failure is the
                --  child's.
-               return Outcome_For_Error (Get_Last_Error);
+               declare
+                  Error_Code : constant C_DWord := Get_Last_Error;
+               begin
+                  Close_Job;
+                  return Outcome_For_Error (Error_Code);
+               end;
             end if;
          end if;
       end;
+
+      if Job /= System.Null_Address then
+         if Assign_Process_To_Job_Object (Job, Information.Process) = 0
+           or else Resume_Thread (Information.Thread) = C_DWord'Last
+         then
+            declare
+               Ignored : Interfaces.C.int;
+               pragma Unreferenced (Ignored);
+            begin
+               Ignored := Terminate_Process (Information.Process, 1);
+               Ignored := Close_Handle (Information.Thread);
+               Ignored := Close_Handle (Information.Process);
+               Ignored := Close_Handle (Job);
+            end;
+            return Spawn_Failed;
+         end if;
+      end if;
 
       --  The thread handle is of no use to a shell and would leak.
       declare
@@ -530,6 +609,9 @@ package body Hostkit.Spawn is
       Item.Id :=
         Interfaces.Integer_64 (System.Storage_Elements.To_Integer (Information.Process));
       Item.Group := Interfaces.Integer_64 (Information.Process_Id);
+      if Job /= System.Null_Address then
+         Item.Tree := Interfaces.Integer_64 (System.Storage_Elements.To_Integer (Job));
+      end if;
 
       return Spawn_Ok;
    end Start;
@@ -626,6 +708,16 @@ package body Hostkit.Spawn is
       Ignored : Interfaces.C.int;
       pragma Unreferenced (Ignored);
    begin
+      if Item.Tree > 0 then
+         declare
+            Job : constant System.Address :=
+              System.Storage_Elements.To_Address
+                (System.Storage_Elements.Integer_Address (Item.Tree));
+         begin
+            Ignored := Terminate_Job_Object (Job, 1);
+            Ignored := Close_Handle (Job);
+         end;
+      end if;
       if Is_Valid (Item) then
          Ignored := Close_Handle
            (System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address (Item.Id)));

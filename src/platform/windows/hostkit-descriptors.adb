@@ -11,10 +11,22 @@ package body Hostkit.Descriptors is
    use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
+   use type Interfaces.Unsigned_8;
    use type Ada.Streams.Stream_Element_Offset;
    use type System.Address;
 
    subtype C_DWord is Interfaces.C.unsigned_long;
+   subtype C_I64 is Interfaces.C.long_long;
+   subtype Identity_Field is Hostkit.File_Identities.Identity_Field;
+
+   type Identifier_Array is
+     array (Natural range 0 .. 15) of Interfaces.Unsigned_8
+     with Convention => C;
+   type File_Id_Info is record
+      Volume_Serial : Identity_Field := 0;
+      Identifier    : Identifier_Array := [others => 0];
+   end record
+     with Convention => C;
 
    --  A Descriptor here holds a HANDLE, not a C-runtime file descriptor. The
    --  small integer GNAT.OS_Lib calls a descriptor is an index into whichever
@@ -39,7 +51,9 @@ package body Hostkit.Descriptors is
    --  atomically, rather than the caller seeking and then writing, which two
    --  processes appending to one log would interleave wrongly.
 
+   File_Type_Disk : constant C_DWord := 1;
    File_Type_Char : constant C_DWord := 2;
+   File_Type_Pipe : constant C_DWord := 3;
 
    Error_Broken_Pipe : constant C_DWord := 109;
    Error_No_Data     : constant C_DWord := 232;
@@ -103,6 +117,13 @@ package body Hostkit.Descriptors is
 
    function Set_Std_Handle (Which : C_DWord; Handle : System.Address) return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "SetStdHandle";
+
+   function Set_File_Pointer
+     (Handle       : System.Address;
+      Distance     : C_I64;
+      New_Position : System.Address;
+      Method       : C_DWord) return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "SetFilePointerEx";
 
    function Wide (Value : String) return Wide_String renames Hostkit.Windows_Paths.Native;
 
@@ -506,13 +527,19 @@ package body Hostkit.Descriptors is
       Handle      : System.Address;
       Attributes  : aliased Security_Attributes;
    begin
+      Item := Invalid;
       Attributes.Length := C_DWord (Security_Attributes'Size / 8);
       Attributes.Inherit_Handle := 0;
 
       case Mode is
-         when Open_Read =>
+         when Open_Read | Open_Read_For_Following =>
             Access_Mode := Generic_Read;
             Disposition := Open_Existing;
+         when Open_Read_Non_Blocking =>
+            --  Synchronous Windows handles cannot provide the contract this
+            --  mode promises.  Refuse it rather than silently returning a
+            --  descriptor whose reads may wait forever.
+            return False;
          when Open_Write_Truncate =>
             Access_Mode := Generic_Write;
             Disposition := Create_Always;
@@ -539,6 +566,124 @@ package body Hostkit.Descriptors is
       Item := To_Descriptor (Handle);
       return Is_Valid (Item);
    end Open_File;
+
+   function Identity_Of
+     (Item : Descriptor) return Hostkit.File_Identities.Entry_Identity
+   is
+      Item_Info : aliased By_Handle_File_Information;
+      Id        : aliased File_Id_Info;
+      Number    : Identity_Field;
+
+      function Identifier_Part (First : Natural) return Identity_Field is
+         Result : Identity_Field := 0;
+      begin
+         for Offset in 0 .. 7 loop
+            Result := Result
+              + Identity_Field (Id.Identifier (First + Offset)) * 2 ** (Offset * 8);
+         end loop;
+         return Result;
+      end Identifier_Part;
+
+      function Valid_Identifier return Boolean is
+         Nonzero      : Boolean := False;
+         Not_All_Ones : Boolean := False;
+      begin
+         for Byte of Id.Identifier loop
+            Nonzero := Nonzero or else Byte /= 0;
+            Not_All_Ones :=
+              Not_All_Ones or else Byte /= Interfaces.Unsigned_8'Last;
+         end loop;
+         return Nonzero and Not_All_Ones;
+      end Valid_Identifier;
+   begin
+      if not Is_Valid (Item)
+        or else Get_File_Information (To_Handle (Item), Item_Info'Access) = 0
+      then
+         return (others => <>);
+      end if;
+
+      if Get_File_Information_Ex
+        (To_Handle (Item), File_Id_Info_Class, Id'Address,
+         C_DWord (File_Id_Info'Size / 8)) /= 0
+        and then Valid_Identifier
+      then
+         return
+           (Available       => True,
+            Volume          => Id.Volume_Serial,
+            File_Number     => Identifier_Part (0),
+            Generation_High => Identifier_Part (8),
+            Generation_Low  => 0);
+      end if;
+
+      Number := Identity_Field (Item_Info.File_Index_High) * 2 ** 32
+        + Identity_Field (Item_Info.File_Index_Low);
+      if Number = 0 or else Number = Identity_Field'Last then
+         return (others => <>);
+      end if;
+      return
+        (Available       => True,
+         Volume          => Identity_Field (Item_Info.Volume_Serial),
+         File_Number     => Number,
+         Generation_High => 0,
+         Generation_Low  => 0);
+   exception
+      when others =>
+         return (others => <>);
+   end Identity_Of;
+
+   function Positioning_Of (Item : Descriptor) return Positioning_Kind is
+   begin
+      if not Is_Valid (Item) then
+         return Positioning_Unknown;
+      end if;
+      return
+        (case Get_File_Type (To_Handle (Item)) is
+            when File_Type_Disk => Positioning_Seekable,
+            when File_Type_Char | File_Type_Pipe => Positioning_Sequential,
+            when others => Positioning_Unknown);
+   exception
+      when others =>
+         return Positioning_Unknown;
+   end Positioning_Of;
+
+   function Advance
+     (Item  : Descriptor;
+      Count : Long_Long_Integer) return Advance_Outcome
+   is
+      File_Current          : constant C_DWord := 1;
+      Error_Invalid_Function : constant C_DWord := 1;
+   begin
+      if not Is_Valid (Item) or else Count < 0 then
+         return Advance_Failed;
+      elsif Set_File_Pointer
+        (To_Handle (Item), C_I64 (Count), System.Null_Address, File_Current) /= 0
+      then
+         return Advance_Complete;
+      elsif Get_Last_Error = Error_Invalid_Function then
+         return Advance_Not_Seekable;
+      else
+         return Advance_Failed;
+      end if;
+   exception
+      when others =>
+         return Advance_Failed;
+   end Advance;
+
+   function Set_Position
+     (Item     : Descriptor;
+      Position : Long_Long_Integer) return Boolean
+   is
+      File_Begin : constant C_DWord := 0;
+   begin
+      return Is_Valid (Item)
+        and then Position >= 0
+        and then Set_File_Pointer
+          (To_Handle (Item), C_I64 (Position), System.Null_Address,
+           File_Begin) /= 0;
+   exception
+      when others =>
+         return False;
+   end Set_Position;
 
    -----------------
    -- Is_Terminal --

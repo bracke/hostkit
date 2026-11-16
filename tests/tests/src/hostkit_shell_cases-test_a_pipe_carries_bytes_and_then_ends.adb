@@ -12,6 +12,9 @@ begin
    Assert (D.Create_Pipe (Ends), "could not create a pipe");
    Assert (D.Is_Valid (Ends.Read_End) and then D.Is_Valid (Ends.Write_End),
            "a created pipe handed back an invalid end");
+   Assert
+     (D.Positioning_Of (Ends.Read_End) = D.Positioning_Sequential,
+      "a pipe was not classified from its descriptor as sequential");
 
    Assert (D.Write (Ends.Write_End, Sent, Last) = D.Transfer_Ok,
            "writing to a fresh pipe failed");

@@ -84,7 +84,9 @@ package Hostkit.Spawn is
       --  anything a user can interrupt.
       Group_Inherit,
 
-      --  A new group, led by this child. The first stage of a pipeline.
+      --  A new group, led by this child. The first stage of a pipeline. On
+      --  Windows this is a Job Object rather than a POSIX group; Group_Id
+      --  remains unavailable, and Release ends descendants left in the job.
       Group_New,
 
       --  An existing group, named by Join_Group. Every stage of a pipeline
@@ -350,8 +352,9 @@ package Hostkit.Spawn is
       Result : out Status) return Boolean;
 
    --  Release a handle after its process has finished and been collected by Wait.
-   --  Windows closes the owned process handle; POSIX has no handle left after reaping.
-   --  This does not wait for or stop a process.
+   --  Windows closes the owned process handle and, for Group_New, ends any
+   --  descendants left in its Job Object; POSIX has no handle left after
+   --  reaping. This does not wait for or stop Item itself.
    --  @param Item Finished process handle; set to Invalid_Process.
    procedure Release (Item : in out Process_Handle);
 
@@ -398,8 +401,13 @@ private
 
       --  The group it was placed in, or -1 where the host has no groups.
       Group : Interfaces.Integer_64 := -1;
+
+      --  A host-owned process-tree handle, or -1 where there is none. Windows
+      --  uses a Job Object here to give Group_New the lifetime semantics of a
+      --  POSIX process group; the POSIX bodies leave it unused.
+      Tree : Interfaces.Integer_64 := -1;
    end record;
 
-   Invalid_Process : constant Process_Handle := (Id => -1, Group => -1);
+   Invalid_Process : constant Process_Handle := (Id => -1, Group => -1, Tree => -1);
 
 end Hostkit.Spawn;
