@@ -29,6 +29,21 @@ begin
                Assert
                  (not Hostkit.Trash.Move_To_Trash (Path),
                   "a path that is no longer there is refused, not reported as trashed");
+               --  The Finder says where it put the item, so it can be put back.
+               Write_File (Path, "to the trash, and back");
+               declare
+                  Where : Ada.Strings.Unbounded.Unbounded_String;
+               begin
+                  Assert (Hostkit.Trash.Move_To_Trash (Path, Where), "macOS takes it and says where");
+                  Assert (Ada.Strings.Unbounded.Length (Where) > 0, "the place it went is named");
+                  Assert
+                    (Ada.Directories.Exists (Ada.Strings.Unbounded.To_String (Where)),
+                     "and the item is there: " & Ada.Strings.Unbounded.To_String (Where));
+                  Assert
+                    (Hostkit.Fs.Move_No_Replace (Ada.Strings.Unbounded.To_String (Where), Path),
+                     "and goes back from there");
+                  Ada.Directories.Delete_File (Path);
+               end;
             end;
          end if;
 
@@ -63,6 +78,12 @@ begin
          begin
             Write_File (Path, "still here");
             Assert (not Hostkit.Trash.Move_To_Trash (Path), "a host with no trash declines");
+            declare
+               Where : Ada.Strings.Unbounded.Unbounded_String;
+            begin
+               Assert (not Hostkit.Trash.Move_To_Trash (Path, Where), "asked to say where too");
+               Assert (Ada.Strings.Unbounded.Length (Where) = 0, "and names nowhere");
+            end;
             Assert (Ada.Directories.Exists (Path), "and leaves the file exactly where it was");
             Assert (not Hostkit.Trash.Can_Hold (Path), "and holds nothing");
             Ada.Directories.Delete_File (Path);

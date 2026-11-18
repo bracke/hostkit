@@ -59,4 +59,21 @@ begin
    Assert (not Hostkit.Fs.Create_Directory (Missing), "a folder in a missing one is refused");
    Assert (GNAT.OS_Lib.Errno = 2, "and errno says the way is missing:" & Integer'Image (GNAT.OS_Lib.Errno));
    Ada.Directories.Delete_Tree (Folder);
+
+   --  A refused replace: a read-only target is cleared once and tried again
+   --  at once, a file held a moment is waited for, anything else ends it.
+   declare
+      use type WE.Replace_Step;
+      function Step (Code : Natural; Read_Only, Cleared : Boolean; Attempt : Positive) return WE.Replace_Step is
+        (WE.After_Refused_Replace (Interfaces.Unsigned_32 (Code), Read_Only, Cleared, Attempt, Attempts => 10));
+   begin
+      Assert (Step (5, True, False, 1) = WE.Clear_Read_Only, "a read-only target is cleared");
+      Assert (Step (5, True, False, 10) = WE.Clear_Read_Only, "even on the last attempt");
+      Assert (Step (5, True, True, 2) = WE.Try_Again, "cleared once only, then waited for");
+      Assert (Step (5, False, False, 1) = WE.Try_Again, "a denial with no read-only target is waited for");
+      Assert (Step (32, False, False, 3) = WE.Try_Again, "a sharing violation is waited for");
+      Assert (Step (33, True, False, 3) = WE.Try_Again, "a lock violation is waited for, read-only or not");
+      Assert (Step (32, False, False, 10) = WE.Give_Up, "not past the last attempt");
+      Assert (Step (2, True, False, 1) = WE.Give_Up, "a missing source ends it at once");
+   end;
 end Test_Windows_Errors_Read_As_Errno;

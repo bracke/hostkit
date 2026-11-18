@@ -661,26 +661,58 @@ package body Hostkit.Fs is
          return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "MoveFileExW";
 
-      Error_Access_Denied     : constant C_DWord := 5;
-      Error_Sharing_Violation : constant C_DWord := 32;
-      Error_Lock_Violation    : constant C_DWord := 33;
+      Error_Access_Denied : constant C_DWord := 5;
+      Read_Only           : constant C_DWord := 16#0001#;
+      Attempts            : constant := 10;
 
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
       Error       : C_DWord;
+      --  The target's attributes as they were, when this replace cleared
+      --  its read-only attribute: put back if the replace still fails.
+      Kept        : C_DWord := Invalid_File_Attributes;
+      Ignored     : Interfaces.C.int;
    begin
       --  A file just written is often held a moment by someone else (a
       --  virus scanner, the indexer) that did not share deletion; the move
       --  is refused until they let go. Try again, briefly, for that only.
-      for Attempt in 1 .. 10 loop
+      --  A read-only target refuses the replace for good, where POSIX rename
+      --  replaces it: that attribute is cleared, once, and the move tried
+      --  again at once (Hostkit.Windows_Errors.After_Refused_Replace).
+      for Attempt in 1 .. Attempts loop
          if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, Move_File_Replace_Existing) /= 0 then
             return True;
          end if;
          Error := Get_Last_Error;
          Hostkit.Errors.Set_Errno_From_Last_Error;
-         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
-         delay Duration (Attempt) * 0.02;
+         declare
+            Attributes : constant C_DWord :=
+              (if Error = Error_Access_Denied and then Kept = Invalid_File_Attributes
+               then Get_File_Attributes (Wide_Target'Address)
+               else Invalid_File_Attributes);
+            Read_Only_Target : constant Boolean :=
+              Attributes /= Invalid_File_Attributes and then (Attributes and Read_Only) /= 0;
+         begin
+            case Hostkit.Windows_Errors.After_Refused_Replace
+              (Interfaces.Unsigned_32 (Error), Read_Only_Target,
+               Read_Only_Cleared => Kept /= Invalid_File_Attributes,
+               Attempt           => Attempt,
+               Attempts          => Attempts)
+            is
+               when Hostkit.Windows_Errors.Clear_Read_Only =>
+                  exit when Set_File_Attributes (Wide_Target'Address, Attributes - Read_Only) = 0;
+                  Kept := Attributes;
+               when Hostkit.Windows_Errors.Try_Again =>
+                  delay Duration (Attempt) * 0.02;
+               when Hostkit.Windows_Errors.Give_Up =>
+                  exit;
+            end case;
+         end;
       end loop;
+      if Kept /= Invalid_File_Attributes then
+         --  The target stays as it was: read-only again.
+         Ignored := Set_File_Attributes (Wide_Target'Address, Kept);
+      end if;
       return False;
    exception
       when others =>
@@ -925,57 +957,57 @@ package body Hostkit.Fs is
 
    function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is separate;
 
+   --  Resolve a single path that must exist (links followed), to its canonical long-name form (with
+   --  the \\?\ / \\?\UNC\ prefix stripped). Returns "" when Target does not exist.
+   function Final_Path_Of (Target : String) return String is
+      use type System.Address;
+      Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
+      Share_All             : constant C_DWord := 7;
+      Wide_Path : aliased Wide_String := Wide (Target);
+      Wide_Buf  : aliased Wide_String (1 .. 32 * 1024) :=
+        [others => Wide_Character'Val (0)];
+      Handle    : System.Address;
+      Length    : C_DWord;
+      Ignored   : Interfaces.C.int;
+   begin
+      Handle := Create_File
+        (Name       => Wide_Path'Address,
+         Access_Way => 0,
+         Share      => Share_All,
+         Security   => System.Null_Address,
+         Creation   => Open_Existing,
+         Flags      => Flag_Backup_Semantics,
+         Template   => System.Null_Address);
+      if Handle = Invalid_Handle_Value then
+         return "";
+      end if;
+
+      --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
+      --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it
+      --  would not fit -- the required size including the NUL, treated as failure.
+      Length := Get_Final_Path_Name
+        (Object => Handle,
+         Path   => Wide_Buf'Address,
+         Count  => Wide_Buf'Length,
+         Flags  => 0);
+      Ignored := Close_Handle (Handle);
+
+      if Length = 0 or else Length > Wide_Buf'Length then
+         return "";
+      end if;
+
+      --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir; a
+      --  volume with no drive letter keeps its \\?\Volume{...}\ form.
+      return Hostkit.Windows_Paths.Win32_Form (Hostkit.Windows_Paths.To_UTF_8 (Wide_Buf (1 .. Natural (Length))));
+   end Final_Path_Of;
+
    --  Windows has no realpath. Open the path -- following links, so no
    --  FILE_FLAG_OPEN_REPARSE_POINT here -- and ask the kernel for the final, canonical
    --  name of what the handle actually refers to. GetFinalPathNameByHandleW returns it in
    --  the \\?\ (or \\?\UNC\) namespace; strip that prefix so callers see an ordinary path.
    --  Ada.Directories.Full_Name is GetFullPathName here: purely lexical, follows nothing.
    function Real_Path (Path : String) return String is
-      use type System.Address;
-
-      Flag_Backup_Semantics : constant C_DWord := 16#0200_0000#;
-      Share_All             : constant C_DWord := 7;
-
-      --  Resolve a single path that must exist, to its canonical long-name form (with
-      --  the \\?\ / \\?\UNC\ prefix stripped). Returns "" when Target does not exist.
-      function Resolve (Target : String) return String is
-         Wide_Path : aliased Wide_String := Wide (Target);
-         Wide_Buf  : aliased Wide_String (1 .. 32 * 1024) :=
-           [others => Wide_Character'Val (0)];
-         Handle    : System.Address;
-         Length    : C_DWord;
-         Ignored   : Interfaces.C.int;
-      begin
-         Handle := Create_File
-           (Name       => Wide_Path'Address,
-            Access_Way => 0,
-            Share      => Share_All,
-            Security   => System.Null_Address,
-            Creation   => Open_Existing,
-            Flags      => Flag_Backup_Semantics,
-            Template   => System.Null_Address);
-         if Handle = Invalid_Handle_Value then
-            return "";
-         end if;
-
-         --  Flags 0 == VOLUME_NAME_DOS or FILE_NAME_NORMALIZED. Length is the count of
-         --  WCHARs written (excluding the terminating NUL); 0 on failure, or -- if it
-         --  would not fit -- the required size including the NUL, treated as failure.
-         Length := Get_Final_Path_Name
-           (Object => Handle,
-            Path   => Wide_Buf'Address,
-            Count  => Wide_Buf'Length,
-            Flags  => 0);
-         Ignored := Close_Handle (Handle);
-
-         if Length = 0 or else Length > Wide_Buf'Length then
-            return "";
-         end if;
-
-         --  \\?\UNC\server\share -> \\server\share ; \\?\C:\dir -> C:\dir; a
-         --  volume with no drive letter keeps its \\?\Volume{...}\ form.
-         return Hostkit.Windows_Paths.Win32_Form (Hostkit.Windows_Paths.To_UTF_8 (Wide_Buf (1 .. Natural (Length))));
-      end Resolve;
+      function Resolve (Target : String) return String renames Final_Path_Of;
 
       --  Index of the last path separator in S, or 0 if there is none.
       function Last_Separator (S : String) return Natural is
@@ -1059,6 +1091,16 @@ package body Hostkit.Fs is
       when others =>
          return "";
    end Real_Path;
+
+   --  The final path of what the handle opened following links refers to:
+   --  "" for a missing part, a dangling link or a loop, as realpath says.
+   function Canonical_Path (Path : String) return String is
+   begin
+      return (if Path = "" then "" else Final_Path_Of (Path));
+   exception
+      when others =>
+         return "";
+   end Canonical_Path;
 
    procedure Read_Beneath
      (Root    : String;

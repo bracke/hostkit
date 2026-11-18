@@ -79,6 +79,33 @@ package body Hostkit.Metadata_Copy is
      (Directory_Fd : C_Int; Path : Interfaces.C.Strings.chars_ptr;
       Times : access Timespec_Array; Flags : C_Int) return C_Int
      with Import, Convention => C, External_Name => "utimensat";
+   function C_Lchflags (Path : Interfaces.C.Strings.chars_ptr; Flags : C_U32) return C_Int
+     with Import, Convention => C, External_Name => "lchflags";
+
+   --  The extended ACL (acl_t is an opaque pointer), read and written
+   --  without following a final link, carried as acl_to_text writes it.
+   Acl_Type_Extended : constant C_Int := 16#0000_0100#;
+   function C_Acl_Get_Link (Path : Interfaces.C.Strings.chars_ptr; Kind : C_Int) return System.Address
+     with Import, Convention => C, External_Name => "acl_get_link_np";
+   function C_Acl_Set_Link
+     (Path : Interfaces.C.Strings.chars_ptr; Kind : C_Int; Acl : System.Address) return C_Int
+     with Import, Convention => C, External_Name => "acl_set_link_np";
+   function C_Acl_To_Text (Acl : System.Address; Length : System.Address) return Interfaces.C.Strings.chars_ptr
+     with Import, Convention => C, External_Name => "acl_to_text";
+   function C_Acl_From_Text (Text : Interfaces.C.Strings.chars_ptr) return System.Address
+     with Import, Convention => C, External_Name => "acl_from_text";
+   function C_Acl_Free (Item : System.Address) return C_Int
+     with Import, Convention => C, External_Name => "acl_free";
+   --  acl_free of the text acl_to_text made.
+   function C_Acl_Free_Text (Text : Interfaces.C.Strings.chars_ptr) return C_Int
+     with Import, Convention => C, External_Name => "acl_free";
+
+   --  The flags a user may set and a copy keeps: UF_NODUMP, UF_IMMUTABLE,
+   --  UF_APPEND, UF_OPAQUE and UF_HIDDEN. UF_COMPRESSED and UF_TRACKED are
+   --  the system's own (set on a file that is not compressed, it reads as
+   --  garbage); the SF_ ones need root.
+   Kept_Flags : constant C_U32 := 16#0000_800F#;
+
    function Errno return C_Int renames Hostkit.Posix.Errno;
 
    procedure Free (Item : in out Interfaces.C.Strings.chars_ptr) is
@@ -149,7 +176,24 @@ package body Hostkit.Metadata_Copy is
       Result.Owner := Interfaces.Unsigned_64 (Info.User_Id);
       Result.Group := Interfaces.Unsigned_64 (Info.Group_Id);
       Result.Is_Link := (Info.Mode and File_Type_Mask) = Link_Type;
+      Result.Flags := Interfaces.Unsigned_32 (Info.Flags);
       C_Path := Interfaces.C.Strings.New_String (Path);
+      --  No ACL (or none this volume keeps) reads as none.
+      declare
+         use type System.Address;
+         Acl     : constant System.Address := C_Acl_Get_Link (C_Path, Acl_Type_Extended);
+         Text    : Interfaces.C.Strings.chars_ptr;
+         Ignored : C_Int;
+      begin
+         if Acl /= System.Null_Address then
+            Text := C_Acl_To_Text (Acl, System.Null_Address);
+            if Text /= Interfaces.C.Strings.Null_Ptr then
+               Result.Acl := To_Unbounded_String (Interfaces.C.Strings.Value (Text));
+               Ignored := C_Acl_Free_Text (Text);
+            end if;
+            Ignored := C_Acl_Free (Acl);
+         end if;
+      end;
       Names_Size := C_Listxattr (C_Path, System.Null_Address, 0, Xattr_Nofollow);
       if Names_Size < 0 then
          if Errno = E_Not_Supported then
@@ -307,8 +351,39 @@ package body Hostkit.Metadata_Copy is
          Ok := C_Chmod
            (C_Path, C_U32 (Item.Mode and (if Preserve_Ownership then 8#7777# else 8#1777#))) = 0;
       end if;
+      Ok := Ok and then Apply_Times (Path, Item.Times);
+      --  The ACL after the times: one that denies writing attributes would
+      --  refuse them. Best effort, as xattrs: a volume without ACLs (FAT,
+      --  exFAT, most network shares) still gets the entry.
+      if Ok and then Length (Item.Acl) > 0 then
+         declare
+            use type System.Address;
+            Text    : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (To_String (Item.Acl));
+            Acl     : constant System.Address := C_Acl_From_Text (Text);
+            Ignored : C_Int;
+         begin
+            Free (Text);
+            if Acl /= System.Null_Address then
+               Ignored := C_Acl_Set_Link (C_Path, Acl_Type_Extended, Acl);
+               Ignored := C_Acl_Free (Acl);
+            end if;
+         end;
+      end if;
+      --  The flags last: an immutable or append-only entry takes no change
+      --  after them. Only those a user may set, over what the copy has;
+      --  best effort, as the ACL.
+      if Ok and then (C_U32 (Item.Flags) and Kept_Flags) /= 0 and then Stat (Path, Current'Access) then
+         declare
+            Wanted  : constant C_U32 := (Current.Flags and not Kept_Flags) or (C_U32 (Item.Flags) and Kept_Flags);
+            Ignored : C_Int;
+         begin
+            if Wanted /= Current.Flags then
+               Ignored := C_Lchflags (C_Path, Wanted);
+            end if;
+         end;
+      end if;
       Free (C_Path);
-      return Ok and then Apply_Times (Path, Item.Times);
+      return Ok;
    exception
       when others => Free (C_Path); return False;
    end Apply;

@@ -39,6 +39,14 @@ package Hostkit.Metadata_Copy is
    --  Preserve_Ownership requests the captured owner where the host has one,
    --  and with it the setuid and setgid bits, which a plain copy drops.
    --
+   --  macOS keeps two things beside the mode that listxattr does not show:
+   --  the entry's flags (the Finder's hidden flag, no-dump, immutable,
+   --  append-only) and its extended ACL. Both are applied, as cp -p and
+   --  ditto apply them: the ACL after the times, the flags last of all (an
+   --  immutable entry takes no more changes). Only the flags a user may set
+   --  are put back, and, as with xattrs, a volume that holds neither still
+   --  gets the entry.
+   --
    --  Windows keeps what xattrs hold elsewhere in named data streams -- the
    --  Mark of the Web a browser puts on a download is the Zone.Identifier
    --  stream -- and Apply copies each named stream of the captured source
@@ -75,6 +83,11 @@ private
       Source     : Ada.Strings.Unbounded.Unbounded_String;
       Streams    : Attribute_Vectors.Vector;
       Encrypted  : Boolean := False;
+      --  macOS: the entry's st_flags (UF_HIDDEN, UF_NODUMP, ...) and its
+      --  extended ACL as acl_to_text writes it, which listxattr does not
+      --  show; zero and "" elsewhere.
+      Flags      : Interfaces.Unsigned_32 := 0;
+      Acl        : Ada.Strings.Unbounded.Unbounded_String;
    end record;
 
    No_Snapshot : constant Snapshot := (others => <>);

@@ -48,6 +48,12 @@ package body Hostkit.Trash is
       return System.Address
      with Import, Convention => C, External_Name => "objc_msgSend";
 
+   --  [url fileSystemRepresentation]: the path as a C string, owned by the
+   --  URL (autoreleased with it).
+   function Send_For_C_String
+     (Receiver : System.Address; Selector : System.Address) return Interfaces.C.Strings.chars_ptr
+     with Import, Convention => C, External_Name => "objc_msgSend";
+
    --  [manager trashItemAtURL:resultingItemURL:error:], answering a BOOL --
    --  one byte on both architectures.
    function Send_Trash
@@ -92,11 +98,22 @@ package body Hostkit.Trash is
    end Current;
 
    function Move_To_Trash (Path : String) return Boolean is
+      Ignored : UString;
+   begin
+      return Move_To_Trash (Path, Ignored);
+   end Move_To_Trash;
+
+   function Move_To_Trash (Path : String; Trashed_Path : out UString) return Boolean is
       use Interfaces.C;
       C_Path  : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Pool    : constant System.Address := Autorelease_Pool_Push;
       Trashed : Boolean := False;
+      --  The NSURL * the Finder fills in with where the item went: the
+      --  resultingItemURL out-parameter (an NSURL **), autoreleased, so read
+      --  before the pool goes.
+      Resulting : aliased System.Address := System.Null_Address;
    begin
+      Trashed_Path := Null_Unbounded_String;
       declare
          Manager_Class : constant System.Address := Objc_Get_Class (To_C ("NSFileManager"));
          String_Class  : constant System.Address := Objc_Get_Class (To_C ("NSString"));
@@ -122,8 +139,18 @@ package body Hostkit.Trash is
                       (Manager,
                        Sel_Register_Name (To_C ("trashItemAtURL:resultingItemURL:error:")),
                        Item      => URL,
-                       Resulting => System.Null_Address,
+                       Resulting => Resulting'Address,
                        Error     => System.Null_Address) /= 0;
+                  if Trashed and then Resulting /= System.Null_Address then
+                     declare
+                        Where : constant Interfaces.C.Strings.chars_ptr :=
+                          Send_For_C_String (Resulting, Sel_Register_Name (To_C ("fileSystemRepresentation")));
+                     begin
+                        if Where /= Interfaces.C.Strings.Null_Ptr then
+                           Trashed_Path := To_Unbounded_String (Interfaces.C.Strings.Value (Where));
+                        end if;
+                     end;
+                  end if;
                end if;
             end;
          end if;

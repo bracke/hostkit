@@ -1,3 +1,5 @@
+with Ada.Streams.Stream_IO;
+with Ada.Strings.Fixed;
 with Ada.Environment_Variables;
 with Ada.Directories;
 with Interfaces;
@@ -73,6 +75,120 @@ package body Hostkit.Host is
    begin
       return "";
    end Native_Locale;
+
+   --  The value of Key in the configuration file at Path: in its Section
+   --  ([Section] header), or before any section when Section is "". A value
+   --  in one matching pair of quotes is returned without them; "" when the
+   --  file or the key is not there, or the file is over the size cap.
+   function Locale_File_Value (Path, Section, Key : String) return String is
+      use type Ada.Directories.File_Kind;
+      use type Ada.Directories.File_Size;
+      Max_Bytes : constant := 256 * 1024;
+   begin
+      if not Ada.Directories.Exists (Path)
+        or else Ada.Directories.Kind (Path) /= Ada.Directories.Ordinary_File
+        or else Ada.Directories.Size (Path) > Max_Bytes
+      then
+         return "";
+      end if;
+      declare
+         File       : Ada.Streams.Stream_IO.File_Type;
+         Content    : String (1 .. Natural (Ada.Directories.Size (Path)));
+         In_Section : Boolean := Section = "";
+         First      : Positive := 1;
+      begin
+         Ada.Streams.Stream_IO.Open (File, Ada.Streams.Stream_IO.In_File, Path);
+         begin
+            String'Read (Ada.Streams.Stream_IO.Stream (File), Content);
+         exception
+            when others =>
+               Ada.Streams.Stream_IO.Close (File);
+               raise;
+         end;
+         Ada.Streams.Stream_IO.Close (File);
+         while First <= Content'Last loop
+            declare
+               Newline   : constant Natural :=
+                 Ada.Strings.Fixed.Index (Content (First .. Content'Last), [1 => ASCII.LF]);
+               Line_End  : constant Natural := (if Newline = 0 then Content'Last else Newline - 1);
+               --  A CR before the LF (a file saved with Windows line ends) is
+               --  not part of the line.
+               Line_Last : constant Natural :=
+                 (if Line_End >= First and then Content (Line_End) = ASCII.CR then Line_End - 1 else Line_End);
+               Trimmed   : constant String :=
+                 Ada.Strings.Fixed.Trim
+                   ((if Line_Last < First then "" else Content (First .. Line_Last)), Ada.Strings.Both);
+               Equals    : constant Natural := Ada.Strings.Fixed.Index (Trimmed, "=");
+            begin
+               if Trimmed'Length = 0 or else Trimmed (Trimmed'First) in '#' | ';' then
+                  null;
+               elsif Trimmed'Length > 2
+                 and then Trimmed (Trimmed'First) = '['
+                 and then Trimmed (Trimmed'Last) = ']'
+               then
+                  In_Section := Trimmed (Trimmed'First + 1 .. Trimmed'Last - 1) = Section;
+               elsif In_Section and then Equals > 0
+                 and then Ada.Strings.Fixed.Trim (Trimmed (Trimmed'First .. Equals - 1), Ada.Strings.Both) = Key
+               then
+                  declare
+                     Value : constant String :=
+                       (if Equals < Trimmed'Last
+                        then Ada.Strings.Fixed.Trim (Trimmed (Equals + 1 .. Trimmed'Last), Ada.Strings.Both)
+                        else "");
+                  begin
+                     --  Shell syntax: LANG="de_DE.UTF-8".
+                     if Value'Length >= 2
+                       and then Value (Value'First) in '"' | '''
+                       and then Value (Value'Last) = Value (Value'First)
+                     then
+                        return Value (Value'First + 1 .. Value'Last - 1);
+                     end if;
+                     return Value;
+                  end;
+               end if;
+               exit when Newline = 0;
+               First := Newline + 1;
+            end;
+         end loop;
+         return "";
+      end;
+   exception
+      when others =>
+         --  A file that cannot be read gives no answer; the next is asked.
+         return "";
+   end Locale_File_Value;
+
+   function Configured_Format_Locale (Category : Format_Category; Home : String) return String is
+      Category_Key : constant String :=
+        (case Category is
+            when Time_Formats   => "LC_TIME",
+            when Number_Formats => "LC_NUMERIC");
+
+      --  The category's key, then LANG, in the file at Path.
+      function From (Path, Section : String) return String is
+         Own : constant String := (if Path = "" then "" else Locale_File_Value (Path, Section, Category_Key));
+      begin
+         if Own /= "" or else Path = "" then
+            return Own;
+         end if;
+         return Locale_File_Value (Path, Section, "LANG");
+      end From;
+
+      Plasma : constant String :=
+        From ((if Home = "" then "" else Home & "/.config/plasma-localerc"), "Formats");
+   begin
+      if Plasma /= "" then
+         return Plasma;
+      end if;
+      declare
+         System_Wide : constant String := From ("/etc/locale.conf", "");
+      begin
+         if System_Wide /= "" then
+            return System_Wide;
+         end if;
+      end;
+      return From ("/etc/default/locale", "");
+   end Configured_Format_Locale;
 
    ------------------------
    -- Executable_Path --

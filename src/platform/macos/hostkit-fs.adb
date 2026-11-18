@@ -131,23 +131,7 @@ package body Hostkit.Fs is
          return False;
    end Is_Hidden;
 
-   function Kind_Of (Path : String) return Entry_Kind is
-   begin
-      if Path = "" or else not Ada.Directories.Exists (Path) then
-         return Missing_Entry;
-      end if;
-      case Ada.Directories.Kind (Path) is
-         when Ada.Directories.Directory =>
-            return Directory_Entry;
-         when Ada.Directories.Ordinary_File =>
-            return Ordinary_File_Entry;
-         when Ada.Directories.Special_File =>
-            return Special_File_Entry;
-      end case;
-   exception
-      when others =>
-         return Missing_Entry;
-   end Kind_Of;
+   function Kind_Of (Path : String) return Entry_Kind is separate;
 
    --  stat and lstat, by the names this architecture links them under
    --  (Hostkit.Darwin_Symbols): neither is variadic, so arm64 passes their
@@ -165,156 +149,76 @@ package body Hostkit.Fs is
    --  (NAME_MAX, 255 bytes on Linux and macOS): no entry can bear it, so
    --  ENAMETOOLONG then says nothing is there. A whole path past PATH_MAX
    --  may still name an entry that the host will not look up by that path.
-   function Has_Overlong_Component (Path : String) return Boolean is
-      Name_Max : constant := 255;
-      Run      : Natural := 0;
-   begin
-      for C of Path loop
-         if C = '/' then
-            Run := 0;
-         else
-            Run := Run + 1;
-            if Run > Name_Max then
-               return True;
-            end if;
-         end if;
-      end loop;
-      return False;
-   end Has_Overlong_Component;
+   function Has_Overlong_Component (Path : String) return Boolean is separate;
 
-   --  stat(2), or lstat(2) for a final link not followed, of Path; the
-   --  failures as the spec's Name_Error and Use_Error. ENOENT and ENOTDIR say
-   --  nothing is reachable there, as do a name too long for any entry and a
-   --  followed final link that loops; anything else (EACCES on a folder on
-   --  the way, EIO, a path past PATH_MAX) that the host would not say.
-   function Stat_Entry (Path : String; Follow_Links : Boolean) return Stat_Record is
-      E_Noent       : constant := 2;
-      E_Notdir      : constant := 20;
-      E_Loop        : constant := 62;
-      E_Nametoolong : constant := 63;
-      Info          : aliased Stat_Record;
-      C_Path        : Interfaces.C.Strings.chars_ptr;
-      Status        : C_Int;
-      Error         : Integer;
-   begin
-      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
-         raise Ada.Directories.Name_Error with "no entry at """ & Path & """";
-      end if;
-      C_Path := Interfaces.C.Strings.New_String (Path);
-      Status := (if Follow_Links then Darwin_Stat (C_Path, Info'Access) else Darwin_Lstat (C_Path, Info'Access));
-      Error := GNAT.OS_Lib.Errno;
-      Interfaces.C.Strings.Free (C_Path);
-      if Status /= 0 then
-         --  ENOENT and ENOTDIR: nothing there. ENAMETOOLONG only for a name
-         --  no entry can bear; ELOOP only past a final link followed (it
-         --  loops, as a dangling one points nowhere) -- on the way, or with
-         --  the final link not followed, the host just will not say.
-         if Error in E_Noent | E_Notdir
-           or else (Error = E_Nametoolong and then Has_Overlong_Component (Path))
-           or else (Error = E_Loop and then Follow_Links)
-         then
-            raise Ada.Directories.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
-         end if;
-         raise Ada.Directories.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
-      end if;
-      return Info;
-   end Stat_Entry;
+   --  What Stat_Entry asks the host for, and the record it answers in:
+   --  stat(2) and lstat(2), which answer every field, so Want asks for
+   --  nothing more and every answer is whole.
+   subtype Stat_Want is Interfaces.C.unsigned;
+   subtype Entry_Record is Stat_Record;
 
-   function Entry_Is_Absent (Path : String) return Boolean is
-   begin
-      declare
-         Unused : constant Stat_Record := Stat_Entry (Path, False);
-      begin
-         return False;
-      end;
-   exception
-      when Ada.Directories.Name_Error =>
-         return True;
-   end Entry_Is_Absent;
+   Errno_Noent       : constant := 2;
+   Errno_Notdir      : constant := 20;
+   Errno_Loop        : constant := 62;
+   Errno_Nametoolong : constant := 63;
 
-   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is
-      Info : constant Stat_Record := Stat_Entry (Path, Follow_Links);
-      Kind : constant C_U16 := Info.Mode and File_Type_Mask;
+   function Stat_Call
+     (C_Path       : Interfaces.C.Strings.chars_ptr;
+      Follow_Links : Boolean;
+      Want         : Stat_Want;
+      Info         : access Entry_Record)
+      return C_Int
+   is
+      pragma Unreferenced (Want);
    begin
-      if Kind /= S_IFREG and then (Follow_Links or else Kind /= S_IFLNK) then
-         raise Ada.Directories.Name_Error with Path & ": no ordinary file";
-      end if;
-      return Ada.Directories.File_Size (Info.Size);
-   end Size_Of;
+      return (if Follow_Links then Darwin_Stat (C_Path, Info) else Darwin_Lstat (C_Path, Info));
+   end Stat_Call;
 
-   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time is
-      Info : constant Stat_Record := Stat_Entry (Path, Follow_Links);
-      Kind : constant C_U16 := Info.Mode and File_Type_Mask;
+   function Answered (Info : Entry_Record; Want : Stat_Want) return Boolean is
+      pragma Unreferenced (Info, Want);
    begin
-      if Kind /= S_IFREG and then Kind /= S_IFDIR and then (Follow_Links or else Kind /= S_IFLNK) then
-         raise Ada.Directories.Name_Error with Path & ": no file or directory";
-      end if;
-      return Hostkit.Fs.Instants.From_Unix
-        (Interfaces.Integer_64 (Info.Modified_Time.Seconds), Interfaces.Integer_64 (Info.Modified_Time.Nanoseconds));
-   end Modification_Time_Of;
+      return True;
+   end Answered;
+
+   --  stat(2) of Path through the host's call (Stat_Call), a final link
+   --  followed or not, asking for Want; the failures as the spec's
+   --  Name_Error and Use_Error. ENOENT and ENOTDIR say nothing is reachable
+   --  there, as do a name too long for any entry and a followed final link
+   --  that loops; anything else (EACCES on a folder on the way, EIO, a path
+   --  past PATH_MAX, an answer missing what was asked for) that the host
+   --  would not say.
+   function Stat_Entry (Path : String; Follow_Links : Boolean; Want : Stat_Want) return Entry_Record is separate;
+
+   Want_Type  : constant Stat_Want := 0;
+   Want_Mtime : constant Stat_Want := 0;
+   Want_Size  : constant Stat_Want := 0;
+   Want_Mode  : constant Stat_Want := 0;
+
+   function Entry_Is_Absent (Path : String) return Boolean is separate;
+
+   function Size_Of (Path : String; Follow_Links : Boolean := True) return Ada.Directories.File_Size is separate;
+
+   function Modification_Time_Of (Path : String; Follow_Links : Boolean := True) return Ada.Calendar.Time is separate;
 
    --  The owner's bit of the mode, as GNAT's __gnat_stat_to_attr reads it
    --  (S_IRUSR, S_IWUSR of a stat that follows a link).
-   function Owner_Bit (Path : String; Bit : C_U16) return Boolean is
-   begin
-      return (Stat_Entry (Path, True).Mode and Bit) /= 0;
-   exception
-      when Ada.Directories.Name_Error | Ada.Directories.Use_Error =>
-         return False;
-   end Owner_Bit;
+   function Owner_Bit (Path : String; Bit : C_U16) return Boolean is separate;
 
    function Is_Owner_Readable (Path : String) return Boolean is (Owner_Bit (Path, 8#400#));
 
    function Is_Owner_Writable (Path : String) return Boolean is (Owner_Bit (Path, 8#200#));
 
-   function Is_Link (Path : String) return Boolean is
-   begin
-      return GNAT.OS_Lib.Is_Symbolic_Link (Path);
-   exception
-      when others =>
-         return False;
-   end Is_Link;
+   function Is_Link (Path : String) return Boolean is separate;
 
    function Create_Link
      (Target    : String;
       Link_Path : String)
       return Boolean
-   is
-      use type Interfaces.C.Strings.chars_ptr;
-      C_Target : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Target);
-      C_Link   : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Link_Path);
-      Status   : Interfaces.C.int;
-   begin
-      Status := Symlink (C_Target, C_Link);
-      Interfaces.C.Strings.Free (C_Target);
-      Interfaces.C.Strings.Free (C_Link);
-      return Status = 0;
-   exception
-      when others =>
-         if C_Target /= Interfaces.C.Strings.Null_Ptr then
-            Interfaces.C.Strings.Free (C_Target);
-         end if;
-         if C_Link /= Interfaces.C.Strings.Null_Ptr then
-            Interfaces.C.Strings.Free (C_Link);
-         end if;
-         return False;
-   end Create_Link;
+   is separate;
 
    --  A regular file, and a mode bit that says it runs. The regular-file half matters:
    --  a directory carries the execute bit too, and means something else entirely by it.
-   function Is_Executable (Path : String) return Boolean is
-      use type Ada.Directories.File_Kind;
-   begin
-      --  Kind alone, not Exists and then Kind: Kind raises Name_Error for a path
-      --  that is not there, which the handler below already turns into False.
-      --  The Exists call was a third stat of the same path for an answer the
-      --  next one gives, and a directory listing pays this per file.
-      return Ada.Directories.Kind (Path) = Ada.Directories.Ordinary_File
-        and then GNAT.OS_Lib.Is_Executable_File (Path);
-   exception
-      when others =>
-         return False;
-   end Is_Executable;
+   function Is_Executable (Path : String) return Boolean is separate;
 
    function Special_File_Info_Of (Path : String) return Special_File_Info is
       function C_Stat
@@ -371,269 +275,45 @@ package body Hostkit.Fs is
          return (Available => False, Kind => Not_Special, Device => 0, Mode => 0);
    end Special_File_Info_Of;
 
+   --  The stat(2) symbol and where st_mode's low byte sits in its struct.
+   Stat_Symbol   : constant String := Hostkit.Darwin_Symbols.Stat;
+   Mode_Low_Byte : constant := 4;
+
    --  Group or other having any permission at all: (st_mode and 8#077#) /= 0. Those six bits
    --  live in the lowest byte of st_mode, so this reads that one byte out of the stat buffer
    --  rather than reconstructing the whole field. Want keeps the two callers apart: a
    --  file's bits and a directory's do not mean the same thing, so neither answers for
    --  the other.
-   function Exposed (Path : String; Want : Ada.Directories.File_Kind) return Boolean is
-      use type Interfaces.Unsigned_8;
-      use type Ada.Directories.File_Kind;
+   function Exposed (Path : String; Want : Ada.Directories.File_Kind) return Boolean is separate;
 
-      --  struct stat is larger than this; stat writes only into what it needs and the mode
-      --  sits near the front. Oversized so there is always room.
-      Buffer : array (0 .. 255) of aliased Interfaces.Unsigned_8 := [others => 0];
+   function Accessible_By_Others (Path : String) return Boolean is separate;
 
-      function C_Stat (Path : Interfaces.C.Strings.chars_ptr; Buf : System.Address)
-        return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => Hostkit.Darwin_Symbols.Stat;
-
-      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-      Result : Interfaces.C.int;
-   begin
-      if not Ada.Directories.Exists (Path)
-        or else Ada.Directories.Kind (Path) /= Want
-      then
-         Interfaces.C.Strings.Free (C_Path);
-         return False;
-      end if;
-
-      Result := C_Stat (C_Path, Buffer'Address);
-      Interfaces.C.Strings.Free (C_Path);
-
-      if Result /= 0 then
-         return False;
-      end if;
-
-      --  st_mode's low byte holds the group and other permission bits. Its offset in the
-      --  struct is 4 on this platform's LP64 layout.
-      return (Buffer (4) and 8#077#) /= 0;
-   exception
-      when others =>
-         return False;
-   end Exposed;
-
-   function Accessible_By_Others (Path : String) return Boolean is
-   begin
-      return Exposed (Path, Ada.Directories.Ordinary_File);
-   end Accessible_By_Others;
-
-   function Directory_Accessible_By_Others (Path : String) return Boolean is
-   begin
-      return Exposed (Path, Ada.Directories.Directory);
-   end Directory_Accessible_By_Others;
+   function Directory_Accessible_By_Others (Path : String) return Boolean is separate;
 
    --  chmod(2), not a spawned chmod(1): no PATH to find, and a return code to check.
 
-   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean is
-      function C_Chown
-        (Path : Interfaces.C.Strings.chars_ptr;
-         UID  : Interfaces.C.int;
-         GID  : Interfaces.C.int) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "chown";
-
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Status : Interfaces.C.int;
-   begin
-      Status :=
-        C_Chown (C_Path, Interfaces.C.int (User), Interfaces.C.int (Group));
-      Interfaces.C.Strings.Free (C_Path);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Set_Owner;
+   function Set_Owner (Path : String; User : Integer; Group : Integer) return Boolean is separate;
 
    function Set_Extended_Attribute
      (Path  : String;
       Name  : String;
       Value : Ada.Streams.Stream_Element_Array) return Boolean
-   is
-      function C_Setxattr
-        (Path  : Interfaces.C.Strings.chars_ptr;
-         Name  : Interfaces.C.Strings.chars_ptr;
-         Value : System.Address;
-         Size  : Interfaces.C.size_t;
-         Flags : Interfaces.C.int) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "setxattr";
+   is separate;
 
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      C_Name : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Name);
-      Buffer : Ada.Streams.Stream_Element_Array := Value;
-      Status : Interfaces.C.int;
-   begin
-      Status :=
-        C_Setxattr
-          (C_Path, C_Name, Buffer'Address,
-           Interfaces.C.size_t (Value'Length), 0);
-      Interfaces.C.Strings.Free (C_Path);
-      Interfaces.C.Strings.Free (C_Name);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Set_Extended_Attribute;
+   function Create_FIFO (Path : String; Mode : Natural) return Boolean is separate;
 
-   function Create_FIFO (Path : String; Mode : Natural) return Boolean is
-      function C_Mkfifo
-        (Path : Interfaces.C.Strings.chars_ptr;
-         Mode : Interfaces.C.unsigned) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "mkfifo";
-
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Status : Interfaces.C.int;
-   begin
-      Status := C_Mkfifo (C_Path, Interfaces.C.unsigned (Mode));
-      Interfaces.C.Strings.Free (C_Path);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Create_FIFO;
-
-   function Create_Socket (Path : String; Mode : Natural) return Boolean is
-      function C_Socket (Domain, Kind, Protocol : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "socket";
-
-      function C_Bind (FD : C_Int; Addr : System.Address; Len : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "bind";
-
-      function C_Close (FD : C_Int) return C_Int
-        with Import => True, Convention => C, External_Name => "close";
-
-      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
-        return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "chmod";
-
-      FD     : C_Int;
-      Addr   : aliased Sockaddr_Un;
-      C_Path : Interfaces.C.Strings.chars_ptr;
-      Status : C_Int;
-   begin
-      if Path'Length = 0 or else Path'Length > 107 then
-         return False;
-      end if;
-
-      FD := C_Socket (AF_UNIX, SOCK_STREAM, 0);
-      if FD < 0 then
-         return False;
-      end if;
-
-      Addr.Family := Interfaces.C.short (AF_UNIX);
-      for I in Path'Range loop
-         Addr.Path (Interfaces.C.size_t (I - Path'First)) :=
-           Interfaces.C.To_C (Path (I));
-      end loop;
-
-      Status := C_Bind (FD, Addr'Address, Sockaddr_Un'Size / 8);
-      declare
-         Ignored : constant C_Int := C_Close (FD);
-      begin
-         pragma Unreferenced (Ignored);
-      end;
-
-      if Status /= 0 then
-         return False;
-      end if;
-
-      C_Path := Interfaces.C.Strings.New_String (Path);
-      Status := C_Chmod (C_Path, Interfaces.C.int (Mode));
-      Interfaces.C.Strings.Free (C_Path);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Create_Socket;
+   function Create_Socket (Path : String; Mode : Natural) return Boolean is separate;
 
    function Create_Device
      (Path   : String;
       Kind   : Device_Kind;
       Device : Interfaces.Unsigned_64;
       Mode   : Natural) return Boolean
-   is
-      function C_Mknod
-        (Path : Interfaces.C.Strings.chars_ptr;
-         Mode : Interfaces.C.unsigned;
-         Dev  : Interfaces.C.unsigned_long) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "mknod";
+   is separate;
 
-      S_IFCHR : constant Interfaces.C.unsigned := 8#020000#;
-      S_IFBLK : constant Interfaces.C.unsigned := 8#060000#;
+   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean is separate;
 
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Full   : constant Interfaces.C.unsigned :=
-        (if Kind = Character_Device then S_IFCHR else S_IFBLK)
-        or Interfaces.C.unsigned (Mode);
-      Status : Interfaces.C.int;
-   begin
-      Status :=
-        C_Mknod (C_Path, Full, Interfaces.C.unsigned_long (Device));
-      Interfaces.C.Strings.Free (C_Path);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Create_Device;
-
-   function Create_Hard_Link (Target : String; Link_Path : String) return Boolean is
-      function C_Link
-        (Old_Path : Interfaces.C.Strings.chars_ptr;
-         New_Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "link";
-
-      C_Target : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Target);
-      C_Link_P : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Link_Path);
-      Status   : Interfaces.C.int;
-   begin
-      Status := C_Link (C_Target, C_Link_P);
-      Interfaces.C.Strings.Free (C_Target);
-      Interfaces.C.Strings.Free (C_Link_P);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Create_Hard_Link;
-
-   function Make_Private (Path : String) return Boolean is
-      use type Ada.Directories.File_Kind;
-
-      function C_Chmod (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
-        return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "chmod";
-
-      C_Path : Interfaces.C.Strings.chars_ptr;
-      Result : Interfaces.C.int;
-      Mode   : Interfaces.C.int;
-   begin
-      if not Ada.Directories.Exists (Path) then
-         return False;
-      end if;
-
-      case Ada.Directories.Kind (Path) is
-         when Ada.Directories.Ordinary_File =>
-            Mode := 8#600#;
-         when Ada.Directories.Directory =>
-            --  A directory the owner cannot enter is not private, it is unusable.
-            Mode := 8#700#;
-         when others =>
-            return False;
-      end case;
-
-      C_Path := Interfaces.C.Strings.New_String (Path);
-      Result := C_Chmod (C_Path, Mode);
-      Interfaces.C.Strings.Free (C_Path);
-      return Result = 0;
-   exception
-      when others =>
-         return False;
-   end Make_Private;
+   function Make_Private (Path : String) return Boolean is separate;
 
    --  POSIX rename replaces an existing Target atomically, which is exactly what the
    --  lock-file-then-rename write wants and what Windows rename cannot do.
@@ -641,27 +321,7 @@ package body Hostkit.Fs is
      (Source : String;
       Target : String)
       return Boolean
-   is
-      function C_Rename
-        (Old_Path : Interfaces.C.Strings.chars_ptr;
-         New_Path : Interfaces.C.Strings.chars_ptr)
-         return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "rename";
-
-      C_Source : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Source);
-      C_Target : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Target);
-      Status   : Interfaces.C.int;
-   begin
-      Status := C_Rename (C_Source, C_Target);
-      Interfaces.C.Strings.Free (C_Source);
-      Interfaces.C.Strings.Free (C_Target);
-      return Status = 0;
-   exception
-      when others =>
-         return False;
-   end Replace_File;
+   is separate;
 
    --  The host refuses an existing target in the same atomic move.
    function Move_No_Replace
@@ -698,179 +358,61 @@ package body Hostkit.Fs is
    function C_Access (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int) return Interfaces.C.int
      with Import => True, Convention => C, External_Name => "access";
 
+   --  A hard link of the entry at From itself, never what it points at.
+   function Link_Entry (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
+     (C_Linkat (Fallback_At_Fdcwd, From, Fallback_At_Fdcwd, To, 0));
+
+   --  The link errors that say the filesystem has no hard links here.
+   function Link_Unsupported (Error : Integer) return Boolean is
+     (Error in Fallback_Eperm | Fallback_Emlink | Fallback_Enotsup | Fallback_Enosys | Fallback_Eopnotsupp);
+
    --  Whether anything, a dangling link included, is at Path.
-   function Present (Path : Interfaces.C.Strings.chars_ptr) return Boolean is
-      use type Interfaces.C.long;
-      Buffer : Interfaces.C.char_array (1 .. 1);
-   begin
-      return C_Readlink (Path, Buffer, 1) >= 0 or else C_Access (Path, 0) = 0;
-   end Present;
+   function Present (Path : Interfaces.C.Strings.chars_ptr) return Boolean is separate;
 
    --  A filesystem without RENAME_EXCL (SMB, NFS, FUSE mounts): a
    --  non-directory moves by link and unlink, which never replaces. A
    --  directory, or a filesystem without hard links, falls back to a
    --  rename after checking the target is free -- what mv -n does there;
    --  only an entry created in between could be replaced.
-   function Without_Native_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return Move_Outcome is
-      Error : Integer;
-   begin
-      if C_Linkat (Fallback_At_Fdcwd, From, Fallback_At_Fdcwd, To, 0) = 0 then
-         if C_Unlink (From) = 0 then
-            return Moved;
-         end if;
-         if C_Unlink (To) /= 0 then
-            null;
-         end if;
-         return Move_Refused;
-      end if;
-      Error := GNAT.OS_Lib.Errno;
-      if Error = Fallback_Exdev then
-         return Move_Cross_Device;
-      elsif Error not in
-        Fallback_Eperm | Fallback_Emlink | Fallback_Enotsup | Fallback_Enosys | Fallback_Eopnotsupp
-      then
-         --  The target is taken, or the move is refused for good.
-         return Move_Refused;
-      end if;
-      if Present (To) then
-         return Move_Refused;
-      elsif C_Plain_Rename (From, To) = 0 then
-         return Moved;
-      elsif GNAT.OS_Lib.Errno = Fallback_Exdev then
-         return Move_Cross_Device;
-      end if;
-      return Move_Refused;
-   end Without_Native_No_Replace;
+   function Without_Native_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return Move_Outcome is separate;
 
-   function Move_Without_Native_No_Replace (Source : String; Target : String) return Move_Outcome is
-      C_Source : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Source);
-      C_Target : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Target);
-      Outcome  : constant Move_Outcome := Without_Native_No_Replace (C_Source, C_Target);
-   begin
-      Interfaces.C.Strings.Free (C_Source);
-      Interfaces.C.Strings.Free (C_Target);
-      return Outcome;
-   end Move_Without_Native_No_Replace;
+   function Move_Without_Native_No_Replace (Source : String; Target : String) return Move_Outcome is separate;
 
-   function Move_No_Replace_Outcome
-     (Source : String;
-      Target : String)
-      return Move_Outcome
-   is
+   --  rename(2) that refuses an existing target, as this host offers it:
+   --  renamex_np with RENAME_EXCL.
+   function Rename_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
       function C_Renamex
         (Old_Path : Interfaces.C.Strings.chars_ptr;
          New_Path : Interfaces.C.Strings.chars_ptr;
          Flags    : Interfaces.C.unsigned)
          return Interfaces.C.int
         with Import => True, Convention => C, External_Name => "renamex_np";
-
       Rename_Excl : constant := 4;
-      Exdev       : constant := 18;
-      Einval      : constant := 22;
-      Enotsup     : constant := 45;
-      Enosys      : constant := 78;
-
-      function C_Rename (From, To : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int is
-        (C_Renamex (From, To, Rename_Excl));
-
-      C_Source : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Source);
-      C_Target : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Target);
-      Status   : Interfaces.C.int;
-      Error    : Integer;
    begin
-      Status := C_Rename (C_Source, C_Target);
-      Error := GNAT.OS_Lib.Errno;
-      if Status /= 0 and then (Error = Einval or else Error = Enotsup or else Error = Enosys) then
-         --  The filesystem lacks the no-replace rename itself.
-         declare
-            Outcome : constant Move_Outcome := Without_Native_No_Replace (C_Source, C_Target);
-         begin
-            Interfaces.C.Strings.Free (C_Source);
-            Interfaces.C.Strings.Free (C_Target);
-            return Outcome;
-         end;
-      end if;
-      Interfaces.C.Strings.Free (C_Source);
-      Interfaces.C.Strings.Free (C_Target);
-      if Status = 0 then
-         return Moved;
-      elsif Error = Exdev then
-         return Move_Cross_Device;
-      end if;
-      return Move_Refused;
-   exception
-      when others =>
-         return Move_Refused;
-   end Move_No_Replace_Outcome;
+      return C_Renamex (From, To, Rename_Excl);
+   end Rename_No_Replace;
+
+   --  The errors that say the filesystem lacks that rename: EINVAL, ENOTSUP
+   --  and ENOSYS.
+   function Lacks_No_Replace_Rename (Error : Integer) return Boolean is (Error in 22 | 45 | 78);
+
+   function Move_No_Replace_Outcome
+     (Source : String;
+      Target : String)
+      return Move_Outcome
+   is separate;
 
    --  POSIX readlink: read the link's own target, not the resolved path.
    function Read_Link_Target
      (Path   : String;
       Target : out Ada.Strings.Unbounded.Unbounded_String)
       return Boolean
-   is
-      use type Interfaces.C.long;
-
-      function C_Readlink
-        (Path : Interfaces.C.Strings.chars_ptr;
-         Buf  : System.Address;
-         Size : Interfaces.C.size_t)
-         return Interfaces.C.long
-        with Import => True, Convention => C, External_Name => "readlink";
-
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Buffer : Interfaces.C.char_array (0 .. 4095);
-      Count  : Interfaces.C.long;
-   begin
-      Target := Ada.Strings.Unbounded.Null_Unbounded_String;
-      Count := C_Readlink (C_Path, Buffer'Address, 4096);
-      Interfaces.C.Strings.Free (C_Path);
-      if Count <= 0 then
-         return False;
-      end if;
-      declare
-         Result : String (1 .. Natural (Count));
-      begin
-         for Index in Result'Range loop
-            Result (Index) :=
-              Character'Val
-                (Interfaces.C.char'Pos
-                   (Buffer (Interfaces.C.size_t (Index - 1))));
-         end loop;
-         Target := Ada.Strings.Unbounded.To_Unbounded_String (Result);
-      end;
-      return True;
-   exception
-      when others =>
-         return False;
-   end Read_Link_Target;
+   is separate;
 
    --  POSIX unlink removes the link and never follows one, and a link to a directory is
    --  a link here rather than a directory -- so one call covers both. The Is_Link guard
    --  is what keeps this from removing an ordinary file that happens to be named.
-   function Delete_Link (Path : String) return Boolean is
-      function C_Unlink (Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int
-        with Import => True, Convention => C, External_Name => "unlink";
-   begin
-      if not Is_Link (Path) then
-         return False;
-      end if;
-
-      declare
-         C_Path : Interfaces.C.Strings.chars_ptr :=
-           Interfaces.C.Strings.New_String (Path);
-         Status : constant Interfaces.C.int := C_Unlink (C_Path);
-      begin
-         Interfaces.C.Strings.Free (C_Path);
-         return Status = 0;
-      end;
-   exception
-      when others =>
-         return False;
-   end Delete_Link;
+   function Delete_Link (Path : String) return Boolean is separate;
 
    function Delete_Tree_No_Follow (Path : String) return Delete_Tree_Outcome is
       use Ada.Strings.Unbounded;
@@ -1286,30 +828,9 @@ package body Hostkit.Fs is
    --  POSIX realpath: resolve every symbolic link in Path and collapse "." and "..",
    --  returning the canonical absolute path. This is what Ada.Directories.Full_Name
    --  already did on POSIX; naming it here keeps callers off the Windows-lexical Full_Name.
-   function Real_Path (Path : String) return String is
-      use type System.Address;
+   function Real_Path (Path : String) return String is separate;
 
-      function C_Realpath
-        (Path     : Interfaces.C.Strings.chars_ptr;
-         Resolved : System.Address)
-         return System.Address
-        with Import => True, Convention => C, External_Name => "realpath";
-
-      C_Path : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Path);
-      Buffer : Interfaces.C.char_array (0 .. 4095) := [others => Interfaces.C.nul];
-      Result : System.Address;
-   begin
-      Result := C_Realpath (C_Path, Buffer'Address);
-      Interfaces.C.Strings.Free (C_Path);
-      if Result = System.Null_Address then
-         return "";
-      end if;
-      return Interfaces.C.To_Ada (Buffer, Trim_Nul => True);
-   exception
-      when others =>
-         return "";
-   end Real_Path;
+   function Canonical_Path (Path : String) return String is separate;
 
    procedure Read_Beneath
      (Root    : String;
@@ -1508,15 +1029,7 @@ package body Hostkit.Fs is
    end Read_Beneath;
 
    --  Shared by the three questions below: the directory part of a path.
-   function Directory_Part (Path : String) return String is
-   begin
-      for Index in reverse Path'Range loop
-         if Path (Index) = '/' then
-            return (if Index = Path'First then "/" else Path (Path'First .. Index - 1));
-         end if;
-      end loop;
-      return "";
-   end Directory_Part;
+   function Directory_Part (Path : String) return String is separate;
 
    function Own_Executable return String is
       function NS_Get_Executable_Path
@@ -1545,11 +1058,7 @@ package body Hostkit.Fs is
          return "";
    end Own_Executable;
 
-   function Own_Executable_Directory return String is
-      Own : constant String := Own_Executable;
-   begin
-      return (if Own = "" then "" else Directory_Part (Own));
-   end Own_Executable_Directory;
+   function Own_Executable_Directory return String is separate;
 
    --  HOME first, because a user who exports it means it. The password file is
    --  what the host itself records, and is there when HOME is not.
@@ -1691,63 +1200,9 @@ package body Hostkit.Fs is
       return Application_Data_Directory;
    end Config_Directory;
 
-   function Temp_Directory return String is
-   begin
-      if Ada.Environment_Variables.Exists ("TMPDIR")
-        and then Ada.Environment_Variables.Value ("TMPDIR") /= ""
-      then
-         return Ada.Environment_Variables.Value ("TMPDIR");
-      end if;
-      return "/tmp";
-   end Temp_Directory;
+   function Temp_Directory return String is separate;
 
-   function Create_Temporary_Directory (Prefix : String) return String is
-      Base : constant String := Temp_Directory;
-
-      function Image (Value : Natural) return String is
-        (Ada.Strings.Fixed.Trim (Natural'Image (Value), Ada.Strings.Left));
-
-      function Time_Image return String is
-         Raw : constant String := Duration'Image (Ada.Calendar.Seconds (Ada.Calendar.Clock));
-         Result : String := Raw;
-      begin
-         for C of Result loop
-            if C = ' ' or else C = '.' then
-               C := '-';
-            end if;
-         end loop;
-         return Result;
-      end Time_Image;
-
-      function Safe_Prefix return String is
-         Result : String := Prefix;
-      begin
-         for C of Result loop
-            if not (C in 'A' .. 'Z' or else C in 'a' .. 'z'
-                    or else C in '0' .. '9' or else C = '-' or else C = '_')
-            then
-               C := '-';
-            end if;
-         end loop;
-         return (if Result = "" then "hostkit-temp" else Result);
-      end Safe_Prefix;
-   begin
-      for Attempt in 1 .. 1000 loop
-         declare
-            Candidate : constant String :=
-              Ada.Directories.Compose
-                (Containing_Directory => Base,
-                 Name => Safe_Prefix & "-" & Time_Image & "-" & Image (Attempt));
-         begin
-            Ada.Directories.Create_Directory (Candidate);
-            return Candidate;
-         exception
-            when Ada.Directories.Name_Error | Ada.Directories.Use_Error =>
-               null;
-         end;
-      end loop;
-      return "";
-   end Create_Temporary_Directory;
+   function Create_Temporary_Directory (Prefix : String) return String is separate;
 
    --  The filesystem type of the volume holding Path, as statfs names it
    --  (f_fstypename: apfs, hfs, msdos, exfat, ntfs, smbfs); "" when the
@@ -1895,19 +1350,13 @@ package body Hostkit.Fs is
    -- Search_Path_Delimiter --
    ---------------------------
 
-   function Search_Path_Delimiter return Character is
-   begin
-      return ':';
-   end Search_Path_Delimiter;
+   function Search_Path_Delimiter return Character is separate;
 
    ------------------------
    -- Executable_Suffix --
    ------------------------
 
-   function Executable_Suffix return String is
-   begin
-      return "";
-   end Executable_Suffix;
+   function Executable_Suffix return String is separate;
 
    -----------------------
    -- Starts_When_Named --
@@ -1932,106 +1381,36 @@ package body Hostkit.Fs is
    function C_Umask (Mask : Interfaces.C.unsigned) return Interfaces.C.unsigned
      with Import, Convention => C, External_Name => "umask";
 
-   function Creation_Mask (Value : out Natural) return Boolean is
-      Held : constant Interfaces.C.unsigned := C_Umask (0);
-      Back : constant Interfaces.C.unsigned := C_Umask (Held);
-   begin
-      pragma Unreferenced (Back);
-      Value := Natural (Held);
-      return True;
-   end Creation_Mask;
+   function Creation_Mask (Value : out Natural) return Boolean is separate;
 
    function Set_Creation_Mask
      (Value : Natural; Previous : out Natural) return Boolean
-   is
-      Held : constant Interfaces.C.unsigned := C_Umask (Interfaces.C.unsigned (Value));
-   begin
-      Previous := Natural (Held);
-      return True;
-   end Set_Creation_Mask;
+   is separate;
 
    ------------------
    -- Null_Device --
    ------------------
 
-   function Null_Device return String is
-   begin
-      --  A character device every POSIX host has, in the place every POSIX
-      --  host keeps it.
-      return "/dev/null";
-   end Null_Device;
+   function Null_Device return String is separate;
 
-   function Delete_Empty_Directory (Path : String) return Boolean is
-   begin
-      Ada.Directories.Delete_Directory (Path);
-      return True;
-   exception
-      when others =>
-         return False;
-   end Delete_Empty_Directory;
+   function Delete_Empty_Directory (Path : String) return Boolean is separate;
+
+   --  mode_t on this host.
+   subtype C_Mode is C_U16;
 
    --  mkdir: the creation mask is taken from 0777, as for any new directory,
    --  and an entry already there -- a link to a directory included -- is
    --  refused.
-   function Create_Directory (Path : String) return Boolean is
-      function C_Mkdir (Path : Interfaces.C.Strings.chars_ptr; Mode : C_U16) return C_Int
-        with Import => True, Convention => C, External_Name => "mkdir";
-   begin
-      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
-         return False;
-      end if;
-      declare
-         C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-         Status : constant C_Int := C_Mkdir (C_Path, 8#777#);
-      begin
-         Interfaces.C.Strings.Free (C_Path);
-         return Status = 0;
-      end;
-   exception
-      when others =>
-         return False;
-   end Create_Directory;
+   function Create_Directory (Path : String) return Boolean is separate;
 
    function Create_Path (Path : String) return Boolean is separate;
 
    --  unlink: the entry itself, a link and never what it points at; a
    --  directory is refused.
-   function Delete_File (Path : String) return Boolean is
-   begin
-      if Path = "" or else (for some C of Path => C = ASCII.NUL) then
-         return False;
-      end if;
-      declare
-         C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
-         Status : constant C_Int := C_Unlink (C_Path);
-      begin
-         Interfaces.C.Strings.Free (C_Path);
-         return Status = 0;
-      end;
-   exception
-      when others =>
-         return False;
-   end Delete_File;
+   function Delete_File (Path : String) return Boolean is separate;
 
    --  getcwd with no buffer allocates one as long as the answer needs.
-   function Current_Directory return String is
-      use type Interfaces.C.Strings.chars_ptr;
-      function C_Getcwd (Buffer : System.Address; Size : Interfaces.C.size_t) return Interfaces.C.Strings.chars_ptr
-        with Import => True, Convention => C, External_Name => "getcwd";
-      procedure C_Free (Item : Interfaces.C.Strings.chars_ptr)
-        with Import => True, Convention => C, External_Name => "free";
-      Buffer : constant Interfaces.C.Strings.chars_ptr := C_Getcwd (System.Null_Address, 0);
-   begin
-      if Buffer = Interfaces.C.Strings.Null_Ptr then
-         return "";
-      end if;
-      declare
-         Result : constant String := Interfaces.C.Strings.Value (Buffer);
-      begin
-         C_Free (Buffer);
-         return Result;
-      end;
-   end Current_Directory;
+   function Current_Directory return String is separate;
 
    --  fopen, which takes Path as it is: no limit but the host's own. POSIX
    --  translates nothing, so Text changes nothing here.
@@ -2041,25 +1420,7 @@ package body Hostkit.Fs is
    --  The C stream for Path opened in fopen's Mode, for the stream and text
    --  subunits: Name_Error when nothing is there, Use_Error for any other
    --  refusal.
-   function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is
-      pragma Unreferenced (Text);
-      use type System.Address;
-      C_Path : aliased constant String := Path & ASCII.NUL;
-      C_Mode : aliased constant String := Mode & ASCII.NUL;
-      Stream : Interfaces.C_Streams.FILEs := Interfaces.C_Streams.NULL_Stream;
-      Error  : Integer := 2;
-   begin
-      if Path /= "" and then (for all C of Path => C /= ASCII.NUL) then
-         Stream := C_Fopen (C_Path'Address, C_Mode'Address);
-         Error := GNAT.OS_Lib.Errno;
-      end if;
-      if Stream /= Interfaces.C_Streams.NULL_Stream then
-         return Stream;
-      elsif Error = 2 then
-         raise Ada.IO_Exceptions.Name_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
-      end if;
-      raise Ada.IO_Exceptions.Use_Error with Path & ": " & GNAT.OS_Lib.Errno_Message (Err => Error);
-   end C_Stream_For;
+   function C_Stream_For (Path : String; Mode : String; Text : Boolean) return Interfaces.C_Streams.FILEs is separate;
 
    procedure Open_Stream
      (File : in out Ada.Streams.Stream_IO.File_Type;

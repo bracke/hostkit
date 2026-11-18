@@ -63,13 +63,24 @@ package Hostkit.Trash is
    --  Put Path in the host's trash.
    --
    --  On Windows this is Move_To_Recycle_Bin without the answer of where the
-   --  item went; on macOS the Finder's trash, which does not say.
+   --  item went; on macOS the Finder's trash. The overload below says where.
    --
    --  @param Path The file or directory to trash.
    --  @return True when the host took it. False when it refused, and on a host
    --          with no trash of its own, where nothing was attempted and the file
    --          is untouched.
    function Move_To_Trash (Path : String) return Boolean;
+
+   --  Put Path in the host's trash and say where it went: on Windows the
+   --  item's $R path in the Recycle Bin, on macOS the path the Finder gave it
+   --  (in ~/.Trash, or in its volume's .Trashes/<uid>, renamed there if the
+   --  name was taken), so a caller can put it back.
+   --
+   --  @param Path The file or directory to trash.
+   --  @param Trashed_Path Where the item is now; "" when it was not trashed,
+   --    or when the host took it without saying where.
+   --  @return As the overload above.
+   function Move_To_Trash (Path : String; Trashed_Path : out UString) return Boolean;
 
    --  Whether Move_To_Trash would keep Path, so it can be restored, rather
    --  than refuse it or destroy it. Windows answers False for a path on a

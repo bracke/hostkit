@@ -49,6 +49,31 @@ package Hostkit.Host is
    --          give.
    function Native_Locale return String;
 
+   --  The categories of formatting a desktop can set apart from its language.
+   type Format_Category is (Time_Formats, Number_Formats);
+
+   --  Which locale has this host's desktop been configured to format dates
+   --  or numbers in?
+   --
+   --  Linux keeps that in files, not in a call: KDE Plasma in the user's
+   --  ~/.config/plasma-localerc ([Formats] section), the system in
+   --  /etc/locale.conf and then /etc/default/locale (shell syntax, a value
+   --  may be quoted). In each the category's own key (LC_TIME, LC_NUMERIC)
+   --  is read before LANG, and the first file that answers wins. A file over
+   --  256 KiB, or one that cannot be read, gives no answer.
+   --
+   --  Windows and macOS keep the formats in the regional setting
+   --  Native_Locale already reads, so they answer "" here.
+   --
+   --  The identifier is returned as written ("de_DE.UTF-8"): normalising it
+   --  is the caller's convention.
+   --
+   --  @param Category Which formats.
+   --  @param Home The home folder the user's desktop setting is under (the
+   --              caller's HOME), or "" to read only the system's.
+   --  @return The configured locale, or "" where none is configured.
+   function Configured_Format_Locale (Category : Format_Category; Home : String) return String;
+
    --  Whether this session has a window server to open windows on: an X11
    --  or Wayland display on Linux (DISPLAY, WAYLAND_DISPLAY), always on
    --  macOS and Windows, which have one for every desktop session.

@@ -128,6 +128,13 @@ package body Hostkit.Host is
          return "";
    end Native_Locale;
 
+   function Configured_Format_Locale (Category : Format_Category; Home : String) return String is
+      pragma Unreferenced (Category, Home);
+   begin
+      --  The formats are part of the regional setting Native_Locale reads.
+      return "";
+   end Configured_Format_Locale;
+
    ------------------------
    -- Executable_Path --
    ------------------------

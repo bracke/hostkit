@@ -17,6 +17,24 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Host.Configured_Format_Locale`**: the locale the desktop has
+  been configured to format dates (`Time_Formats`) or numbers
+  (`Number_Formats`) in. Linux reads KDE Plasma's `~/.config/plasma-localerc`
+  (`[Formats]`), then `/etc/locale.conf` and `/etc/default/locale`, the
+  category's own key before `LANG`, quotes taken off, files over 256 KiB
+  ignored; Windows and macOS keep formats in the regional setting
+  `Native_Locale` reads and answer `""`. Moved here from files.
+- **`Hostkit.Fs.Canonical_Path`**: a path's canonical form only when all of
+  it is there -- "" for a missing part, a dangling link or a loop of links,
+  the same answer on every host. `Real_Path` keeps its Windows answers for
+  those (a missing leaf joined to its resolved folder, a dangling link
+  followed by its text, a loop's smallest member), which callers comparing
+  roots rely on; the spec now says so.
+- **`Hostkit.Trash.Move_To_Trash (Path, Trashed_Path)`**: says where the item
+  went -- the Recycle Bin's `$R` path on Windows, and on macOS the path the
+  Finder gave it (`resultingItemURL`), so a caller can put it back.
+- **`Hostkit.Windows_Errors.After_Refused_Replace`**: the pure decision behind
+  Windows `Replace_File`'s retries, tested on every host.
 - **`Hostkit.Fs.Leaf_Name_Limit_At`**: how long a leaf name the filesystem
   holding a directory stores, and in what unit (`Name_Length_Unit`: bytes,
   or UTF-16 units on NTFS, FAT, exFAT, SMB, APFS and HFS+). Linux asks the
@@ -284,6 +302,17 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- **Windows `Replace_File` replaces a read-only target**, as POSIX rename
+  does: the attribute is cleared once and the move tried again at once (put
+  back if it still fails), instead of a second of retries that all fail.
+- **macOS metadata copies keep the entry's flags and extended ACL**: the
+  Finder's hidden flag, no-dump, immutable and append-only (applied last), and
+  the ACL `listxattr` does not show (`acl_get_link_np`/`acl_set_link_np`),
+  best effort as xattrs.
+- **Linux and macOS share one `Hostkit.Fs` body for 42 subprograms**
+  (`src/platform/posix/hostkit-fs-*.adb` subunits): what differed was only the
+  stat call, errno numbers, the no-replace rename and the link call, now
+  small per-host hooks. Behaviour is unchanged.
 - Linux decides a volume's naming rules from mount points with their
   escapes decoded: a FAT stick labelled "NO NAME" (`NO\040NAME` in
   mountinfo) gets DOS rules. SMB shares (`cifs`, `smb3`) fold case. The mount

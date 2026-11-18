@@ -27,6 +27,13 @@ package body Hostkit.Trash is
       return False;
    end Move_To_Trash;
 
+   function Move_To_Trash (Path : String; Trashed_Path : out UString) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      Trashed_Path := Ada.Strings.Unbounded.Null_Unbounded_String;
+      return False;
+   end Move_To_Trash;
+
    --  Nothing is attempted here, so nothing is held.
    function Can_Hold (Path : String) return Boolean is
       pragma Unreferenced (Path);

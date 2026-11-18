@@ -1348,6 +1348,12 @@ package body Hostkit.Trash is
       return Move_To_Recycle_Bin (Path, Ignored_Recycled, Ignored_Info) = Recycled;
    end Move_To_Trash;
 
+   function Move_To_Trash (Path : String; Trashed_Path : out UString) return Boolean is
+      Ignored_Info : UString;
+   begin
+      return Move_To_Recycle_Bin (Path, Trashed_Path, Ignored_Info) = Recycled;
+   end Move_To_Trash;
+
    function Restore (Recycled_Path : String; Destination : String := "") return Restore_Outcome is
       Item : Recycle_Bin_Entry;
    begin

@@ -91,4 +91,25 @@ package body Hostkit.Windows_Errors is
       end if;
    end Set_Errno_From;
 
+   function After_Refused_Replace
+     (Code              : Interfaces.Unsigned_32;
+      Target_Read_Only  : Boolean;
+      Read_Only_Cleared : Boolean;
+      Attempt           : Positive;
+      Attempts          : Positive)
+      return Replace_Step
+   is
+      use type Interfaces.Unsigned_32;
+      Access_Denied     : constant := 5;
+      Sharing_Violation : constant := 32;
+      Lock_Violation    : constant := 33;
+   begin
+      if Code = Access_Denied and then Target_Read_Only and then not Read_Only_Cleared then
+         return Clear_Read_Only;
+      elsif Code in Access_Denied | Sharing_Violation | Lock_Violation and then Attempt < Attempts then
+         return Try_Again;
+      end if;
+      return Give_Up;
+   end After_Refused_Replace;
+
 end Hostkit.Windows_Errors;

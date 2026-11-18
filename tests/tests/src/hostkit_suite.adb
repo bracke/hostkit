@@ -261,6 +261,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  Canonical_Path answers only for a path that is all there, the same
+   --  on every host: a missing leaf, a dangling link and a loop have none.
+   procedure Test_Canonical_Path_Answers_Only_What_Is_There
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  One Windows entry has one spelling however it was typed: drive letter,
    --  separators, the stored case and the long name of each component.
    procedure Test_Windows_Stored_Spelling
@@ -450,6 +456,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  macOS: the Finder's hidden flag and an extended ACL, which listxattr
+   --  does not show, reach the copy.
+   procedure Test_Macos_Flags_And_Acls_Are_Copied
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Windows_Attributes_Are_Copied
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -468,6 +480,8 @@ package body Hostkit_Suite is
    procedure Test_Host_Tables (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
+   procedure Test_Configured_Format_Locale (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    --  A desktop entry's values read as the specification has them: string
    --  and list escapes, locales, Exec split into arguments and its field
@@ -836,6 +850,9 @@ package body Hostkit_Suite is
         (T, Test_Windows_Long_Path_Form'Access,
          "process : a long Windows path is given the \\?\ form only when that keeps its meaning");
       Register_Routine
+        (T, Test_Canonical_Path_Answers_Only_What_Is_There'Access,
+         "fs : a canonical path is given only for a path that is all there, on every host");
+      Register_Routine
         (T, Test_Windows_Stored_Spelling'Access,
          "process : a Windows path is spelled as the volume stores it, however it was typed");
       Register_Routine
@@ -932,11 +949,17 @@ package body Hostkit_Suite is
         (T, Test_A_Held_File_Is_Synced_Once_Let_Go'Access,
          "durability : a file held against writers is synced once it is let go");
       Register_Routine
+        (T, Test_Macos_Flags_And_Acls_Are_Copied'Access,
+         "metadata : a macOS copy keeps the hidden flag and the extended ACL");
+      Register_Routine
         (T, Test_Windows_Attributes_Are_Copied'Access,
          "metadata copy : a hidden Windows file's copy is hidden too");
       Register_Routine
         (T, Test_Filesystem_Rules'Access,
          "fs : DOS-ruled filesystems are recognised from the mount table");
+      Register_Routine
+        (T, Test_Configured_Format_Locale'Access,
+         "host : the desktop's configured date and number formats are read where the host keeps them");
       Register_Routine
         (T, Test_Run_Reports_Exit_Status'Access, "process : Run reports the program's own exit status");
       Register_Routine

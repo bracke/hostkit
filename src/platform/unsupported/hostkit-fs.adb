@@ -252,6 +252,12 @@ package body Hostkit.Fs is
       return "";
    end Real_Path;
 
+   function Canonical_Path (Path : String) return String is
+      pragma Unreferenced (Path);
+   begin
+      return "";
+   end Canonical_Path;
+
    --  No body for this host: say so by saying nothing, rather than guessing at
    --  a layout that may not exist.
    function Own_Executable return String is

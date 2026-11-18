@@ -529,8 +529,21 @@ package Hostkit.Fs is
    --  Ada.Directories.Full_Name cannot be used: on POSIX it resolves links, but on
    --  Windows it is GetFullPathName (purely lexical, does not follow reparse points).
    --  @return Empty string if Path cannot be resolved; otherwise the resolved path
-   --          (on Windows with the \\?\ and \\?\UNC\ prefix stripped).
+   --          (on Windows with the \\?\ and \\?\UNC\ prefix stripped). On POSIX
+   --          a path that is not all there -- a missing part, a dangling link, a
+   --          loop of links -- cannot be resolved. Windows answers for those too,
+   --          and callers that compare roots rely on it: a missing leaf is joined to
+   --          its resolved folder, a dangling link is followed by the text it holds,
+   --          and a loop answers with its lexically smallest member. A caller that
+   --          needs one meaning on every host asks Canonical_Path.
    function Real_Path (Path : String) return String;
+
+   --  Path's canonical absolute form when every part of it is there: links and
+   --  reparse points followed, as Real_Path follows them, the same answer on
+   --  every host.
+   --  @return The resolved path, or "" when Path is not all there (a missing
+   --          part, a dangling link, a loop of links) or the host will not say.
+   function Canonical_Path (Path : String) return String;
 
    type Read_Beneath_Outcome is
      (Read_Done,
