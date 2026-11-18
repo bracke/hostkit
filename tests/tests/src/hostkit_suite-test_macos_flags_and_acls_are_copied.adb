@@ -57,7 +57,17 @@ begin
    --  extended ACL entry.
    Run ("/usr/bin/chflags", "hidden " & Source);
    Assert (Done and then Hostkit.Fs.Is_Hidden (Source), "the source is hidden");
-   Run ("/bin/chmod", "+a ""everyone deny delete"" " & Source);
+   --  The entry is one argument with spaces in it: passed as a list, since
+   --  Argument_String_To_List would keep the quotes around it.
+   declare
+      Parts : GNAT.OS_Lib.Argument_List :=
+        [new String'("+a"), new String'("everyone deny delete"), new String'(Source)];
+   begin
+      GNAT.OS_Lib.Spawn ("/bin/chmod", Parts, Done);
+      for Part of Parts loop
+         GNAT.OS_Lib.Free (Part);
+      end loop;
+   end;
    Assert (Done, "the source has an ACL entry");
    Assert
      (Hostkit.Metadata_Copy.Apply (Hostkit.Metadata_Copy.Capture (Source), Target, Preserve_Ownership => False),

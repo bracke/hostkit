@@ -2251,7 +2251,6 @@ package body Hostkit.Metadata is
       Available : out Boolean)
       return String
    is
-      use type Interfaces.Integer_64;
       Wide_Path : aliased Wide_String := Wide (Path);
       File      : System.Address :=
         Create_File

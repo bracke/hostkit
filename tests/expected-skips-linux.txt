@@ -6,3 +6,4 @@ Test_Windows_Attributes_Are_Copied: needs Windows file attributes
 Test_A_Held_File_Is_Synced_Once_Let_Go: only Windows refuses an open for a holder's share mode
 Test_The_Recycle_Bin_Says_Where_An_Item_Went: needs the Windows Recycle Bin
 Test_Macos_Flags_And_Acls_Are_Copied: needs macOS file flags and ACLs
+Test_Spawn_Group_Release_Ends_Descendants: Job Object group release exists only on Windows

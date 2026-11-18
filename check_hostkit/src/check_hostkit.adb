@@ -119,7 +119,9 @@ procedure Check_Hostkit is
    --  Windows and an unsupported one beside it, and must not also be in the
    --  Linux or macOS folder: two bodies of one unit in one build is an error
    --  only the host building both can see. A unit whose spec sits beside its
-   --  body (Hostkit.Posix) belongs to those hosts alone and needs no others.
+   --  body (Hostkit.Posix) belongs to those hosts alone and needs no others;
+   --  so does a subunit ("separate (Parent)"), which is part of the Linux and
+   --  macOS parent bodies that declare it separate and of no other host's.
    procedure Require_A_Body_Per_Host is
       type Host_List is array (Positive range <>) of Unbounded_String;
 
@@ -139,7 +141,10 @@ procedure Check_Hostkit is
                Name : constant String := Ada.Directories.Simple_Name (Item);
                Own_Unit : constant Boolean :=
                  Ada.Directories.Exists
-                   (Root & "/src/platform/" & From & "/" & Name (Name'First .. Name'Last - 1) & "s");
+                   (Root & "/src/platform/" & From & "/" & Name (Name'First .. Name'Last - 1) & "s")
+                 or else Ada.Strings.Fixed.Index
+                   (Project_Tools.Files.Read_Raw_File (Root & "/src/platform/" & From & "/" & Name),
+                    "separate (") > 0;
             begin
                for Host of Needed loop
                   exit when Own_Unit;
@@ -508,11 +513,11 @@ begin
    Require_Binding ("src/platform/windows/hostkit-fs.adb", "DeleteFileW");
    Require_Win32_Call ("src/platform/windows/hostkit-directory_listing.adb", "FindFirstFileW", "Find_First_File");
    Require_Win32_Call ("src/platform/windows/hostkit-directory_listing.adb", "FindNextFileW", "Find_Next_File");
-   Require_Binding ("src/platform/linux/hostkit-fs.adb", "mkdir");
-   Require_Binding ("src/platform/linux/hostkit-fs.adb", "getcwd");
+   --  Linux and macOS share mkdir and getcwd in the Hostkit.Fs subunits of
+   --  src/platform/posix.
+   Require_Binding ("src/platform/posix/hostkit-fs-create_directory.adb", "mkdir");
+   Require_Binding ("src/platform/posix/hostkit-fs-current_directory.adb", "getcwd");
    Require_Binding ("src/platform/linux/hostkit-fs.adb", "fopen");
-   Require_Binding ("src/platform/macos/hostkit-fs.adb", "mkdir");
-   Require_Binding ("src/platform/macos/hostkit-fs.adb", "getcwd");
    Require_Binding ("src/platform/macos/hostkit-fs.adb", "fopen");
    --  Size, modification time and the owner's access at any depth, which
    --  GNAT's Windows runtime refuses past 260 characters.

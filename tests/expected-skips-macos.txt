@@ -9,3 +9,4 @@ Test_Group_Ends_With_Leader: a group ending with its leader is checked on Linux 
 Test_An_Identity_Reads_Beside_Another_Reader: process identities are not read from /proc here
 Test_A_Lock_Is_Not_Inherited: no /proc/self/fd to list a program's open files
 Test_The_Recycle_Bin_Says_Where_An_Item_Went: needs the Windows Recycle Bin
+Test_Spawn_Group_Release_Ends_Descendants: Job Object group release exists only on Windows
