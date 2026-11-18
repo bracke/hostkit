@@ -20,7 +20,9 @@ package body Hostkit.Windows_Errors is
    E_Name_Too_Long : constant := 38;
    E_No_Sys        : constant := 40;
    E_Not_Empty     : constant := 41;
-   --  The UCRT's POSIX supplement: ELOOP is 114 there, not Linux's 40.
+   --  The UCRT's POSIX supplement: ELOOP is 114 there, not Linux's 40, and
+   --  EHOSTUNREACH 110, not 113.
+   E_Host_Unreach  : constant := 110;
    E_Loop          : constant := 114;
 
    function Errno_Of (Code : Interfaces.Unsigned_32) return Integer is
@@ -28,11 +30,18 @@ package body Hostkit.Windows_Errors is
       case Code is
          when 0 =>                         --  ERROR_SUCCESS
             return 0;
-         when 2 | 3 | 15 | 18 | 53 | 67 | 161 | 1921 =>
+         when 2 | 3 | 15 | 18 | 161 =>
             --  FILE_NOT_FOUND, PATH_NOT_FOUND, INVALID_DRIVE, NO_MORE_FILES,
-            --  BAD_NETPATH, BAD_NET_NAME, BAD_PATHNAME, CANT_RESOLVE_FILENAME:
-            --  nothing there, as Hostkit.Fs reads them.
+            --  BAD_PATHNAME: nothing there, as Hostkit.Fs reads them.
             return E_No_Ent;
+         when 53 | 67 =>
+            --  BAD_NETPATH, BAD_NET_NAME: a network path or share Windows
+            --  cannot reach. A sleeping server answers these as a missing
+            --  one does, so they are not ENOENT: nothing says it is gone.
+            return E_Host_Unreach;
+         when 1921 =>
+            --  CANT_RESOLVE_FILENAME: a link that loops.
+            return E_Loop;
          when 4 =>                         --  TOO_MANY_OPEN_FILES
             return E_M_File;
          when 5 | 65 | 82 =>               --  ACCESS_DENIED, NETWORK_ACCESS_DENIED, CANNOT_MAKE

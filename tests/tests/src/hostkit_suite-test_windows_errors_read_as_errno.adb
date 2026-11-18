@@ -25,6 +25,9 @@ begin
    Assert (Errno_Of (206) = 38, "ERROR_FILENAME_EXCED_RANGE is ENAMETOOLONG");
    Assert (Errno_Of (80) = 17 and then Errno_Of (183) = 17, "ERROR_FILE_EXISTS and ERROR_ALREADY_EXISTS are EEXIST");
    Assert (Errno_Of (2) = 2 and then Errno_Of (3) = 2, "a missing file or folder is ENOENT");
+   Assert (Errno_Of (53) = 110 and then Errno_Of (67) = 110,
+           "an unreachable network path or share is EHOSTUNREACH, not ENOENT: a sleeping server answers so too");
+   Assert (Errno_Of (1921) = 114, "ERROR_CANT_RESOLVE_FILENAME, a looping link, is ELOOP, not ENOENT");
    Assert (Errno_Of (145) = 41, "ERROR_DIR_NOT_EMPTY is ENOTEMPTY");
    Assert (Errno_Of (17) = 18, "ERROR_NOT_SAME_DEVICE is EXDEV");
    Assert (Errno_Of (1314) = 1, "ERROR_PRIVILEGE_NOT_HELD is EPERM");

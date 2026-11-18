@@ -40,6 +40,16 @@ package Hostkit.Lease_Files is
       Offset : Ada.Streams.Stream_Element_Offset := 0) return Boolean;
    function Size (Item : Lease) return Long_Long_Integer;
 
+   --  Cut the held lease (opened writable) back to Length bytes, durably, as
+   --  Write_At makes its bytes durable: how a record a failed Write_At left
+   --  half-written is taken back off the end, so the next record is not
+   --  written after a torn one.
+   --
+   --  @param Item A held lease, opened writable.
+   --  @param Length The size to cut it to; no larger than it is.
+   --  @return True when the file is Length bytes long and on the device.
+   function Truncate (Item : Lease; Length : Long_Long_Integer) return Boolean;
+
    --  Stable identity of the held file. High is the upper half of Windows'
    --  128-bit file id and zero on POSIX.
    type Lease_Identity is record

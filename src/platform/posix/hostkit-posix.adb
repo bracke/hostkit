@@ -1,7 +1,5 @@
 with Ada.Containers.Vectors;
 
-with System;
-
 with Hostkit.Posix_Abi;
 
 package body Hostkit.Posix is
@@ -109,5 +107,24 @@ package body Hostkit.Posix is
       when others =>
          null;
    end Reap_Noted_Children;
+
+   --------------------
+   -- Read_Directory --
+   --------------------
+
+   function Read_Directory (Directory : System.Address) return Boolean is
+      use type System.Address;
+      Item : System.Address;
+   begin
+      loop
+         Set_Errno (0);
+         Item := Readdir (Directory);
+         exit when Item = System.Null_Address;
+         if not Visit (Item) then
+            return True;
+         end if;
+      end loop;
+      return Errno = 0;
+   end Read_Directory;
 
 end Hostkit.Posix;

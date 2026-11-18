@@ -17,6 +17,10 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Lease_Files.Truncate`**: cut a held lease back to a shorter
+  length, durably, as `Write_At` makes its bytes durable -- how a record a
+  failed `Write_At` left half-written (a full disk) is taken back off the end,
+  so the next record is not appended after a torn one.
 - **`Hostkit.Desktop_Entries.Locale_Variable`**: which variable decides a
   locale category -- the first of LC_ALL, the category's own and LANG that
   is set -- the one reading of POSIX's precedence. `Message_Locale` is its
@@ -320,6 +324,27 @@ recently enough to matter to somebody pinning it; the history before that is in
   giving up on the identity.
 
 ### Fixed
+
+- **A directory read that fails part-way fails the listing on Linux and
+  macOS.** `Directory_Listing.List` took readdir's NULL for the end of the
+  directory without asking errno, so EIO on a failing disk or ESTALE on a
+  lost share returned a shorter listing as a whole one -- and a copy
+  succeeded with entries missing. Windows already failed it. One
+  errno-checked loop (`Hostkit.Posix.Read_Directory`) now serves both hosts.
+
+- **Windows no longer answers "absent" for what it cannot reach.**
+  ERROR_BAD_NETPATH and ERROR_BAD_NET_NAME are what a sleeping server or a
+  dropped connection answers too, so `Entry_Is_Absent` and the other asks
+  now raise Use_Error for them, and errno reads EHOSTUNREACH, not ENOENT.
+  ERROR_CANT_RESOLVE_FILENAME (a link loop) is nothing there only past a
+  final link followed, as ELOOP is on POSIX; met on the way it is Use_Error,
+  as the spec said, and errno reads ELOOP.
+
+- **Windows `Delete_Link` and `Delete_File` decide "link" by the reparse
+  tag**, as `Is_Link` does. A OneDrive placeholder or a deduplicated file is
+  a reparse point too: `Delete_Link` deleted one (the spec leaves a regular
+  file alone), `Delete_File` removed an empty placeholder folder, and a
+  read-only placeholder skipped the read-only clearing an ordinary file gets.
 
 - **`Spawn.Group_New` owns a process tree on Windows.** The child is started
   suspended, assigned to a Job Object and then resumed; after its leader has

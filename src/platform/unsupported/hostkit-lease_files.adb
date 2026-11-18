@@ -49,6 +49,12 @@ package body Hostkit.Lease_Files is
       return -1;
    end Size;
 
+   function Truncate (Item : Lease; Length : Long_Long_Integer) return Boolean is
+      pragma Unreferenced (Item, Length);
+   begin
+      return False;
+   end Truncate;
+
    function Identity (Item : Lease) return Lease_Identity is
       pragma Unreferenced (Item);
    begin

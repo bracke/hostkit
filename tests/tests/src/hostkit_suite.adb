@@ -573,6 +573,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A directory read that fails part-way is a failed listing, not a
+   --  shorter one: readdir's NULL is told from the end by errno alone.
+   procedure Test_A_Failed_Directory_Read_Is_Not_A_Short_Listing
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Locate (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    procedure Test_The_Host_Is_Not_Guessed (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
@@ -993,6 +999,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Directory_Listing'Access,
          "directory listing : each entry with its kind, links not followed");
+      Register_Routine
+        (T, Test_A_Failed_Directory_Read_Is_Not_A_Short_Listing'Access,
+         "directory listing : a read that fails part-way fails the listing");
       Register_Routine
         (T, Test_Locate'Access, "process : a program is found by name");
       Register_Routine

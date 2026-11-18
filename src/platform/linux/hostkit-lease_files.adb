@@ -58,6 +58,8 @@ package body Hostkit.Lease_Files is
      with Import, Convention => C, External_Name => "close";
    function C_Flock (Fd, Operation : C_Int) return C_Int
      with Import, Convention => C, External_Name => "flock";
+   function C_Ftruncate (Fd : C_Int; Length : C_S64) return C_Int
+     with Import, Convention => C, External_Name => "ftruncate";
    function C_Fsync (Fd : C_Int) return C_Int
      with Import, Convention => C, External_Name => "fsync";
    function C_Fchmod (Fd : C_Int; Mode : C_U32) return C_Int
@@ -332,6 +334,28 @@ package body Hostkit.Lease_Files is
    exception
       when others => return -1;
    end Size;
+
+   function Truncate (Item : Lease; Length : Long_Long_Integer) return Boolean is
+      Result : C_Int;
+   begin
+      if not Item.Held or else Length < 0 or else Length > Size (Item) then
+         return False;
+      end if;
+      loop
+         Result := C_Ftruncate (C_Int (Item.Handle), C_S64 (Length));
+         exit when Result = 0 or else Errno /= 4;
+      end loop;
+      if Result /= 0 then
+         return False;
+      end if;
+      loop
+         Result := C_Fsync (C_Int (Item.Handle));
+         exit when Result = 0 or else Errno /= 4;
+      end loop;
+      return Result = 0;
+   exception
+      when others => return False;
+   end Truncate;
 
    function Identity (Item : Lease) return Lease_Identity is
       Info : aliased Statx_Record;

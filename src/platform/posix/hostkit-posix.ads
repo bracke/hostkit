@@ -1,4 +1,5 @@
 with Interfaces.C;
+with System;
 
 --  What the Linux and macOS bodies share below the level of a public unit:
 --  the calling thread's errno, and the children started detached that are
@@ -31,5 +32,21 @@ private package Hostkit.Posix is
    --  Collect each noted child that has already finished, and forget it.
    --  Never waits for one still running; that one stays noted for next time.
    procedure Reap_Noted_Children;
+
+   --  Read an open directory to its end with Readdir, handing each entry to
+   --  Visit. readdir answers NULL both at the end and when the read fails
+   --  part-way (EIO on a failing disk, ESTALE on a lost share); only errno,
+   --  cleared before each call, tells the two apart. A listing cut short by
+   --  a failure is not a shorter listing.
+   --
+   --  @param Directory The open directory (a DIR *).
+   --  @return True when the directory was read to its end, or Visit stopped
+   --  the read; False when a read failed.
+   generic
+      --  readdir on Directory: the next entry (a struct dirent *), or NULL.
+      with function Readdir (Directory : System.Address) return System.Address;
+      --  One entry. False stops the read there, as a success.
+      with function Visit (Item : System.Address) return Boolean;
+   function Read_Directory (Directory : System.Address) return Boolean;
 
 end Hostkit.Posix;

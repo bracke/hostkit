@@ -34,6 +34,13 @@ begin
    Assert (Hostkit.Lease_Files.Read_At (First, Read_Back),
            "lease bytes are read through the held file");
    Assert (Read_Back = Written, "lease bytes round-trip exactly");
+   Assert (Hostkit.Lease_Files.Truncate (First, 40) and then Hostkit.Lease_Files.Size (First) = 40,
+           "a held lease is cut back to a shorter length");
+   Assert (not Hostkit.Lease_Files.Truncate (First, 41), "a lease is never grown by a cut");
+   Assert (Hostkit.Lease_Files.Write_At (First, Written (41 .. 64), Offset => 40)
+           and then Hostkit.Lease_Files.Read_At (First, Read_Back)
+           and then Read_Back = Written,
+           "what follows a cut is written where the cut ended");
    Id := Hostkit.Lease_Files.Identity (First);
    Assert (Id.Available, "the held lease has a stable identity");
    Assert (Hostkit.Lease_Files.Path_Matches (First, Path),

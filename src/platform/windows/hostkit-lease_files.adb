@@ -68,6 +68,8 @@ package body Hostkit.Lease_Files is
      with Import, Convention => Stdcall, External_Name => "SetFilePointerEx";
    function Flush_File_Buffers (Handle : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "FlushFileBuffers";
+   function Set_End_Of_File (Handle : System.Address) return C_Int
+     with Import, Convention => Stdcall, External_Name => "SetEndOfFile";
    function Get_File_Size (Handle : System.Address; Value : access C_I64) return C_Int
      with Import, Convention => Stdcall, External_Name => "GetFileSizeEx";
 
@@ -325,6 +327,21 @@ package body Hostkit.Lease_Files is
    exception
       when others => return -1;
    end Size;
+
+   function Truncate (Item : Lease; Length : Long_Long_Integer) return Boolean is
+   begin
+      if not Item.Held or else Length < 0 or else Length > Size (Item)
+        or else Set_File_Pointer (To_Handle (Item), C_I64 (Length), System.Null_Address, File_Begin) = 0
+      then
+         return False;
+      elsif Set_End_Of_File (To_Handle (Item)) = 0 or else Flush_File_Buffers (To_Handle (Item)) = 0 then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      end if;
+      return True;
+   exception
+      when others => return False;
+   end Truncate;
 
    function Identity (Item : Lease) return Lease_Identity is
    begin

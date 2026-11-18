@@ -53,11 +53,13 @@ package Hostkit.Fs is
    --  @param Path Path to look at.
    --  @return True when nothing is there: ENOENT or ENOTDIR on POSIX, or
    --    ENAMETOOLONG for a name longer than any entry can bear; a missing
-   --    file, folder, drive or share on Windows. False when an entry or a
-   --    link is there.
+   --    file, folder or drive on Windows. False when an entry or a link is
+   --    there.
    --  @exception Ada.Directories.Use_Error The host will not say (a folder on
    --    the way may not be searched, the volume refused, a device not ready,
-   --    a path past PATH_MAX, a link loop on the way).
+   --    a path past PATH_MAX, a link loop on the way, a network path or share
+   --    that cannot be reached -- Windows answers a sleeping server as it
+   --    answers a missing one).
    function Entry_Is_Absent (Path : String) return Boolean;
 
    --  The size of the ordinary file at Path, as Ada.Directories.Size says it,
@@ -372,6 +374,10 @@ package Hostkit.Fs is
    --  Not following is the point. The target is someone else's -- often deliberately
    --  outside the tree being cleared -- and a caller that followed the link would delete
    --  it. This removes a link or nothing.
+   --
+   --  A link is a symbolic link (or, on Windows, a junction) by what the entry
+   --  says it is: a Windows reparse point of any other kind -- a OneDrive
+   --  placeholder, a deduplicated file -- is the ordinary file or folder it shows as.
    --
    --  @return True when the link is gone. False when Path is not a link (a regular file
    --          or directory is left alone) or the host refused to remove it.

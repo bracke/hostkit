@@ -1,3 +1,4 @@
+with Hostkit.Posix;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
@@ -25,33 +26,39 @@ package body Hostkit.Directory_Listing is
    function List (Path : String; Entries : out Entry_Vectors.Vector) return Boolean is
       C_Name    : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Handle    : constant System.Address := C_Opendir (C_Name);
-      Pointer   : System.Address;
       Ignored   : Interfaces.C.int;
+
+      --  Keep one entry the read hands over; . and .. are left out.
+      function Visit (Pointer : System.Address) return Boolean is
+         Item : Dirent with Import, Address => Pointer;
+         Name : constant String := Interfaces.C.To_Ada (Item.Name);
+         Kind : constant Entry_Kind :=
+           (case Item.Kind is
+              when 4 => Directory,
+              when 8 => Regular_File,
+              when 10 => Symbolic_Link,
+              when 0 => Unknown,
+              when others => Other);
+      begin
+         if Name /= "." and then Name /= ".." then
+            Entries.Append (Listed_Entry'(Length => Name'Length, Kind => Kind, Name => Name));
+         end if;
+         return True;
+      end Visit;
+
+      --  The whole directory, or False when a read fails part-way.
+      function Read_All is new Hostkit.Posix.Read_Directory (C_Readdir, Visit);
    begin
       Interfaces.C.Strings.Free (C_Name);
       Entries.Clear;
       if Handle = System.Null_Address then
          return False;
       end if;
-      loop
-         Pointer := C_Readdir (Handle);
-         exit when Pointer = System.Null_Address;
-         declare
-            Item : Dirent with Import, Address => Pointer;
-            Name : constant String := Interfaces.C.To_Ada (Item.Name);
-            Kind : constant Entry_Kind :=
-              (case Item.Kind is
-                 when 4 => Directory,
-                 when 8 => Regular_File,
-                 when 10 => Symbolic_Link,
-                 when 0 => Unknown,
-                 when others => Other);
-         begin
-            if Name /= "." and then Name /= ".." then
-               Entries.Append (Listed_Entry'(Length => Name'Length, Kind => Kind, Name => Name));
-            end if;
-         end;
-      end loop;
+      if not Read_All (Handle) then
+         Ignored := C_Closedir (Handle);
+         Entries.Clear;
+         return False;
+      end if;
       Ignored := C_Closedir (Handle);
       return True;
    exception

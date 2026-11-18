@@ -203,24 +203,32 @@ package body Hostkit.Fs is
       Size       : Interfaces.Unsigned_64 := 0;
    end record;
 
-   --  A failed ask as the spec's exceptions: a missing file, folder, drive
-   --  or share, a name Windows cannot read and a link it cannot resolve are
-   --  nothing there (Name_Error); anything else -- access denied, a sharing
-   --  violation, a device not ready -- is the host not saying (Use_Error).
-   procedure Refuse (Path : String; Error : C_DWord) with No_Return;
+   --  A failed ask as the spec's exceptions: a missing file, folder or
+   --  drive and a name Windows cannot read are nothing there (Name_Error);
+   --  anything else -- access denied, a sharing violation, a device not
+   --  ready, a network path or share Windows cannot reach -- is the host not
+   --  saying (Use_Error). ERROR_BAD_NETPATH and ERROR_BAD_NET_NAME are also
+   --  what a sleeping server or a dropped connection answers, so a share
+   --  is never taken for gone. A link that cannot be resolved (a loop) is
+   --  nothing there only past a final link followed, as ELOOP is on POSIX:
+   --  met on the way, the host just will not say.
+   --
+   --  @param Path The path asked about, for the message.
+   --  @param Error GetLastError of the failed ask.
+   --  @param Followed Whether the ask followed a final link.
+   procedure Refuse (Path : String; Error : C_DWord; Followed : Boolean) with No_Return;
 
-   procedure Refuse (Path : String; Error : C_DWord) is
+   procedure Refuse (Path : String; Error : C_DWord; Followed : Boolean) is
       Error_File_Not_Found     : constant := 2;
       Error_Path_Not_Found     : constant := 3;
       Error_Invalid_Drive      : constant := 15;
-      Error_Bad_Netpath        : constant := 53;
-      Error_Bad_Net_Name       : constant := 67;
       Error_Invalid_Name       : constant := 123;
       Error_Bad_Pathname       : constant := 161;
       Error_Cant_Resolve_Name  : constant := 1921;
    begin
-      if Error in Error_File_Not_Found | Error_Path_Not_Found | Error_Invalid_Drive | Error_Bad_Netpath
-        | Error_Bad_Net_Name | Error_Invalid_Name | Error_Bad_Pathname | Error_Cant_Resolve_Name
+      if Error in Error_File_Not_Found | Error_Path_Not_Found | Error_Invalid_Drive | Error_Invalid_Name
+        | Error_Bad_Pathname
+        or else (Error = Error_Cant_Resolve_Name and then Followed)
       then
          raise Ada.Directories.Name_Error with Path & ": Windows error" & C_DWord'Image (Error);
       end if;
@@ -239,7 +247,7 @@ package body Hostkit.Fs is
       if Path = "" or else (for some C of Path => C = ASCII.NUL) then
          raise Ada.Directories.Name_Error with "no entry at """ & Path & """";
       elsif Get_File_Attributes_Ex (Native_Path'Address, 0, Data'Access) = 0 then
-         Refuse (Path, Get_Last_Error);
+         Refuse (Path, Get_Last_Error, Followed => False);
       elsif Follow_Links
         and then (Data.Attributes and File_Attribute_Reparse_Point) /= 0
         and then Is_Link (Path)
@@ -256,13 +264,13 @@ package body Hostkit.Fs is
             Ignored : Interfaces.C.int;
          begin
             if Handle = Invalid_Handle_Value then
-               Refuse (Path, Get_Last_Error);
+               Refuse (Path, Get_Last_Error, Followed => True);
             end if;
             Asked := Get_File_Information (Handle, Info'Access) /= 0;
             Error := Get_Last_Error;
             Ignored := Close_Handle (Handle);
             if not Asked then
-               Refuse (Path, Error);
+               Refuse (Path, Error, Followed => True);
             end if;
             return
               (Attributes => Info.Attributes,
@@ -892,8 +900,12 @@ package body Hostkit.Fs is
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
+      --  A link by its reparse tag, as Is_Link reads it: a OneDrive
+      --  placeholder or a deduplicated file is a reparse point too, but an
+      --  ordinary file or folder, which this leaves alone.
       if Attributes = Invalid_File_Attributes
         or else (Attributes and File_Attribute_Reparse_Point) = 0
+        or else not Is_Link (Path)
       then
          return False;
       end if;
@@ -1477,7 +1489,9 @@ package body Hostkit.Fs is
       begin
          if Attributes = Invalid_File_Attributes then
             return False;
-         elsif (Attributes and File_Attribute_Reparse_Point) /= 0 then
+         elsif (Attributes and File_Attribute_Reparse_Point) /= 0 and then Is_Link (Path) then
+            --  Only a link by its tag; any other reparse point (a cloud
+            --  placeholder) is the ordinary file or folder it shows as.
             return Delete_Link (Path);
          elsif (Attributes and File_Attribute_Directory) /= 0 then
             return False;
