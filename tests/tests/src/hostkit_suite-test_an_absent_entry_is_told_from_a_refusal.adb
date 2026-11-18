@@ -24,7 +24,8 @@ begin
    --  PATH_MAX made of ordinary names is one the host will not look up, not
    --  proof that nothing is there. Windows reads both through \\?\.
    Assert
-     (Hostkit.Fs.Entry_Is_Absent (Ada.Directories.Compose (Folder, [1 .. 300 => 'n'])),
+     --  Joined by hand: Ada.Directories.Compose refuses such a name on Windows.
+     (Hostkit.Fs.Entry_Is_Absent (Folder & GNAT.OS_Lib.Directory_Separator & [1 .. 300 => 'n']),
       "a name longer than NAME_MAX is absent");
    if Hostkit.Host.Current /= Hostkit.Host.Windows then
       declare

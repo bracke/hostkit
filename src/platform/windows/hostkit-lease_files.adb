@@ -32,6 +32,8 @@ package body Hostkit.Lease_Files is
    Error_Sharing : constant C_DWord := 32;
    Error_Lock : constant C_DWord := 33;
    Error_Not_Found : constant C_DWord := 2;
+   Error_File_Exists : constant C_DWord := 80;
+   Error_Already_Exists : constant C_DWord := 183;
    Error_Path_Not_Found : constant C_DWord := 3;
    Error_Invalid_Name : constant C_DWord := 123;
    File_Begin : constant C_DWord := 0;
@@ -185,6 +187,10 @@ package body Hostkit.Lease_Files is
          Code := Get_Last_Error;
          Hostkit.Errors.Set_Errno_From_Last_Error;
          if not New_File and then Code in Error_Not_Found | Error_Path_Not_Found | Error_Invalid_Name then
+            return Refused;
+         elsif New_File and then Code in Error_File_Exists | Error_Already_Exists then
+            --  The name is taken, as EEXIST says on POSIX: a refusal, which
+            --  callers tell from a failure (a torn marker is rewritten).
             return Refused;
          elsif Code in Error_Sharing | Error_Lock then
             return Busy;

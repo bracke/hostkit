@@ -625,9 +625,10 @@ package body Hostkit.Spawn is
       Mode   : Wait_Mode;
       Result : out Status) return Boolean
    is
-      Handle : constant System.Address :=
-        System.Storage_Elements.To_Address
-          (System.Storage_Elements.Integer_Address (Item.Id));
+      --  Only a valid handle's id is an address: Invalid_Process's -1 has no
+      --  Integer_Address, so it is converted once Is_Valid has said so.
+      function Handle return System.Address is
+        (System.Storage_Elements.To_Address (System.Storage_Elements.Integer_Address (Item.Id)));
       Waited : C_DWord;
       Code   : aliased C_DWord := 0;
    begin
