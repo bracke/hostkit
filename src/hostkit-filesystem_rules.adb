@@ -23,6 +23,53 @@ package body Hostkit.Filesystem_Rules is
         or else Lower = "ntfs3";
    end Dos_By_Type_Name;
 
+   function Folds_By_Type_Name (Name : String) return Boolean is
+      Lower : constant String := Ada.Characters.Handling.To_Lower (Name);
+   begin
+      return Dos_By_Type_Name (Name)
+        or else Lower = "cifs"
+        or else Lower = "smb3"
+        or else Lower = "smbfs";
+   end Folds_By_Type_Name;
+
+   function Utf16_By_Type_Name (Name : String) return Boolean is
+      Lower : constant String := Ada.Characters.Handling.To_Lower (Name);
+   begin
+      return Folds_By_Type_Name (Name)
+        or else Lower = "apfs"
+        or else Lower = "hfs";
+   end Utf16_By_Type_Name;
+
+   function Decode_Mount_Field (Value : String) return String is
+      function Octal (Item : Character) return Natural is
+        (if Item in '0' .. '7' then Character'Pos (Item) - Character'Pos ('0') else Natural'Last);
+
+      Decoded  : Unbounded_String;
+      Position : Natural := Value'First;
+   begin
+      while Position <= Value'Last loop
+         if Value (Position) = '\'
+           and then Position + 3 <= Value'Last
+           and then Octal (Value (Position + 1)) /= Natural'Last
+           and then Octal (Value (Position + 2)) /= Natural'Last
+           and then Octal (Value (Position + 3)) /= Natural'Last
+           and then Octal (Value (Position + 1)) * 64 + Octal (Value (Position + 2)) * 8
+                    + Octal (Value (Position + 3)) <= Character'Pos (Character'Last)
+         then
+            Append
+              (Decoded,
+               Character'Val
+                 (Octal (Value (Position + 1)) * 64 + Octal (Value (Position + 2)) * 8
+                  + Octal (Value (Position + 3))));
+            Position := Position + 4;
+         else
+            Append (Decoded, Value (Position));
+            Position := Position + 1;
+         end if;
+      end loop;
+      return To_String (Decoded);
+   end Decode_Mount_Field;
+
    --  A mount point M contains P when M is the whole of P, or a leading path
    --  component boundary of P. Root ("/") contains every absolute path.
    function Mount_Contains (Mount_Point : String; Target_Path : String) return Boolean is
@@ -71,13 +118,14 @@ package body Hostkit.Filesystem_Rules is
       return Tokens;
    end Tokenize;
 
-   function Filesystem_Type_For_Mount
+   --  The type and device of the deepest mount point holding Target_Path.
+   procedure Find_Mount
      (Mountinfo   : String;
-      Target_Path : String)
-      return String
+      Target_Path : String;
+      Best_Type   : out Unbounded_String;
+      Best_Device : out Unbounded_String)
    is
       Best_Length : Integer := -1;
-      Best_Type   : Unbounded_String := Null_Unbounded_String;
       Line_First  : Integer := Mountinfo'First;
 
       procedure Consider (Line : String) is
@@ -103,7 +151,7 @@ package body Hostkit.Filesystem_Rules is
          end if;
 
          declare
-            Mount_Point : constant String := To_String (Tokens (5));
+            Mount_Point : constant String := Decode_Mount_Field (To_String (Tokens (5)));
             Fs_Type     : constant String := To_String (Tokens (Dash + 1));
          begin
             if Mount_Point'Length > Best_Length
@@ -111,10 +159,13 @@ package body Hostkit.Filesystem_Rules is
             then
                Best_Length := Mount_Point'Length;
                Best_Type := To_Unbounded_String (Fs_Type);
+               Best_Device := Tokens (3);
             end if;
          end;
       end Consider;
    begin
+      Best_Type := Null_Unbounded_String;
+      Best_Device := Null_Unbounded_String;
       for Index in Mountinfo'Range loop
          if Mountinfo (Index) = Ada.Characters.Latin_1.LF then
             if Index > Line_First then
@@ -127,8 +178,67 @@ package body Hostkit.Filesystem_Rules is
       if Line_First <= Mountinfo'Last then
          Consider (Mountinfo (Line_First .. Mountinfo'Last));
       end if;
+   end Find_Mount;
 
-      return To_String (Best_Type);
+   function Filesystem_Type_For_Mount
+     (Mountinfo   : String;
+      Target_Path : String)
+      return String
+   is
+      Fs_Type, Device : Unbounded_String;
+   begin
+      Find_Mount (Mountinfo, Target_Path, Fs_Type, Device);
+      return To_String (Fs_Type);
    end Filesystem_Type_For_Mount;
+
+   function Device_For_Mount
+     (Mountinfo   : String;
+      Target_Path : String)
+      return String
+   is
+      Fs_Type, Device : Unbounded_String;
+   begin
+      Find_Mount (Mountinfo, Target_Path, Fs_Type, Device);
+      return To_String (Device);
+   end Device_For_Mount;
+
+   function Fuse_Block_Type (Fs_Type : String; Udev_Record : String) return String is
+      Lower  : constant String := Ada.Characters.Handling.To_Lower (Fs_Type);
+      Prefix : constant String := "fuseblk";
+      Key    : constant String := "E:ID_FS_TYPE=";
+
+      --  A FUSE driver's name as the filesystem it serves.
+      function Served (Driver : String) return String is
+        (if Driver = "ntfs-3g" or else Driver = "lowntfs-3g" or else Driver = "ntfs3g" then "ntfs"
+         elsif Driver = "exfat-fuse" or else Driver = "fuse-exfat" then "exfat"
+         else Driver);
+
+      Line_First : Integer := Udev_Record'First;
+   begin
+      if Lower'Length < Prefix'Length
+        or else Lower (Lower'First .. Lower'First + Prefix'Length - 1) /= Prefix
+      then
+         return Fs_Type;
+      elsif Lower'Length > Prefix'Length + 1 and then Lower (Lower'First + Prefix'Length) = '.' then
+         return Served (Lower (Lower'First + Prefix'Length + 1 .. Lower'Last));
+      elsif Lower'Length /= Prefix'Length then
+         return Fs_Type;
+      end if;
+      for Index in Udev_Record'First .. Udev_Record'Last + 1 loop
+         if Index > Udev_Record'Last or else Udev_Record (Index) = Ada.Characters.Latin_1.LF then
+            declare
+               Line : constant String := Udev_Record (Line_First .. Index - 1);
+            begin
+               if Line'Length > Key'Length
+                 and then Line (Line'First .. Line'First + Key'Length - 1) = Key
+               then
+                  return Ada.Characters.Handling.To_Lower (Line (Line'First + Key'Length .. Line'Last));
+               end if;
+            end;
+            Line_First := Index + 1;
+         end if;
+      end loop;
+      return Fs_Type;
+   end Fuse_Block_Type;
 
 end Hostkit.Filesystem_Rules;

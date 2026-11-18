@@ -1,4 +1,5 @@
 with Ada.Directories;
+with Hostkit.Filesystem_Rules;
 with Ada.Text_IO;
 
 separate (Hostkit.Mounts)
@@ -13,36 +14,8 @@ function Table return Mount_Vectors.Vector is
    Buffer : String (1 .. Max_Line);
    Last   : Natural;
 
-   function Octal (Value : Character) return Natural is
-     (if Value in '0' .. '7' then Character'Pos (Value) - Character'Pos ('0') else Natural'Last);
-
    --  A field with its \ooo escapes decoded.
-   function Decode (Value : String) return String is
-      Decoded  : UString;
-      Position : Natural := Value'First;
-   begin
-      while Position <= Value'Last loop
-         if Value (Position) = '\'
-           and then Position + 3 <= Value'Last
-           and then Octal (Value (Position + 1)) /= Natural'Last
-           and then Octal (Value (Position + 2)) /= Natural'Last
-           and then Octal (Value (Position + 3)) /= Natural'Last
-           and then Octal (Value (Position + 1)) * 64 + Octal (Value (Position + 2)) * 8
-                    + Octal (Value (Position + 3)) <= Character'Pos (Character'Last)
-         then
-            Ada.Strings.Unbounded.Append
-              (Decoded,
-               Character'Val
-                 (Octal (Value (Position + 1)) * 64 + Octal (Value (Position + 2)) * 8
-                  + Octal (Value (Position + 3))));
-            Position := Position + 4;
-         else
-            Ada.Strings.Unbounded.Append (Decoded, Value (Position));
-            Position := Position + 1;
-         end if;
-      end loop;
-      return Ada.Strings.Unbounded.To_String (Decoded);
-   end Decode;
+   function Decode (Value : String) return String renames Hostkit.Filesystem_Rules.Decode_Mount_Field;
 
    --  The Index-th space-separated field of Line, decoded; "" past the last.
    function Field (Line : String; Index : Positive) return String is

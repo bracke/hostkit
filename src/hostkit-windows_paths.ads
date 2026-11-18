@@ -48,6 +48,21 @@ package Hostkit.Windows_Paths is
    --  relative "Volume{...}\" that stripping the prefix would leave. Text
    --  with neither prefix is returned as it is.
 
+   function Stored_Form
+     (Path        : String;
+      Stored_Name : not null access function (Directory : String; Name : String) return String)
+      return String;
+   --  Path spelled as a Windows volume stores it (Fs.Stored_Spelling): '/'
+   --  read as '\', a drive letter in upper case, an empty component (a
+   --  doubled or trailing separator) dropped, and each component after the
+   --  root (X:\ or \\server\share) as Stored_Name answers for it in the
+   --  directory spelled so far. Stored_Name answers "" when it cannot say;
+   --  that component and every one after it are then kept as written, as are
+   --  "." and ".." and a name with a wildcard (* or ?), which a listing would
+   --  match against other names. A relative or already prefixed (\\?\,
+   --  \\.\) path is returned as it is. The rules are pure text, so they
+   --  are tested on every platform.
+
    function Native (Path : String) return Wide_String;
    --  Native_Form (Path, Fs.Current_Directory) as UTF-16 (From_UTF_8) with a
    --  terminating NUL, ready to pass by address to a wide file API.

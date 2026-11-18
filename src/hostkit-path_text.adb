@@ -326,4 +326,46 @@ package body Hostkit.Path_Text is
       end;
    end Absolute;
 
+   function Posix_Stored_Form
+     (Path        : String;
+      Stored_Name : not null access function (Entry_Path : String) return String)
+      return String
+   is
+      use Ada.Strings.Unbounded;
+      Result  : Unbounded_String;
+      Looking : Boolean := True;
+      Start   : Integer;
+   begin
+      if Path = "" or else Path (Path'First) /= '/' then
+         return Path;
+      end if;
+      Start := Path'First + 1;
+      while Start <= Path'Last loop
+         declare
+            Stop : Integer := Start;
+         begin
+            while Stop <= Path'Last and then Path (Stop) /= '/' loop
+               Stop := Stop + 1;
+            end loop;
+            if Stop > Start then
+               declare
+                  Component : constant String := Path (Start .. Stop - 1);
+                  Spelled   : constant String := To_String (Result) & "/" & Component;
+                  Stored    : constant String :=
+                    (if not Looking or else Component = "." or else Component = ".." then ""
+                     else Stored_Name (Spelled));
+               begin
+                  if Stored = "" then
+                     Looking := False;
+                  end if;
+                  Append (Result, "/");
+                  Append (Result, (if Stored = "" then Component else Stored));
+               end;
+            end if;
+            Start := Stop + 1;
+         end;
+      end loop;
+      return (if Result = Null_Unbounded_String then "/" else To_String (Result));
+   end Posix_Stored_Form;
+
 end Hostkit.Path_Text;

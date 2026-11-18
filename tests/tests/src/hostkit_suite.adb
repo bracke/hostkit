@@ -261,6 +261,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  One Windows entry has one spelling however it was typed: drive letter,
+   --  separators, the stored case and the long name of each component.
+   procedure Test_Windows_Stored_Spelling
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  A Windows name that is not well-formed UTF-16 reads as WTF-8 and goes
    --  back as the same units; a name that is UTF-8 converts as it always did.
    procedure Test_Windows_Names_Round_Trip_As_WTF_8
@@ -829,6 +835,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Windows_Long_Path_Form'Access,
          "process : a long Windows path is given the \\?\ form only when that keeps its meaning");
+      Register_Routine
+        (T, Test_Windows_Stored_Spelling'Access,
+         "process : a Windows path is spelled as the volume stores it, however it was typed");
       Register_Routine
         (T, Test_Windows_Names_Round_Trip_As_WTF_8'Access,
          "process : a Windows name with a lone surrogate reads as WTF-8 and goes back unchanged");

@@ -1343,6 +1343,54 @@ package body Hostkit.Fs is
       return True;
    end Folds_Name_Case;
 
+   function Leaf_Name_Limit_At (Directory : String) return Leaf_Name_Limit is
+      pragma Unreferenced (Directory);
+   begin
+      --  NTFS, FAT, exFAT and the shares Windows reaches all hold 255 UTF-16
+      --  units.
+      return (Unit => Utf16_Units, Most => 255);
+   end Leaf_Name_Limit_At;
+
+   function Stored_Spelling (Path : String) return String is
+      use type System.Address;
+
+      --  The name Directory lists for Name: FindFirstFileW on the entry
+      --  itself reads its directory entry -- the stored case, the long name
+      --  -- and does not follow a link or junction.
+      function Listed_Name (Directory : String; Name : String) return String is
+         Wide_Path : aliased Wide_String := Wide (Directory & (if Directory (Directory'Last) = '\' then "" else "\")
+                                                  & Name);
+         Data      : aliased Find_Data;
+         Handle    : System.Address;
+         Last      : Natural := 0;
+      begin
+         Handle := Find_First_File (Wide_Path'Address, Data'Access);
+         if Handle = Invalid_Handle_Value then
+            return "";
+         end if;
+         if Find_Close (Handle) = 0 then
+            null;
+         end if;
+         for Index in Data.File_Name'Range loop
+            exit when Data.File_Name (Index) = Wide_Character'Val (0);
+            Last := Index;
+         end loop;
+         declare
+            Units : Wide_String (1 .. Last);
+         begin
+            for Index in Units'Range loop
+               Units (Index) := Data.File_Name (Index);
+            end loop;
+            return Hostkit.Windows_Paths.To_UTF_8 (Units);
+         end;
+      exception
+         when others =>
+            return "";
+      end Listed_Name;
+   begin
+      return Hostkit.Windows_Paths.Stored_Form (Path, Listed_Name'Access);
+   end Stored_Spelling;
+
    ---------------
    -- Separator --
    ---------------

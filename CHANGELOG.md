@@ -17,6 +17,26 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Fs.Leaf_Name_Limit_At`**: how long a leaf name the filesystem
+  holding a directory stores, and in what unit (`Name_Length_Unit`: bytes,
+  or UTF-16 units on NTFS, FAT, exFAT, SMB, APFS and HFS+). Linux asks the
+  volume (`_PC_NAME_MAX`: 143 on ecryptfs); macOS counts UTF-16 units, so a
+  name of 100 CJK characters is not refused there as 300 bytes.
+- **`Hostkit.Fs.Stored_Spelling`** and the pure
+  **`Hostkit.Windows_Paths.Stored_Form`**: a Windows path in the spelling the
+  volume stores (drive letter, separators, stored case, long names for 8.3
+  ones, without following a junction). macOS spells each component as its
+  volume stores it (`getattrlist`'s name, not followed), by the pure
+  **`Hostkit.Path_Text.Posix_Stored_Form`**; Linux paths come back as they
+  are.
+- **`Hostkit.Filesystem_Rules.Fuse_Block_Type`** and **`Device_For_Mount`**:
+  a `fuseblk` mount (ntfs-3g, exfat-fuse) is named by its subtype or by
+  udev's record of its device (`/run/udev/data/b<major>:<minor>`,
+  `ID_FS_TYPE`), so an NTFS stick on Linux gets Windows naming rules and
+  UTF-16 name lengths; an unidentified one keeps POSIX rules.
+- **`Hostkit.Filesystem_Rules.Folds_By_Type_Name`**,
+  **`Utf16_By_Type_Name`** and **`Decode_Mount_Field`** (the mount table's
+  `\ooo` escapes, shared with `Hostkit.Mounts.Table`).
 - **`Hostkit.Lease_Files.Truncate`**: cut a held lease back to a shorter
   length, durably, as `Write_At` makes its bytes durable -- how a record a
   failed `Write_At` left half-written (a full disk) is taken back off the end,
@@ -264,6 +284,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- Linux decides a volume's naming rules from mount points with their
+  escapes decoded: a FAT stick labelled "NO NAME" (`NO\040NAME` in
+  mountinfo) gets DOS rules. SMB shares (`cifs`, `smb3`) fold case. The mount
+  table is read at most once every `Mount_Table_Lifetime` (2 s), not once a
+  question, and a path is taken through its links first.
+- macOS `Uses_Dos_Filename_Rules` asks the volume (statfs `f_fstypename`:
+  msdos, exfat, ntfs) instead of always answering False. The statfs layout
+  moved to `Hostkit.Darwin_Abi`, shared by the macOS bodies.
 - **`Process.Terminal_Program_Prefix` falls back to `-e` on POSIX.** st,
   lxterminal and qterminal take `-e`; mate-terminal and sakura take `-x`.
   A terminal not listed is handed `-e` on Linux and macOS, as consumers did

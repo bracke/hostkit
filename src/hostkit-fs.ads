@@ -905,10 +905,64 @@ package Hostkit.Fs is
    --  restriction), True on Windows (its volumes are DOS-family in practice), so
    --  an unknown case is never worse than validating by host alone.
    --
-   --  Linux reads /proc/self/mountinfo; macOS answers False (its native volumes
-   --  are POSIX and a removable one is enforced by the OS at write time);
-   --  Windows answers True.
+   --  Linux reads /proc/self/mountinfo (the table read at most once every
+   --  Mount_Table_Lifetime, so a loop of name checks does not reread it), and
+   --  for a "fuseblk" mount (ntfs-3g, exfat-fuse) udev's record of its device
+   --  (Filesystem_Rules.Fuse_Block_Type);
+   --  macOS asks the volume (statfs: msdos, exfat, ntfs); Windows answers
+   --  True. Linux and macOS take Path through its links first, so a path
+   --  under a link onto the stick is judged by the stick.
    function Uses_Dos_Filename_Rules (Path : String) return Boolean;
+
+   --  How long Linux keeps the mount table it read for the filesystem
+   --  questions here (Uses_Dos_Filename_Rules, Folds_Name_Case,
+   --  Leaf_Name_Limit_At). A volume mounted or unmounted is seen at most this
+   --  long after: mounts change seldom, while a search for a free name asks
+   --  thousands of times in a row.
+   Mount_Table_Lifetime : constant Duration := 2.0;
+
+   --  How a filesystem measures the length of a leaf name.
+   type Name_Length_Unit is
+     (Bytes,
+      --  The name's bytes as UTF-8 (ext4, btrfs, xfs, nfs).
+      Utf16_Units
+      --  The name's UTF-16 code units: a character beyond the Basic
+      --  Multilingual Plane counts two (NTFS, FAT, exFAT, SMB, APFS, HFS+).
+     );
+
+   --  The longest leaf name a filesystem stores, and the unit it is counted
+   --  in.
+   type Leaf_Name_Limit is record
+      Unit : Name_Length_Unit := Bytes;
+      Most : Positive := 255;
+   end record;
+
+   --  How long a leaf name the filesystem holding Directory stores.
+   --
+   --  Linux: UTF-16 units for a DOS-ruled or SMB volume (255), bytes
+   --  elsewhere, as many as the volume says (pathconf's _PC_NAME_MAX: 143 on
+   --  an ecryptfs home) or 255 when it does not; macOS: 255 UTF-16 units on
+   --  its own volumes (APFS, HFS+) and the DOS-family and SMB ones, 255 bytes
+   --  on others (NFS); Windows: 255 UTF-16 units.
+   --
+   --  @param Directory A directory on the filesystem in question.
+   --  @return The limit, (Bytes, 255) when nothing better is known.
+   function Leaf_Name_Limit_At (Directory : String) return Leaf_Name_Limit;
+
+   --  Path spelled as the host stores it, so one entry has one spelling
+   --  however it was typed. Windows: a drive letter upper case, '/' read as
+   --  '\', and each component after the root as the directory lists it --
+   --  its stored case, its long name for an 8.3 short one (PROGRA~1) --
+   --  without following a link or junction, which keeps its own name. A
+   --  component that cannot be listed, and every one after it, stays as
+   --  written. macOS: each component after "/" as its volume stores it
+   --  (getattrlist's name, the entry itself, not followed), by the same
+   --  rule (Path_Text.Posix_Stored_Form), so a folding volume's "/users/me"
+   --  reads "/Users/me". Linux: Path as it is.
+   --
+   --  @param Path An absolute path.
+   --  @return The stored spelling.
+   function Stored_Spelling (Path : String) return String;
 
    --  Whether the filesystem holding Directory takes two names that differ
    --  only in letter case for the same file ("Notes.txt" and "notes.txt"),
@@ -917,7 +971,8 @@ package Hostkit.Fs is
    --  Windows answers True; macOS asks the volume (pathconf's
    --  _PC_CASE_SENSITIVE: APFS and HFS+ fold case unless formatted not to)
    --  and answers True when it cannot tell; Linux answers True for a
-   --  DOS-family volume (Uses_Dos_Filename_Rules) and False otherwise.
+   --  DOS-family volume or an SMB share (Filesystem_Rules.Folds_By_Type_Name)
+   --  and False otherwise.
    --
    --  @param Directory A directory on the filesystem in question.
    --  @return True when names on it are compared without regard to case.

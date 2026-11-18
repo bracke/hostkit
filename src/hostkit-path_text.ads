@@ -90,4 +90,21 @@ package Hostkit.Path_Text is
    --    a relative path that comes to nothing.
    function Absolute (Path : String; Base : String) return String;
 
+   --  An absolute POSIX path spelled as its volume stores it
+   --  (Fs.Stored_Spelling on macOS): each component after "/" as
+   --  Stored_Name answers for the path spelled so far plus that component,
+   --  an empty component (a doubled or trailing '/') dropped. Stored_Name
+   --  answers "" when it cannot say; that component and every one after it
+   --  are then kept as written, as are "." and "..". A relative path is
+   --  returned as it is. Pure text, so it is tested on every platform.
+   --
+   --  @param Path An absolute path.
+   --  @param Stored_Name The name the volume stores for the entry at a path,
+   --    without following it when it is a link; "" when it cannot say.
+   --  @return The stored spelling.
+   function Posix_Stored_Form
+     (Path        : String;
+      Stored_Name : not null access function (Entry_Path : String) return String)
+      return String;
+
 end Hostkit.Path_Text;

@@ -107,6 +107,91 @@ package body Hostkit.Windows_Paths is
       end;
    end Win32_Form;
 
+   function Stored_Form
+     (Path        : String;
+      Stored_Name : not null access function (Directory : String; Name : String) return String)
+      return String
+   is
+      use Ada.Strings.Unbounded;
+      Text : String (1 .. Path'Length) := Path;
+      Root_Last : Natural := 0;
+      Result    : Unbounded_String;
+      Looking   : Boolean := True;
+      Start     : Positive;
+
+      --  The separator after Text (From ..), or Text'Last + 1.
+      function Next_Separator (From : Positive) return Positive is
+      begin
+         for Index in From .. Text'Last loop
+            if Text (Index) = '\' then
+               return Index;
+            end if;
+         end loop;
+         return Text'Last + 1;
+      end Next_Separator;
+
+      procedure Add (Component : String) is
+         Spelled : constant String := To_String (Result);
+         Stored  : constant String :=
+           (if not Looking or else Component = "." or else Component = ".."
+              or else (for some Item of Component => Item in '*' | '?')
+            then ""
+            else Stored_Name (Spelled, Component));
+      begin
+         if Stored = "" then
+            Looking := False;
+         end if;
+         if Spelled (Spelled'Last) /= '\' then
+            Append (Result, '\');
+         end if;
+         Append (Result, (if Stored = "" then Component else Stored));
+      end Add;
+   begin
+      if Is_Prefixed (Path) then
+         return Path;
+      end if;
+      for Item of Text loop
+         if Item = '/' then
+            Item := '\';
+         end if;
+      end loop;
+      if Text'Length >= 2 and then Text (1) in 'a' .. 'z' | 'A' .. 'Z' and then Text (2) = ':'
+        and then (Text'Length = 2 or else Text (3) = '\')
+      then
+         Result := To_Unbounded_String
+           ([1 => (if Text (1) in 'a' .. 'z' then Character'Val (Character'Pos (Text (1)) - 32) else Text (1))]
+            & ":\");
+         Root_Last := Natural'Min (3, Text'Length);
+      elsif Text'Length > 2 and then Text (1 .. 2) = "\\" and then Text (3) /= '\' then
+         declare
+            Server_End : constant Positive := Next_Separator (3);
+         begin
+            if Server_End >= Text'Last then
+               return Path;
+            end if;
+            Root_Last := Next_Separator (Server_End + 1) - 1;
+            if Root_Last = Server_End then
+               return Path;
+            end if;
+            Result := To_Unbounded_String (Text (1 .. Root_Last));
+         end;
+      else
+         return Path;
+      end if;
+      Start := Root_Last + 1;
+      while Start <= Text'Last loop
+         declare
+            Stop : constant Positive := Next_Separator (Start);
+         begin
+            if Stop > Start then
+               Add (Text (Start .. Stop - 1));
+            end if;
+            Start := Stop + 1;
+         end;
+      end loop;
+      return To_String (Result);
+   end Stored_Form;
+
    function Native (Path : String) return Wide_String is
      (From_UTF_8
         (if Path'Length < Long_Path_Threshold then Path

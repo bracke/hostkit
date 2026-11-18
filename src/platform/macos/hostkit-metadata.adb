@@ -4,6 +4,7 @@ with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
 with System;
+with Hostkit.Darwin_Abi;
 with Hostkit.Darwin_Symbols;
 with Hostkit.Metadata.Natural_Ids;
 
@@ -24,7 +25,6 @@ package body Hostkit.Metadata is
    subtype C_U64 is Interfaces.C.unsigned_long;
    subtype C_S32 is Interfaces.C.int;
    subtype C_S64 is Interfaces.C.long;
-   subtype C_Char is Interfaces.C.char;
 
    --  macOS has no statx, so this uses stat(2). Since Darwin's 64-bit inode
    --  transition the x86_64 symbols carry an $INODE64 suffix: the unsuffixed
@@ -66,34 +66,7 @@ package body Hostkit.Metadata is
 
    --  statfs, not statvfs: Darwin's statvfs counts blocks in 32 bits, which
    --  overflows on any volume worth reporting. statfs carries 64-bit counts.
-   type Fsid is array (1 .. 2) of C_S32
-     with Convention => C;
-   type Name_Buffer is array (1 .. 16) of C_Char
-     with Convention => C;
-   type Path_Buffer is array (1 .. 1_024) of C_Char
-     with Convention => C;
-   type Reserved_Array is array (1 .. 8) of C_U32
-     with Convention => C;
-
-   type Statfs_Record is record
-      Block_Size       : C_U32 := 0;
-      Io_Size          : C_S32 := 0;
-      Blocks           : C_U64 := 0;
-      Blocks_Free      : C_U64 := 0;
-      Blocks_Available : C_U64 := 0;
-      Nodes            : C_U64 := 0;
-      Nodes_Free       : C_U64 := 0;
-      Filesystem_Id    : Fsid := [others => 0];
-      Owner            : C_U32 := 0;
-      Kind             : C_U32 := 0;
-      Flags            : C_U32 := 0;
-      Sub_Kind         : C_U32 := 0;
-      Type_Name        : Name_Buffer := [others => Interfaces.C.nul];
-      Mounted_On       : Path_Buffer := [others => Interfaces.C.nul];
-      Mounted_From     : Path_Buffer := [others => Interfaces.C.nul];
-      Reserved         : Reserved_Array := [others => 0];
-   end record
-     with Convention => C;
+   subtype Statfs_Record is Hostkit.Darwin_Abi.Statfs_Record;
 
    --  A layout that is wrong by even one byte does not fail loudly -- it reads
    --  the wrong field and reports plausible nonsense. Pin the sizes so the
@@ -101,9 +74,6 @@ package body Hostkit.Metadata is
    pragma Compile_Time_Error
      (Stat_Record'Size /= 144 * 8,
       "Darwin struct stat (64-bit inode, x86_64) must be 144 bytes");
-   pragma Compile_Time_Error
-     (Statfs_Record'Size /= 2_168 * 8,
-      "Darwin struct statfs (64-bit inode, x86_64) must be 2168 bytes");
 
    Mount_Read_Only : constant C_U32 := 16#0000_0001#;
    Darwin_Name_Max : constant Natural := 255;

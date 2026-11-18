@@ -375,6 +375,15 @@ package body Hostkit.Fs is
       return False;
    end Folds_Name_Case;
 
+   function Leaf_Name_Limit_At (Directory : String) return Leaf_Name_Limit is
+      pragma Unreferenced (Directory);
+   begin
+      --  A host Hostkit has no body for: the POSIX limit.
+      return (Unit => Bytes, Most => 255);
+   end Leaf_Name_Limit_At;
+
+   function Stored_Spelling (Path : String) return String is (Path);
+
    ---------------
    -- Separator --
    ---------------

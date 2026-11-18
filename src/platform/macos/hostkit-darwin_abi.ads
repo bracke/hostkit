@@ -43,6 +43,42 @@ package Hostkit.Darwin_Abi is
       Quad_Spare    : Spare_Array := [others => 0];
    end record with Convention => C;
 
+   subtype C_Char is Interfaces.C.char;
+
+   --  struct statfs in its 64-bit-inode layout (statfs, not statvfs: Darwin's
+   --  statvfs counts blocks in 32 bits, which overflows on any volume worth
+   --  reporting).
+   type Fsid is array (1 .. 2) of C_S32 with Convention => C;
+   type Name_Buffer is array (1 .. 16) of C_Char with Convention => C;
+   type Path_Buffer is array (1 .. 1_024) of C_Char with Convention => C;
+   type Reserved_Array is array (1 .. 8) of C_U32 with Convention => C;
+
+   type Statfs_Record is record
+      Block_Size       : C_U32 := 0;
+      Io_Size          : C_S32 := 0;
+      Blocks           : C_U64 := 0;
+      Blocks_Free      : C_U64 := 0;
+      Blocks_Available : C_U64 := 0;
+      Nodes            : C_U64 := 0;
+      Nodes_Free       : C_U64 := 0;
+      Filesystem_Id    : Fsid := [others => 0];
+      Owner            : C_U32 := 0;
+      Kind             : C_U32 := 0;
+      Flags            : C_U32 := 0;
+      Sub_Kind         : C_U32 := 0;
+      --  f_fstypename: "apfs", "hfs", "msdos", "exfat", "ntfs", "smbfs", ...
+      Type_Name        : Name_Buffer := [others => Interfaces.C.nul];
+      Mounted_On       : Path_Buffer := [others => Interfaces.C.nul];
+      Mounted_From     : Path_Buffer := [others => Interfaces.C.nul];
+      Reserved         : Reserved_Array := [others => 0];
+   end record with Convention => C;
+
+   --  A layout wrong by one byte reads the wrong field and reports plausible
+   --  nonsense; pin the size so the compiler catches drift on any host.
+   pragma Compile_Time_Error
+     (Statfs_Record'Size /= 2_168 * 8,
+      "Darwin struct statfs (64-bit inode) must be 2168 bytes");
+
    O_Nonblock  : constant C_Int := 16#4#;
    O_Nofollow  : constant C_Int := 16#100#;
    O_Evtonly   : constant C_Int := 16#8000#;

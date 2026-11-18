@@ -8,9 +8,12 @@ with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
 with Interfaces.C_Streams;
+with Hostkit.Darwin_Abi;
 with Hostkit.Darwin_Symbols;
+with Hostkit.Filesystem_Rules;
 with Hostkit.Fs.Instants;
 with Hostkit.Posix;
+with Hostkit.Path_Text;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -1746,14 +1749,128 @@ package body Hostkit.Fs is
       return "";
    end Create_Temporary_Directory;
 
-   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
-      pragma Unreferenced (Path);
+   --  The filesystem type of the volume holding Path, as statfs names it
+   --  (f_fstypename: apfs, hfs, msdos, exfat, ntfs, smbfs); "" when the
+   --  volume will not say. statfs follows links, so a path under a link onto
+   --  a stick is judged by the stick.
+   function Volume_Type_Of (Path : String) return String is
+      function C_Statfs
+        (Name   : Interfaces.C.char_array;
+         Buffer : access Hostkit.Darwin_Abi.Statfs_Record) return Interfaces.C.int
+        with Import, Convention => C, External_Name => Hostkit.Darwin_Symbols.Statfs;
+      Buffer : aliased Hostkit.Darwin_Abi.Statfs_Record;
+      Last   : Natural := 0;
    begin
-      --  The native volumes (APFS, HFS+) are POSIX; a removable FAT/exFAT one is
-      --  possible but its own rules are enforced by the OS at write time, so this
-      --  declines to guess a restriction rather than binding statfs here.
-      return False;
-   end Uses_Dos_Filename_Rules;
+      if Path = "" or else C_Statfs (Interfaces.C.To_C (Path), Buffer'Access) /= 0 then
+         return "";
+      end if;
+      for Index in Buffer.Type_Name'Range loop
+         exit when Interfaces.C."=" (Buffer.Type_Name (Index), Interfaces.C.nul);
+         Last := Index;
+      end loop;
+      declare
+         Name : String (1 .. Last);
+      begin
+         for Index in Name'Range loop
+            Name (Index) := Interfaces.C.To_Ada (Buffer.Type_Name (Index));
+         end loop;
+         return Name;
+      end;
+   exception
+      when others =>
+         return "";
+   end Volume_Type_Of;
+
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+     (Hostkit.Filesystem_Rules.Dos_By_Type_Name (Volume_Type_Of (Path)));
+
+   function Leaf_Name_Limit_At (Directory : String) return Leaf_Name_Limit is
+      Kind : constant String := Volume_Type_Of (Directory);
+   begin
+      --  APFS and HFS+ hold 255 UTF-16 units, so a name of 100 CJK
+      --  characters (300 bytes of UTF-8) is fine there; an NFS share or
+      --  another POSIX volume counts bytes. A volume that will not say is
+      --  taken for the native one.
+      return (Unit => (if Kind = "" or else Hostkit.Filesystem_Rules.Utf16_By_Type_Name (Kind)
+                       then Utf16_Units else Bytes),
+              Most => 255);
+   end Leaf_Name_Limit_At;
+
+   function Stored_Spelling (Path : String) return String is
+      --  <sys/attr.h>: the name attribute alone, of the entry itself.
+      Attr_Bit_Map_Count : constant := 5;
+      Attr_Cmn_Name      : constant := 16#0000_0001#;
+      Fsopt_No_Follow    : constant := 16#0000_0001#;
+
+      type Attribute_List is record
+         Bitmap_Count : Interfaces.C.unsigned_short := Attr_Bit_Map_Count;
+         Reserved     : Interfaces.C.unsigned_short := 0;
+         Common       : Interfaces.Unsigned_32 := Attr_Cmn_Name;
+         Volume       : Interfaces.Unsigned_32 := 0;
+         Directory    : Interfaces.Unsigned_32 := 0;
+         File         : Interfaces.Unsigned_32 := 0;
+         Fork         : Interfaces.Unsigned_32 := 0;
+      end record
+        with Convention => C;
+
+      function Get_Attribute_List
+        (Path    : Interfaces.C.char_array;
+         List    : access Attribute_List;
+         Buffer  : System.Address;
+         Size    : Interfaces.C.size_t;
+         Options : Interfaces.C.unsigned)
+         return Interfaces.C.int
+        with Import, Convention => C, External_Name => "getattrlist";
+
+      --  The name the volume stores for the entry at Entry_Path, not
+      --  followed: its own case, as written to the disk, whatever case the
+      --  lookup used; "" when the volume does not answer.
+      function Stored_Name (Entry_Path : String) return String is
+         use type Interfaces.Unsigned_32;
+         --  The answer: its length, the name's offset (from the reference
+         --  itself) and length with its NUL, then the name -- at most
+         --  NAME_MAX UTF-8 bytes of 255 UTF-16 units, 765, decomposed.
+         type Answer_Bytes is array (1 .. 1024 + 12) of Interfaces.Unsigned_8
+           with Convention => C, Alignment => 4;
+         Answer : aliased Answer_Bytes := [others => 0];
+         List   : aliased Attribute_List;
+
+         function Word (At_Byte : Positive) return Interfaces.Unsigned_32 is
+           (Interfaces.Unsigned_32 (Answer (At_Byte))
+            or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Answer (At_Byte + 1)), 8)
+            or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Answer (At_Byte + 2)), 16)
+            or Interfaces.Shift_Left (Interfaces.Unsigned_32 (Answer (At_Byte + 3)), 24));
+      begin
+         if Get_Attribute_List
+           (Interfaces.C.To_C (Entry_Path), List'Access, Answer'Address, Answer'Length, Fsopt_No_Follow) /= 0
+         then
+            return "";
+         end if;
+         declare
+            --  The reference starts at the answer's fifth byte; its offset counts from there.
+            Offset : constant Interfaces.Unsigned_32 := Word (5);
+            Length : constant Interfaces.Unsigned_32 := Word (9);
+            First  : constant Interfaces.Unsigned_32 := 5 + Offset;
+         begin
+            if Length < 2 or else Offset > Answer'Length or else First + Length - 2 > Answer'Length then
+               return "";
+            end if;
+            declare
+               Name : String (1 .. Natural (Length - 1));
+            begin
+               for Index in Name'Range loop
+                  Name (Index) := Character'Val (Answer (Positive (First) + Index - 1));
+               end loop;
+               return Name;
+            end;
+         end;
+      exception
+         when others =>
+            return "";
+      end Stored_Name;
+   begin
+      return Hostkit.Path_Text.Posix_Stored_Form (Path, Stored_Name'Access);
+   end Stored_Spelling;
 
    function Folds_Name_Case (Directory : String) return Boolean is
       --  <sys/unistd.h>: 1 when the volume tells case apart, 0 when it folds.

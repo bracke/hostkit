@@ -1,4 +1,5 @@
 with Ada.IO_Exceptions;
+with Ada.Real_Time;
 with Ada.Environment_Variables;
 with System;
 with Ada.Characters.Latin_1;
@@ -1761,35 +1762,154 @@ package body Hostkit.Fs is
       return "";
    end Create_Temporary_Directory;
 
-   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
-      use Ada.Strings.Unbounded;
-      File    : Ada.Text_IO.File_Type;
-      Content : Unbounded_String;
-   begin
-      declare
-         Absolute : constant String := Ada.Directories.Full_Name (Path);
-      begin
-         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/mountinfo", Form => "shared=no");
-         while not Ada.Text_IO.End_Of_File (File) loop
-            Append (Content, Ada.Text_IO.Get_Line (File));
-            Append (Content, Ada.Characters.Latin_1.LF);
-         end loop;
-         Ada.Text_IO.Close (File);
+   --  The mount table and when it was read: kept Mount_Table_Lifetime, so a
+   --  loop of name checks (a search for a free name asks thousands of times)
+   --  reads /proc/self/mountinfo once, not once a check.
+   protected Mount_Table_Cache is
+      procedure Get
+        (Now     : Ada.Real_Time.Time;
+         Fresh   : out Boolean;
+         Content : out Ada.Strings.Unbounded.Unbounded_String);
+      procedure Put (Now : Ada.Real_Time.Time; Content : Ada.Strings.Unbounded.Unbounded_String);
+   private
+      Held    : Ada.Strings.Unbounded.Unbounded_String;
+      Read_At : Ada.Real_Time.Time := Ada.Real_Time.Time_First;
+      Valid   : Boolean := False;
+   end Mount_Table_Cache;
 
-         return Hostkit.Filesystem_Rules.Dos_By_Type_Name
-           (Hostkit.Filesystem_Rules.Filesystem_Type_For_Mount
-              (To_String (Content), Absolute));
-      end;
+   protected body Mount_Table_Cache is
+      procedure Get
+        (Now     : Ada.Real_Time.Time;
+         Fresh   : out Boolean;
+         Content : out Ada.Strings.Unbounded.Unbounded_String)
+      is
+         use type Ada.Real_Time.Time;
+         use type Ada.Real_Time.Time_Span;
+      begin
+         Fresh := Valid and then Now - Read_At <= Ada.Real_Time.To_Time_Span (Mount_Table_Lifetime);
+         Content := (if Fresh then Held else Ada.Strings.Unbounded.Null_Unbounded_String);
+      end Get;
+
+      procedure Put (Now : Ada.Real_Time.Time; Content : Ada.Strings.Unbounded.Unbounded_String) is
+      begin
+         Held := Content;
+         Read_At := Now;
+         Valid := True;
+      end Put;
+   end Mount_Table_Cache;
+
+   --  /proc/self/mountinfo, as Mount_Table_Cache keeps it. Raises when it
+   --  cannot be read; a table that could not be read is not kept.
+   function Mount_Table return String is
+      use Ada.Strings.Unbounded;
+      Now     : constant Ada.Real_Time.Time := Ada.Real_Time.Clock;
+      Fresh   : Boolean;
+      Content : Unbounded_String;
+      File    : Ada.Text_IO.File_Type;
+   begin
+      Mount_Table_Cache.Get (Now, Fresh, Content);
+      if Fresh then
+         return To_String (Content);
+      end if;
+      Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/proc/self/mountinfo", Form => "shared=no");
+      while not Ada.Text_IO.End_Of_File (File) loop
+         Append (Content, Ada.Text_IO.Get_Line (File));
+         Append (Content, Ada.Characters.Latin_1.LF);
+      end loop;
+      Ada.Text_IO.Close (File);
+      Mount_Table_Cache.Put (Now, Content);
+      return To_String (Content);
    exception
       when others =>
          if Ada.Text_IO.Is_Open (File) then
             Ada.Text_IO.Close (File);
          end if;
-         return False;
-   end Uses_Dos_Filename_Rules;
+         raise;
+   end Mount_Table;
+
+   --  The type of the filesystem holding Path, as the mount table names it
+   --  (ext4, vfat, cifs); "" when it cannot be told. Path is taken through
+   --  its links first, so a path under a link onto a stick is judged by the
+   --  stick.
+   function Filesystem_Type_Of (Path : String) return String is
+      Resolved : constant String := (if Path = "" then "" else Real_Path (Path));
+
+      --  udev's record of a block device ("8:17"), or "" when there is none
+      --  to read: what it learned from the volume's superblock names the
+      --  filesystem behind a "fuseblk" mount (Filesystem_Rules.Fuse_Block_Type).
+      function Udev_Record (Device : String) return String is
+         use Ada.Strings.Unbounded;
+         Content : Unbounded_String;
+         File    : Ada.Text_IO.File_Type;
+      begin
+         if Device = "" then
+            return "";
+         end if;
+         Ada.Text_IO.Open (File, Ada.Text_IO.In_File, "/run/udev/data/b" & Device, Form => "shared=no");
+         while not Ada.Text_IO.End_Of_File (File) loop
+            Append (Content, Ada.Text_IO.Get_Line (File));
+            Append (Content, Ada.Characters.Latin_1.LF);
+         end loop;
+         Ada.Text_IO.Close (File);
+         return To_String (Content);
+      exception
+         when others =>
+            if Ada.Text_IO.Is_Open (File) then
+               Ada.Text_IO.Close (File);
+            end if;
+            return "";
+      end Udev_Record;
+   begin
+      if Path = "" then
+         return "";
+      end if;
+      declare
+         Table  : constant String := Mount_Table;
+         Target : constant String := (if Resolved /= "" then Resolved else Ada.Directories.Full_Name (Path));
+         Kind   : constant String := Hostkit.Filesystem_Rules.Filesystem_Type_For_Mount (Table, Target);
+      begin
+         if Kind /= "fuseblk" then
+            return Hostkit.Filesystem_Rules.Fuse_Block_Type (Kind, "");
+         end if;
+         return Hostkit.Filesystem_Rules.Fuse_Block_Type
+           (Kind, Udev_Record (Hostkit.Filesystem_Rules.Device_For_Mount (Table, Target)));
+      end;
+   exception
+      when others =>
+         return "";
+   end Filesystem_Type_Of;
+
+   function Uses_Dos_Filename_Rules (Path : String) return Boolean is
+     (Hostkit.Filesystem_Rules.Dos_By_Type_Name (Filesystem_Type_Of (Path)));
 
    function Folds_Name_Case (Directory : String) return Boolean is
-     (Uses_Dos_Filename_Rules (Directory));
+     (Hostkit.Filesystem_Rules.Folds_By_Type_Name (Filesystem_Type_Of (Directory)));
+
+   function Leaf_Name_Limit_At (Directory : String) return Leaf_Name_Limit is
+      --  <unistd.h> on Linux.
+      PC_Name_Max : constant Interfaces.C.int := 3;
+
+      function Pathconf (Path : Interfaces.C.char_array; Name : Interfaces.C.int) return Interfaces.C.long
+        with Import, Convention => C, External_Name => "pathconf";
+      use type Interfaces.C.long;
+   begin
+      if Hostkit.Filesystem_Rules.Utf16_By_Type_Name (Filesystem_Type_Of (Directory)) then
+         return (Unit => Utf16_Units, Most => 255);
+      elsif Directory = "" then
+         return (others => <>);
+      end if;
+      declare
+         Answer : constant Interfaces.C.long := Pathconf (Interfaces.C.To_C (Directory), PC_Name_Max);
+      begin
+         return (Unit => Bytes,
+                 Most => (if Answer in 1 .. Interfaces.C.long (Positive'Last) then Positive (Answer) else 255));
+      end;
+   exception
+      when others =>
+         return (others => <>);
+   end Leaf_Name_Limit_At;
+
+   function Stored_Spelling (Path : String) return String is (Path);
 
    ---------------
    -- Separator --
