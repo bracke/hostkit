@@ -76,4 +76,17 @@ begin
       Assert (Step (32, False, False, 10) = WE.Give_Up, "not past the last attempt");
       Assert (Step (2, True, False, 1) = WE.Give_Up, "a missing source ends it at once");
    end;
+
+   --  A file someone holds a moment is waited for long enough to outlast a
+   --  virus scanner's look at a file just written (seen at over a second),
+   --  and no single pause is long.
+   declare
+      Total : Duration := 0.0;
+   begin
+      for Attempt in 1 .. WE.Held_Attempts - 1 loop
+         Assert (WE.Held_Delay (Attempt) <= 0.25, "no pause is longer than a quarter second");
+         Total := Total + WE.Held_Delay (Attempt);
+      end loop;
+      Assert (Total >= 3.0, "the attempts wait at least three seconds in all:" & Total'Image);
+   end;
 end Test_Windows_Errors_Read_As_Errno;

@@ -663,7 +663,7 @@ package body Hostkit.Fs is
 
       Error_Access_Denied : constant C_DWord := 5;
       Read_Only           : constant C_DWord := 16#0001#;
-      Attempts            : constant := 10;
+      Attempts            : constant := Hostkit.Windows_Errors.Held_Attempts;
 
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
@@ -703,7 +703,7 @@ package body Hostkit.Fs is
                   exit when Set_File_Attributes (Wide_Target'Address, Attributes - Read_Only) = 0;
                   Kept := Attributes;
                when Hostkit.Windows_Errors.Try_Again =>
-                  delay Duration (Attempt) * 0.02;
+                  delay Hostkit.Windows_Errors.Held_Delay (Attempt);
                when Hostkit.Windows_Errors.Give_Up =>
                   exit;
             end case;
@@ -757,14 +757,15 @@ package body Hostkit.Fs is
    begin
       --  As Replace_File: someone holding the file a moment refuses the
       --  move; try again, briefly, for that only.
-      for Attempt in 1 .. 10 loop
+      for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
          if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, 0) /= 0 then
             return Moved;
          end if;
          Error := Get_Last_Error;
          Hostkit.Errors.Set_Errno_From_Last_Error;
-         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation;
-         delay Duration (Attempt) * 0.02;
+         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation
+           or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+         delay Hostkit.Windows_Errors.Held_Delay (Attempt);
       end loop;
       if Error = Error_Not_Same_Device then
          return Move_Cross_Device;
@@ -1593,11 +1594,23 @@ package body Hostkit.Fs is
             Hostkit.Errors.Set_Errno_From_Last_Error;
             Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
             return False;
-         elsif Delete_File_W (Wide_Path'Address) = 0 then
-            Hostkit.Errors.Set_Errno_From_Last_Error;
-            return False;
          end if;
-         return True;
+         --  A file just written may be held a moment by someone who did not
+         --  share deleting it (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION):
+         --  try again for that only, as Replace_File does.
+         for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
+            if Delete_File_W (Wide_Path'Address) /= 0 then
+               return True;
+            end if;
+            declare
+               Code : constant C_DWord := Get_Last_Error;
+            begin
+               Hostkit.Errors.Set_Errno_From_Last_Error;
+               exit when Code not in 32 | 33 or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+            end;
+            delay Hostkit.Windows_Errors.Held_Delay (Attempt);
+         end loop;
+         return False;
       end;
    exception
       when others =>
@@ -1682,10 +1695,11 @@ package body Hostkit.Fs is
             --  virus scanner, the search indexer -- that did not share it
             --  (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION); try again
             --  briefly, as Durability.Sync_File does. Nothing else is retried.
-            for Attempt in 1 .. 10 loop
+            for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
                Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
-               exit when Stream /= Interfaces.C_Streams.NULL_Stream or else Get_Last_Error not in 32 | 33;
-               delay Duration (Attempt) * 0.02;
+               exit when Stream /= Interfaces.C_Streams.NULL_Stream or else Get_Last_Error not in 32 | 33
+                 or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+               delay Hostkit.Windows_Errors.Held_Delay (Attempt);
             end loop;
             Error := GNAT.OS_Lib.Errno;
          end;

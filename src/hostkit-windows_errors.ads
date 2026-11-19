@@ -68,4 +68,18 @@ package Hostkit.Windows_Errors is
       Attempts          : Positive)
       return Replace_Step;
 
+   --  How often an operation on a file someone holds a moment (a virus
+   --  scanner, the search indexer, not sharing it) is tried in all: Windows
+   --  Defender has been seen to hold a just-written file for over a second.
+   Held_Attempts : constant := 20;
+
+   --  The pause after attempt Attempt was refused for a hold: growing by
+   --  20 ms an attempt, at most a quarter second, so Held_Attempts tries
+   --  wait about 3.6 s in all before giving up.
+   --
+   --  @param Attempt The attempt just refused, from 1.
+   --  @return The pause before the next attempt.
+   function Held_Delay (Attempt : Positive) return Duration is
+     (Duration'Min (Duration (Attempt) * 0.02, 0.25));
+
 end Hostkit.Windows_Errors;
