@@ -75,6 +75,12 @@ begin
       Assert (Step (33, True, False, 3) = WE.Try_Again, "a lock violation is waited for, read-only or not");
       Assert (Step (32, False, False, 10) = WE.Give_Up, "not past the last attempt");
       Assert (Step (2, True, False, 1) = WE.Give_Up, "a missing source ends it at once");
+      Assert
+        (WE.After_Refused_Replace (5, False, False, WE.Denied_Attempts, WE.Held_Attempts) = WE.Give_Up,
+         "a denial is tried briefly, not for the whole hold");
+      Assert
+        (WE.After_Refused_Replace (32, False, False, WE.Denied_Attempts, WE.Held_Attempts) = WE.Try_Again,
+         "a hold is waited for past that");
    end;
 
    --  A file someone holds a moment is waited for long enough to outlast a

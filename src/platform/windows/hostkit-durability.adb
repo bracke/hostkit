@@ -74,7 +74,7 @@ package body Hostkit.Durability is
       --  scanner) that did not share writing; try again briefly -- but only
       --  then: a read-only file (handled below) or a denied one no retry opens.
       for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
-         exit when FD >= 0 or else not Transient (Error);
+         exit when FD >= 0 or else not Transient (Error) or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);
          FD := open (Name'Address, O_Rdwr + O_Binary);
          Error := (if FD < 0 then Refusal else 0);

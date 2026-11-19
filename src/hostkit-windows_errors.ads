@@ -71,11 +71,17 @@ package Hostkit.Windows_Errors is
    --  How often an operation on a file someone holds a moment (a virus
    --  scanner, the search indexer, not sharing it) is tried in all: Windows
    --  Defender has been seen to hold a just-written file for over a second.
+   --  A hold shows as a sharing or lock violation.
    Held_Attempts : constant := 20;
+
+   --  How often a refusal of access is tried in all. Access denied is what
+   --  a delete still pending gives a moment, but also what a folder's ACL
+   --  gives for good: it is tried briefly, not for the whole hold.
+   Denied_Attempts : constant := 3;
 
    --  The pause after attempt Attempt was refused for a hold: growing by
    --  20 ms an attempt, at most a quarter second, so Held_Attempts tries
-   --  wait about 3.6 s in all before giving up.
+   --  wait about 3.3 s in all (19 pauses) before giving up.
    --
    --  @param Attempt The attempt just refused, from 1.
    --  @return The pause before the next attempt.

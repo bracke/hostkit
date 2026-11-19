@@ -106,7 +106,9 @@ package body Hostkit.Windows_Errors is
    begin
       if Code = Access_Denied and then Target_Read_Only and then not Read_Only_Cleared then
          return Clear_Read_Only;
-      elsif Code in Access_Denied | Sharing_Violation | Lock_Violation and then Attempt < Attempts then
+      elsif Code = Access_Denied and then Attempt < Natural'Min (Attempts, Denied_Attempts) then
+         return Try_Again;
+      elsif Code in Sharing_Violation | Lock_Violation and then Attempt < Attempts then
          return Try_Again;
       end if;
       return Give_Up;

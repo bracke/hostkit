@@ -764,6 +764,7 @@ package body Hostkit.Fs is
          Error := Get_Last_Error;
          Hostkit.Errors.Set_Errno_From_Last_Error;
          exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation
+           or else (Error = Error_Access_Denied and then Attempt >= Hostkit.Windows_Errors.Denied_Attempts)
            or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);
       end loop;
@@ -1587,13 +1588,9 @@ package body Hostkit.Fs is
          elsif (Attributes and File_Attribute_Directory) /= 0 then
             return False;
          elsif (Attributes and Read_Only) /= 0 then
+            --  A read-only file is deleted as POSIX unlink would: the
+            --  attribute goes first, and comes back if the delete fails.
             Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
-            if Delete_File_W (Wide_Path'Address) /= 0 then
-               return True;
-            end if;
-            Hostkit.Errors.Set_Errno_From_Last_Error;
-            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
-            return False;
          end if;
          --  A file just written may be held a moment by someone who did not
          --  share deleting it (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION):
@@ -1610,6 +1607,9 @@ package body Hostkit.Fs is
             end;
             delay Hostkit.Windows_Errors.Held_Delay (Attempt);
          end loop;
+         if (Attributes and Read_Only) /= 0 then
+            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
+         end if;
          return False;
       end;
    exception
