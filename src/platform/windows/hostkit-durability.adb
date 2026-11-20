@@ -30,11 +30,6 @@ package body Hostkit.Durability is
    Read_Only          : constant C_DWord := 16#0001#;
    Invalid_Attributes : constant C_DWord := 16#FFFF_FFFF#;
 
-   --  What a failed open is worth waiting out: someone else holding the file
-   --  without sharing writes (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION).
-   --  Anything else -- access denied, read-only, not found -- stays so.
-   function Transient (Error : C_DWord) return Boolean is (Error in 32 | 33);
-
    function commit (FD : C_Int) return C_Int
      with Import, Convention => C, External_Name => "_commit";
 
@@ -71,10 +66,15 @@ package body Hostkit.Durability is
       Result : Outcome := Failed;
    begin
       --  A file just written may be held a moment by someone else (a virus
-      --  scanner) that did not share writing; try again briefly -- but only
-      --  then: a read-only file (handled below) or a denied one no retry opens.
+      --  scanner) that did not share writing, or denied briefly while a
+      --  delete is pending; try again briefly for those only, as every
+      --  Windows body does (Hostkit.Windows_Errors.Try_Again_After_Refusal).
+      --  A read-only file is denied too: after the few attempts a denial
+      --  gets, it is handled below. Anything else -- not found -- stays so.
       for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
-         exit when FD >= 0 or else not Transient (Error) or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+         exit when FD >= 0
+           or else not Hostkit.Windows_Errors.Try_Again_After_Refusal
+             (Interfaces.Unsigned_32 (Error), Attempt, Hostkit.Windows_Errors.Held_Attempts);
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);
          FD := open (Name'Address, O_Rdwr + O_Binary);
          Error := (if FD < 0 then Refusal else 0);

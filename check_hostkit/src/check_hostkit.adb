@@ -56,9 +56,39 @@ procedure Check_Hostkit is
       end if;
    end Require_Alire_GNAT_15;
 
+   --  Whether a subunit of the body at Path -- a Stem-*.adb beside it that is
+   --  "separate" -- holds Pattern: a body split into subunits still makes
+   --  the calls its subunits make.
+   function Subunit_Contains (Path : String; Pattern : String) return Boolean is
+      Search : Ada.Directories.Search_Type;
+      Item   : Ada.Directories.Directory_Entry_Type;
+      Found  : Boolean := False;
+   begin
+      if Ada.Directories.Extension (Path) /= "adb" or else not Ada.Directories.Exists (Path) then
+         return False;
+      end if;
+      Ada.Directories.Start_Search
+        (Search,
+         Ada.Directories.Containing_Directory (Path),
+         Ada.Directories.Base_Name (Path) & "-*.adb");
+      while not Found and then Ada.Directories.More_Entries (Search) loop
+         Ada.Directories.Get_Next_Entry (Search, Item);
+         declare
+            Subunit : constant String := Ada.Directories.Full_Name (Item);
+         begin
+            Found := Project_Tools.Files.File_Contains (Subunit, "separate (")
+              and then Project_Tools.Files.File_Contains (Subunit, Pattern);
+         end;
+      end loop;
+      Ada.Directories.End_Search (Search);
+      return Found;
+   end Subunit_Contains;
+
    procedure Require_Text (Relative_Path : String; Pattern : String; Message : String) is
    begin
-      Project_Tools.Files.Require_Contains (Root & "/" & Relative_Path, Pattern, Message);
+      if not Subunit_Contains (Root & "/" & Relative_Path, Pattern) then
+         Project_Tools.Files.Require_Contains (Root & "/" & Relative_Path, Pattern, Message);
+      end if;
    end Require_Text;
 
    procedure Require_GNAT_15_Manifest (Relative_Path : String) is

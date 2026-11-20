@@ -1,3 +1,5 @@
+with GNAT.OS_Lib;
+
 with Hostkit.Errors;
 with Hostkit.Win32;
 with Hostkit.Windows_Paths;
@@ -34,6 +36,8 @@ package body Hostkit.Metadata_Copy is
    Attribute_Reparse_Point : constant C_DWord := 16#0400#;
    Attribute_Encrypted     : constant C_DWord := 16#4000#;
    Invalid_File_Attributes : constant C_DWord := 16#FFFF_FFFF#;
+   --  The UCRT's ENOSPC.
+   E_No_Spc                : constant := 28;
 
    --  WIN32_FIND_STREAM_DATA: the stream's size, then its name as
    --  ":name:$DATA" (MAX_PATH + 36 UTF-16 units, NUL-terminated).
@@ -297,10 +301,16 @@ package body Hostkit.Metadata_Copy is
                      return False;
                   end if;
                   exit when Read = 0;
-                  if Write_File (Output, Buffer'Address, Read, Written'Access, System.Null_Address) = 0
-                    or else Written /= Read
-                  then
+                  if Write_File (Output, Buffer'Address, Read, Written'Access, System.Null_Address) = 0 then
                      Hostkit.Errors.Set_Errno_From_Last_Error;
+                     Ignored := Close_Handle (Input);
+                     Ignored := Close_Handle (Output);
+                     return False;
+                  elsif Written /= Read then
+                     --  A short write that reported success: nothing failed to
+                     --  read a reason from, and what stops a write short is
+                     --  room (the UCRT's ENOSPC).
+                     GNAT.OS_Lib.Set_Errno (E_No_Spc);
                      Ignored := Close_Handle (Input);
                      Ignored := Close_Handle (Output);
                      return False;

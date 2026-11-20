@@ -279,6 +279,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  An entry owned by this process's user and closed to everyone else is
+   --  told apart from one others may reach, and a link is never followed.
+   procedure Test_Private_To_Current_User
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    --  A Windows system error code is read as the errno a caller asks about,
    --  and a refused create says why through errno on every host.
    procedure Test_Windows_Errors_Read_As_Errno
@@ -858,6 +864,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Windows_Names_Round_Trip_As_WTF_8'Access,
          "process : a Windows name with a lone surrogate reads as WTF-8 and goes back unchanged");
+      Register_Routine
+        (T, Test_Private_To_Current_User'Access,
+         "metadata : an entry private to this user is told from one others may reach, links not followed");
       Register_Routine
         (T, Test_Windows_Errors_Read_As_Errno'Access,
          "errors : a Windows error code is read as errno, and a refused create says why");

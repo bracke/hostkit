@@ -747,25 +747,22 @@ package body Hostkit.Fs is
       Error_Not_Same_Device  : constant C_DWord := 17;
       Error_Invalid_Function  : constant C_DWord := 1;
       Error_Not_Supported    : constant C_DWord := 50;
-      Error_Access_Denied     : constant C_DWord := 5;
-      Error_Sharing_Violation : constant C_DWord := 32;
-      Error_Lock_Violation    : constant C_DWord := 33;
 
       Wide_Source : aliased Wide_String := Wide (Source);
       Wide_Target : aliased Wide_String := Wide (Target);
       Error       : C_DWord;
    begin
       --  As Replace_File: someone holding the file a moment refuses the
-      --  move; try again, briefly, for that only.
+      --  move, or a delete still pending denies it; try again, briefly, for
+      --  those only (Hostkit.Windows_Errors.Try_Again_After_Refusal).
       for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
          if Move_File_Ex (Wide_Source'Address, Wide_Target'Address, 0) /= 0 then
             return Moved;
          end if;
          Error := Get_Last_Error;
-         Hostkit.Errors.Set_Errno_From_Last_Error;
-         exit when Error not in Error_Access_Denied | Error_Sharing_Violation | Error_Lock_Violation
-           or else (Error = Error_Access_Denied and then Attempt >= Hostkit.Windows_Errors.Denied_Attempts)
-           or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+         Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Error));
+         exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+           (Interfaces.Unsigned_32 (Error), Attempt, Hostkit.Windows_Errors.Held_Attempts);
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);
       end loop;
       if Error = Error_Not_Same_Device then
@@ -931,16 +928,20 @@ package body Hostkit.Fs is
       function Delete_File (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
 
+      --  The UCRT's EINVAL: the entry is no link, as readlink says of one.
+      E_Inval    : constant := 22;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
    begin
       --  A link by its reparse tag, as Is_Link reads it: a OneDrive
       --  placeholder or a deduplicated file is a reparse point too, but an
-      --  ordinary file or folder, which this leaves alone.
-      if Attributes = Invalid_File_Attributes
-        or else (Attributes and File_Attribute_Reparse_Point) = 0
-        or else not Is_Link (Path)
-      then
+      --  ordinary file or folder, which this leaves alone. Either refusal
+      --  says why: nothing there (the attributes' own reason), or no link.
+      if Attributes = Invalid_File_Attributes then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+         return False;
+      elsif (Attributes and File_Attribute_Reparse_Point) = 0 or else not Is_Link (Path) then
+         GNAT.OS_Lib.Set_Errno (E_Inval);
          return False;
       end if;
 
@@ -1570,6 +1571,8 @@ package body Hostkit.Fs is
       function Delete_File_W (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
       Read_Only : constant C_DWord := 16#0001#;
+      --  The UCRT's EISDIR: a directory is refused, as unlink refuses one.
+      E_Is_Dir  : constant := 21;
    begin
       if Path = "" or else (for some C of Path => C = ASCII.NUL) then
          return False;
@@ -1580,12 +1583,15 @@ package body Hostkit.Fs is
          Ignored    : Interfaces.C.int;
       begin
          if Attributes = Invalid_File_Attributes then
+            --  Nothing there, or no way to it: the attributes' own reason.
+            Hostkit.Errors.Set_Errno_From_Last_Error;
             return False;
          elsif (Attributes and File_Attribute_Reparse_Point) /= 0 and then Is_Link (Path) then
             --  Only a link by its tag; any other reparse point (a cloud
             --  placeholder) is the ordinary file or folder it shows as.
             return Delete_Link (Path);
          elsif (Attributes and File_Attribute_Directory) /= 0 then
+            GNAT.OS_Lib.Set_Errno (E_Is_Dir);
             return False;
          elsif (Attributes and Read_Only) /= 0 then
             --  A read-only file is deleted as POSIX unlink would: the
@@ -1593,17 +1599,21 @@ package body Hostkit.Fs is
             Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
          end if;
          --  A file just written may be held a moment by someone who did not
-         --  share deleting it (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION):
-         --  try again for that only, as Replace_File does.
+         --  share deleting it (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION),
+         --  or denied briefly while a delete is still pending: try again for
+         --  those only, as Replace_File does
+         --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). errno keeps the
+         --  last refusal's reason.
          for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
             if Delete_File_W (Wide_Path'Address) /= 0 then
                return True;
             end if;
             declare
-               Code : constant C_DWord := Get_Last_Error;
+               Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Get_Last_Error);
             begin
-               Hostkit.Errors.Set_Errno_From_Last_Error;
-               exit when Code not in 32 | 33 or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+               Hostkit.Windows_Errors.Set_Errno_From (Code);
+               exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+                 (Code, Attempt, Hostkit.Windows_Errors.Held_Attempts);
             end;
             delay Hostkit.Windows_Errors.Held_Delay (Attempt);
          end loop;
@@ -1697,7 +1707,8 @@ package body Hostkit.Fs is
             --  briefly, as Durability.Sync_File does. Nothing else is retried.
             for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
                Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
-               exit when Stream /= Interfaces.C_Streams.NULL_Stream or else Get_Last_Error not in 32 | 33
+               exit when Stream /= Interfaces.C_Streams.NULL_Stream
+                 or else not Hostkit.Windows_Errors.Is_Held (Interfaces.Unsigned_32 (Get_Last_Error))
                  or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
                delay Hostkit.Windows_Errors.Held_Delay (Attempt);
             end loop;

@@ -879,6 +879,8 @@ package body Hostkit.Metadata is
    function File_Status_Of (Path : String) return Entry_Status is
      (Status_Of (Path, Follow_Links => True));
 
+   function Private_To_Current_User (Path : String) return Boolean is separate;
+
    function Same_File (Left : String; Right : String) return Boolean is
       L_Buffer : aliased Stat_Record;
       R_Buffer : aliased Stat_Record;

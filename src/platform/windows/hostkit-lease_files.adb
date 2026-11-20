@@ -1,5 +1,6 @@
 with Hostkit.Errors;
 with Hostkit.Win32;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 with System;
@@ -29,8 +30,6 @@ package body Hostkit.Lease_Files is
    Reparse_Point : constant C_DWord := 16#0000_0400#;
    Lock_Exclusive : constant C_DWord := 2;
    Lock_Immediate : constant C_DWord := 1;
-   Error_Sharing : constant C_DWord := 32;
-   Error_Lock : constant C_DWord := 33;
    Error_Not_Found : constant C_DWord := 2;
    Error_File_Exists : constant C_DWord := 80;
    Error_Already_Exists : constant C_DWord := 183;
@@ -158,12 +157,17 @@ package body Hostkit.Lease_Files is
       if Lock_File_Ex (Handle, Flags, 0, 1, 0, Region'Access) /= 0 then
          return Opened;
       end if;
-      Hostkit.Errors.Set_Errno_From_Last_Error;
-      if Get_Last_Error in Error_Sharing | Error_Lock then
-         return Busy;
-      else
-         return Error;
-      end if;
+      declare
+         --  Read once, before setting errno may call into the system.
+         Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Get_Last_Error);
+      begin
+         Hostkit.Windows_Errors.Set_Errno_From (Code);
+         if Hostkit.Windows_Errors.Is_Held (Code) then
+            return Busy;
+         else
+            return Error;
+         end if;
+      end;
    end Take_Lock;
 
    function Open_Handle
@@ -192,7 +196,7 @@ package body Hostkit.Lease_Files is
             --  The name is taken, as EEXIST says on POSIX: a refusal, which
             --  callers tell from a failure (a torn marker is rewritten).
             return Refused;
-         elsif Code in Error_Sharing | Error_Lock then
+         elsif Hostkit.Windows_Errors.Is_Held (Interfaces.Unsigned_32 (Code)) then
             return Busy;
          else
             return Error;

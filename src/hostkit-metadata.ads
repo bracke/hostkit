@@ -125,6 +125,31 @@ package Hostkit.Metadata is
    --  pathname lookup.
    function File_Status_Of (Path : String) return Entry_Status;
 
+   --  Whether the entry at Path belongs to this process's user and to nobody
+   --  else: the one question "may I treat this as my own private file" asks
+   --  on every host, where POSIX mode bits answer it on one and an ACL on
+   --  another. It does not follow a link: a link answers False, whatever it
+   --  points at.
+   --
+   --  POSIX: the entry's owner is the effective user id and its mode grants
+   --  the group and others nothing (mode and 8#077# is 0).
+   --
+   --  Windows: the owner is the process token's user, or its default owner
+   --  (an elevated administrator's files are owned by Administrators), a
+   --  DACL is present, and every access-allowed ACE in it names that user,
+   --  that owner, or OWNER RIGHTS (S-1-3-4) -- the one ACE
+   --  Hostkit.Private_Paths writes. A deny ACE takes nothing away from
+   --  privacy and is accepted; an ACE of any other kind is not. A volume
+   --  that keeps no ACL (FAT, exFAT) answers False: nothing there is anyone's
+   --  alone.
+   --
+   --  Any failure to read what is asked answers False. errno is not part of
+   --  the contract.
+   --
+   --  @param Path The entry to ask about, not followed.
+   --  @return True only when the entry is the current user's and private.
+   function Private_To_Current_User (Path : String) return Boolean;
+
    type Metadata_Update_Kind is (Update_Permissions, Update_Ownership);
 
    type Metadata_Update_Result is record

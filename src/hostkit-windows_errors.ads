@@ -37,6 +37,31 @@ package Hostkit.Windows_Errors is
    --  @param Code A Windows system error code.
    procedure Set_Errno_From (Code : Interfaces.Unsigned_32);
 
+   --  Whether Code says someone holds the file a moment and did not share
+   --  it -- a virus scanner, the search indexer: a sharing violation
+   --  (ERROR_SHARING_VIOLATION) or a lock violation (ERROR_LOCK_VIOLATION).
+   --
+   --  @param Code What GetLastError said.
+   --  @return Whether the refusal is a hold that passes.
+   function Is_Held (Code : Interfaces.Unsigned_32) return Boolean;
+
+   --  Whether an operation on a file refused with Code is tried again: a
+   --  hold (Is_Held) while attempts remain, and a refusal of access
+   --  (ERROR_ACCESS_DENIED, which a delete still pending gives a moment)
+   --  only while Denied_Attempts remain too; anything else ends it at once.
+   --  The caller keeps the refusal it last saw (errno), which is the final
+   --  one once this says no.
+   --
+   --  @param Code What GetLastError said for the refused attempt.
+   --  @param Attempt The attempt just refused, from 1.
+   --  @param Attempts How many attempts the operation makes in all.
+   --  @return Whether to pause (Held_Delay) and try again.
+   function Try_Again_After_Refusal
+     (Code     : Interfaces.Unsigned_32;
+      Attempt  : Positive;
+      Attempts : Positive)
+      return Boolean;
+
    --  What a replace (MoveFileExW with MOVEFILE_REPLACE_EXISTING) does next
    --  once the host refused it with a code.
    type Replace_Step is

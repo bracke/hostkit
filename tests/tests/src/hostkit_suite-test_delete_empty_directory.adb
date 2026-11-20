@@ -37,5 +37,19 @@ begin
       Links_Refused ("Delete_Empty_Directory, a link to a folder");
    end if;
    Assert (Hostkit.Fs.Delete_Empty_Directory (Empty), "the folder itself is removed");
+
+   --  Delete_File refuses a missing file and a directory, each saying why:
+   --  ENOENT (2 everywhere), and for the directory what unlink says --
+   --  EISDIR (21) on Linux and Windows, EPERM on macOS.
+   GNAT.OS_Lib.Set_Errno (0);
+   Assert (not Hostkit.Fs.Delete_File (Empty), "a missing file is refused");
+   Assert (GNAT.OS_Lib.Errno = 2, "with ENOENT:" & Integer'Image (GNAT.OS_Lib.Errno));
+   GNAT.OS_Lib.Set_Errno (0);
+   Assert (not Hostkit.Fs.Delete_File (Full), "a directory is refused");
+   Assert (GNAT.OS_Lib.Errno /= 0, "and the refusal says why");
+   if Hostkit.Host.Current /= Hostkit.Host.MacOS then
+      Assert (GNAT.OS_Lib.Errno = 21, "EISDIR, as unlink says:" & Integer'Image (GNAT.OS_Lib.Errno));
+   end if;
+   Assert (Ada.Directories.Exists (Inside), "and the directory is left as it was");
    Ada.Directories.Delete_Tree (Full);
 end Test_Delete_Empty_Directory;

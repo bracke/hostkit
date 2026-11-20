@@ -83,6 +83,24 @@ begin
          "a hold is waited for past that");
    end;
 
+   --  One reading of a hold, and one retry rule, for every Windows body
+   --  that waits one out (delete, move, replace, sync, open, lock).
+   declare
+      function Again (Code : Natural; Attempt : Positive) return Boolean is
+        (WE.Try_Again_After_Refusal (Interfaces.Unsigned_32 (Code), Attempt, WE.Held_Attempts));
+   begin
+      Assert (WE.Is_Held (32) and then WE.Is_Held (33), "sharing and lock violations are holds");
+      Assert (not WE.Is_Held (5) and then not WE.Is_Held (2) and then not WE.Is_Held (0), "nothing else is");
+      Assert (Again (32, 1) and then Again (33, WE.Held_Attempts - 1), "a hold is waited for while attempts remain");
+      Assert (not Again (32, WE.Held_Attempts), "not past the last attempt");
+      Assert (Again (5, 1) and then Again (5, WE.Denied_Attempts - 1), "a denial is tried again briefly");
+      Assert (not Again (5, WE.Denied_Attempts), "only for Denied_Attempts in all");
+      Assert
+        (not WE.Try_Again_After_Refusal (5, 1, Attempts => 1),
+         "and never past the attempts the caller makes, if fewer");
+      Assert (not Again (2, 1) and then not Again (112, 1), "a missing file or a full disk ends it at once");
+   end;
+
    --  A file someone holds a moment is waited for long enough to outlast a
    --  virus scanner's look at a file just written (seen at over a second),
    --  and no single pause is long.

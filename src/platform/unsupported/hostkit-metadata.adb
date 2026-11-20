@@ -20,6 +20,12 @@ package body Hostkit.Metadata is
       return (others => <>);
    end Entry_Status_Of;
 
+   function Private_To_Current_User (Path : String) return Boolean is
+      pragma Unreferenced (Path);
+   begin
+      return False;
+   end Private_To_Current_User;
+
    function File_Status_Of (Path : String) return Entry_Status is
       pragma Unreferenced (Path);
    begin

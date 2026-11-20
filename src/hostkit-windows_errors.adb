@@ -91,6 +91,27 @@ package body Hostkit.Windows_Errors is
       end if;
    end Set_Errno_From;
 
+   Access_Denied     : constant := 5;
+   Sharing_Violation : constant := 32;
+   Lock_Violation    : constant := 33;
+
+   function Is_Held (Code : Interfaces.Unsigned_32) return Boolean is
+     (Code in Sharing_Violation | Lock_Violation);
+
+   function Try_Again_After_Refusal
+     (Code     : Interfaces.Unsigned_32;
+      Attempt  : Positive;
+      Attempts : Positive)
+      return Boolean
+   is
+      use type Interfaces.Unsigned_32;
+   begin
+      if Code = Access_Denied then
+         return Attempt < Natural'Min (Attempts, Denied_Attempts);
+      end if;
+      return Is_Held (Code) and then Attempt < Attempts;
+   end Try_Again_After_Refusal;
+
    function After_Refused_Replace
      (Code              : Interfaces.Unsigned_32;
       Target_Read_Only  : Boolean;
@@ -100,15 +121,10 @@ package body Hostkit.Windows_Errors is
       return Replace_Step
    is
       use type Interfaces.Unsigned_32;
-      Access_Denied     : constant := 5;
-      Sharing_Violation : constant := 32;
-      Lock_Violation    : constant := 33;
    begin
       if Code = Access_Denied and then Target_Read_Only and then not Read_Only_Cleared then
          return Clear_Read_Only;
-      elsif Code = Access_Denied and then Attempt < Natural'Min (Attempts, Denied_Attempts) then
-         return Try_Again;
-      elsif Code in Sharing_Violation | Lock_Violation and then Attempt < Attempts then
+      elsif Try_Again_After_Refusal (Code, Attempt, Attempts) then
          return Try_Again;
       end if;
       return Give_Up;

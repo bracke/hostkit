@@ -1,5 +1,6 @@
 
 with Hostkit.Win32;
+with Hostkit.Windows_Errors;
 with Hostkit.Windows_Paths;
 with Interfaces.C;
 
@@ -19,9 +20,6 @@ package body Hostkit.Locks is
 
    Lockfile_Exclusive_Lock   : constant C_DWord := 2;
    Lockfile_Fail_Immediately : constant C_DWord := 1;
-
-   Error_Lock_Violation : constant C_DWord := 33;
-   Error_Sharing_Violation : constant C_DWord := 32;
 
    type Security_Attributes is record
       Length              : C_DWord := 0;
@@ -125,7 +123,8 @@ package body Hostkit.Locks is
          begin
             Ignored := Close_Handle (Handle);
 
-            if Code = Error_Lock_Violation or else Code = Error_Sharing_Violation then
+            --  Another holder of the lock: a lock or sharing violation.
+            if Hostkit.Windows_Errors.Is_Held (Interfaces.Unsigned_32 (Code)) then
                return Lock_Busy;
             end if;
 

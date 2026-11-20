@@ -800,6 +800,8 @@ package body Hostkit.Metadata is
    function File_Status_Of (Path : String) return Entry_Status is
      (Status_Of (Path, Follow_Links => True));
 
+   function Private_To_Current_User (Path : String) return Boolean is separate;
+
    function Same_File (Left : String; Right : String) return Boolean is
       L_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Left);
       R_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Right);
