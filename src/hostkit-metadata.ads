@@ -131,17 +131,30 @@ package Hostkit.Metadata is
    --  another. It does not follow a link: a link answers False, whatever it
    --  points at.
    --
-   --  POSIX: the entry's owner is the effective user id and its mode grants
+   --  Linux: the entry's owner is the effective user id and its mode grants
    --  the group and others nothing (mode and 8#077# is 0).
    --
-   --  Windows: the owner is the process token's user, or its default owner
-   --  (an elevated administrator's files are owned by Administrators), a
-   --  DACL is present, and every access-allowed ACE in it names that user,
-   --  that owner, or OWNER RIGHTS (S-1-3-4) -- the one ACE
-   --  Hostkit.Private_Paths writes. A deny ACE takes nothing away from
-   --  privacy and is accepted; an ACE of any other kind is not. A volume
-   --  that keeps no ACL (FAT, exFAT) answers False: nothing there is anyone's
-   --  alone.
+   --  macOS: as Linux, and the entry has no extended ACL that allows anyone
+   --  anything (acl_get_link_np finds none, or one with only deny entries):
+   --  an allow entry there grants access whatever the mode bits say, so
+   --  Hostkit.Private_Paths clears it. A volume that keeps no ACLs has none.
+   --
+   --  Windows: the owner is the process token's user (TokenUser) -- not its
+   --  default owner as such, which for an elevated administrator is
+   --  BUILTIN\Administrators and so any other administrator -- a DACL is
+   --  present, and every access-allowed ACE in it names that user or OWNER
+   --  RIGHTS (S-1-3-4), the one ACE Hostkit.Private_Paths writes (and it
+   --  gives what it makes private to that user, elevated or not). A deny
+   --  ACE takes nothing away from privacy and is accepted; an ACE of any
+   --  other kind is not.
+   --
+   --  A volume that keeps no access control (FAT, exFAT) follows the rule
+   --  Hostkit.Private_Paths makes private by: on Windows, where such a
+   --  volume has no ACL at all and Private_Paths succeeds with nothing to
+   --  restrict, a regular file that is no link is as private as that volume
+   --  can make it and answers True; a folder there answers False. On Linux
+   --  and macOS such a volume answers by the owner and mode it is mounted
+   --  with, as above.
    --
    --  Any failure to read what is asked answers False. errno is not part of
    --  the contract.

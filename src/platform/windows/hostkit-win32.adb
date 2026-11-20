@@ -20,4 +20,14 @@ package body Hostkit.Win32 is
       return False;
    end Is_Held_Link;
 
+   function Keeps_Access_Control (Object : HANDLE) return Boolean is
+      File_Persistent_Acls : constant DWORD := 16#0000_0008#;
+      Serial, Max_Component, Flags : aliased DWORD := 0;
+   begin
+      return Get_Volume_Information_By_Handle
+          (Object, System.Null_Address, 0, Serial'Access, Max_Component'Access, Flags'Access,
+           System.Null_Address, 0) = 0
+        or else (Flags and File_Persistent_Acls) /= 0;
+   end Keeps_Access_Control;
+
 end Hostkit.Win32;

@@ -58,21 +58,34 @@ package body Hostkit.Durability is
      with Import, Convention => C, External_Name => "_close";
 
    function Sync_File (Path : String) return Outcome is
+      --  ERROR_ACCESS_DENIED: what opening a read-only file for writing gives.
+      Access_Denied : constant C_DWord := 5;
       --  UTF-16, whole: Wide_Strings.Decode refuses code points past U+FFFF.
       Name   : aliased constant Wide_String :=
         Hostkit.Windows_Paths.Native (Path);
       FD     : C_Int := open (Name'Address, O_Rdwr + O_Binary);
       Error  : C_DWord := (if FD < 0 then Refusal else 0);
       Result : Outcome := Failed;
+
+      --  Whether Path is a file with the read-only attribute. A failure to
+      --  read the attributes answers False and leaves errno as the refused
+      --  open set it.
+      function Is_Read_Only return Boolean is
+         Attributes : constant C_DWord := Get_File_Attributes (Name'Address);
+      begin
+         return Attributes /= Invalid_Attributes and then (Attributes and Read_Only) /= 0;
+      end Is_Read_Only;
    begin
       --  A file just written may be held a moment by someone else (a virus
       --  scanner) that did not share writing, or denied briefly while a
       --  delete is pending; try again briefly for those only, as every
       --  Windows body does (Hostkit.Windows_Errors.Try_Again_After_Refusal).
-      --  A read-only file is denied too: after the few attempts a denial
-      --  gets, it is handled below. Anything else -- not found -- stays so.
+      --  A read-only file is denied too, and no wait changes that: a denial
+      --  first reads the attributes, and a read-only file goes straight to
+      --  the handling below. Anything else -- not found -- stays so.
       for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
          exit when FD >= 0
+           or else (Error = Access_Denied and then Is_Read_Only)
            or else not Hostkit.Windows_Errors.Try_Again_After_Refusal
              (Interfaces.Unsigned_32 (Error), Attempt, Hostkit.Windows_Errors.Held_Attempts);
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);

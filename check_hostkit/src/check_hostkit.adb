@@ -469,9 +469,18 @@ begin
    Require_Win32_Call
      ("src/platform/windows/hostkit-metadata_copy.adb", "GetVolumeInformationByHandleW",
       "Get_Volume_Information_By_Handle");
+   --  Whether a volume keeps ACLs is one answer, Hostkit.Win32's, which
+   --  Private_Paths and Private_To_Current_User share: what the one makes
+   --  private on a FAT volume, the other calls private.
    Require_Win32_Call
-     ("src/platform/windows/hostkit-private_paths.adb", "GetVolumeInformationByHandleW",
+     ("src/platform/windows/hostkit-win32.adb", "GetVolumeInformationByHandleW",
       "Get_Volume_Information_By_Handle");
+   Require_Text
+     ("src/platform/windows/hostkit-private_paths.adb", "Keeps_Access_Control (",
+      "src/platform/windows/hostkit-private_paths.adb must ask Hostkit.Win32.Keeps_Access_Control");
+   Require_Text
+     ("src/platform/windows/hostkit-metadata-private_to_current_user.adb", "Keeps_Access_Control (",
+      "src/platform/windows/hostkit-metadata-private_to_current_user.adb must ask Hostkit.Win32.Keeps_Access_Control");
    Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
    Require_Text
      ("src/platform/macos/hostkit-trash.adb",

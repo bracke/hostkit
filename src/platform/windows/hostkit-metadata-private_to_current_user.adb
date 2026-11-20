@@ -1,24 +1,20 @@
 separate (Hostkit.Metadata)
 function Private_To_Current_User (Path : String) return Boolean is
-   --  TOKEN_INFORMATION_CLASS: TokenUser and TokenOwner.
-   Token_User_Class  : constant C_Int := 1;
-   Token_Owner_Class : constant C_Int := 4;
+   --  TOKEN_INFORMATION_CLASS: TokenUser.
+   Token_User_Class : constant C_Int := 1;
    --  WELL_KNOWN_SID_TYPE: WinCreatorOwnerRightsSid, OWNER RIGHTS (S-1-3-4),
    --  the trustee of Hostkit.Private_Paths' one ACE, "D:P(A;OICI;FA;;;OW)".
    Win_Creator_Owner_Rights_Sid : constant C_Int := 71;
    --  Where an ACE's SID starts: past its header and its access mask.
    Ace_Sid_Offset : constant := 8;
 
-   --  TOKEN_USER and TOKEN_OWNER, each led by its SID's address, with the
-   --  SID after it; eight-byte words, so that address is aligned.
+   --  TOKEN_USER, led by its SID's address, with the SID after it;
+   --  eight-byte words, so that address is aligned.
    type Token_Buffer is array (0 .. 255) of Interfaces.Unsigned_64
      with Convention => C;
-   User_Buffer  : aliased Token_Buffer := [others => 0];
-   Owner_Buffer : aliased Token_Buffer := [others => 0];
+   User_Buffer : aliased Token_Buffer := [others => 0];
    User_Sid : System.Address
      with Import, Address => User_Buffer'Address;
-   Default_Owner_Sid : System.Address
-     with Import, Address => Owner_Buffer'Address;
 
    Owner_Rights      : aliased Sid_Buffer := [others => Interfaces.C.nul];
    Owner_Rights_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
@@ -34,13 +30,16 @@ function Private_To_Current_User (Path : String) return Boolean is
    Ignored_Int     : C_Int;
    Ignored_Address : System.Address;
 
-   --  Whether Sid is this process's user or its default owner.
+   --  Whether Sid is this process's user (TokenUser). Not its default owner
+   --  as such: an elevated administrator's is BUILTIN\Administrators, which
+   --  any other administrator could have given a file to; it counts only
+   --  where it is that user anyway.
    function Names_Self (Sid : System.Address) return Boolean is
-     (Equal_Sid (Sid, User_Sid) /= 0 or else Equal_Sid (Sid, Default_Owner_Sid) /= 0);
+     (Equal_Sid (Sid, User_Sid) /= 0);
 
    --  Whether every access-allowed ACE of the DACL names this process's
-   --  user, its default owner or OWNER RIGHTS, and every other ACE is a
-   --  deny.
+   --  user or OWNER RIGHTS (the owner being that user), and every other
+   --  ACE is a deny.
    function Dacl_Private return Boolean is
       Header : constant Acl_Header
         with Import, Address => Dacl;
@@ -83,16 +82,22 @@ function Private_To_Current_User (Path : String) return Boolean is
 begin
    --  The entry itself, never what a link names: a link answers False. A
    --  reparse point that is no link (a cloud placeholder) is the file it
-   --  shows as. A volume without ACLs (FAT, exFAT) hands back no owner and
-   --  no DACL, and answers False.
+   --  shows as. A volume that keeps no access control (FAT, exFAT) hands
+   --  back no owner and no DACL: there a regular file is as private as the
+   --  volume can make it, as Hostkit.Private_Paths' Set_Private takes it,
+   --  and answers True; a folder answers False.
    Handle := Create_File
      (Name'Address, Read_Control + File_Read_Attributes,
       File_Share_Read + File_Share_Write + File_Share_Delete, System.Null_Address, Open_Existing,
       File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point, System.Null_Address);
-   if Handle /= Invalid_Handle_Value
-     and then Get_File_Information (Handle, Info'Access) /= 0
-     and then ((Info.Attributes and File_Attribute_Reparse_Point) = 0 or else not Hostkit.Fs.Is_Link (Path))
-     and then Get_Security_Info
+   if Handle = Invalid_Handle_Value
+     or else Get_File_Information (Handle, Info'Access) = 0
+     or else ((Info.Attributes and File_Attribute_Reparse_Point) /= 0 and then Hostkit.Fs.Is_Link (Path))
+   then
+      Result := False;
+   elsif not Keeps_Access_Control (Handle) then
+      Result := (Info.Attributes and File_Attribute_Directory) = 0;
+   elsif Get_Security_Info
        (Handle, Se_File_Object, Owner_Information + Dacl_Information,
         Owner'Address, System.Null_Address, Dacl'Address, System.Null_Address,
         Descriptor'Access) = Success
@@ -101,8 +106,6 @@ begin
      and then Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) /= 0
      and then Get_Token_Information
        (Token, Token_User_Class, User_Buffer'Address, C_DWord (Token_Buffer'Size / 8), Needed'Access) /= 0
-     and then Get_Token_Information
-       (Token, Token_Owner_Class, Owner_Buffer'Address, C_DWord (Token_Buffer'Size / 8), Needed'Access) /= 0
      and then Create_Well_Known_Sid
        (Win_Creator_Owner_Rights_Sid, System.Null_Address, Owner_Rights (1)'Address, Owner_Rights_Size'Access) /= 0
      and then Names_Self (Owner)

@@ -37,6 +37,15 @@ begin
    GNAT.OS_Lib.Close (Descriptor);
    Descriptor := GNAT.OS_Lib.Invalid_FD;
 
+   --  One rule on every host, elevated or not: what Private_Paths makes
+   --  private, Private_To_Current_User calls private.
+   Assert
+     (Hostkit.Metadata.Private_To_Current_User (File_Path),
+      "a restricted file is this user's alone");
+   Assert
+     (Hostkit.Metadata.Private_To_Current_User (Directory),
+      "so is a hardened directory");
+
    if Hostkit.Metadata.Permissions_Supported
      and then Hostkit.Metadata.Mode_Bits_Are_Native
    then

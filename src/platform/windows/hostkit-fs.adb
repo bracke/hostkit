@@ -945,13 +945,26 @@ package body Hostkit.Fs is
          return False;
       end if;
 
-      if (if (Attributes and File_Attribute_Directory) /= 0
-          then Remove_Directory (Wide_Path'Address) /= 0
-          else Delete_File (Wide_Path'Address) /= 0)
-      then
-         return True;
-      end if;
-      Hostkit.Errors.Set_Errno_From_Last_Error;
+      --  As Delete_File: someone holding the link a moment, or a delete
+      --  still pending, refuses it; try again for those only
+      --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). errno keeps the
+      --  last refusal's reason.
+      for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
+         if (if (Attributes and File_Attribute_Directory) /= 0
+             then Remove_Directory (Wide_Path'Address) /= 0
+             else Delete_File (Wide_Path'Address) /= 0)
+         then
+            return True;
+         end if;
+         declare
+            Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Get_Last_Error);
+         begin
+            Hostkit.Windows_Errors.Set_Errno_From (Code);
+            exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+              (Code, Attempt, Hostkit.Windows_Errors.Held_Attempts);
+         end;
+         delay Hostkit.Windows_Errors.Held_Delay (Attempt);
+      end loop;
       return False;
    exception
       when others =>
@@ -1548,16 +1561,28 @@ package body Hostkit.Fs is
       if Cleared then
          Ignored := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only);
       end if;
-      if Remove_Directory (Wide_Path'Address) = 0 then
-         --  As Delete_File: the reason first, before the attribute is put
-         --  back and the last error with it overwritten.
-         Hostkit.Errors.Set_Errno_From_Last_Error;
-         if Cleared then
-            Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
+      --  As Delete_File: someone holding the folder a moment, or a delete
+      --  still pending, refuses it; try again for those only
+      --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). The reason goes
+      --  into errno first, before the attribute is put back and the last
+      --  error with it overwritten; errno keeps the last refusal's.
+      for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
+         if Remove_Directory (Wide_Path'Address) /= 0 then
+            return True;
          end if;
-         return False;
+         declare
+            Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Get_Last_Error);
+         begin
+            Hostkit.Windows_Errors.Set_Errno_From (Code);
+            exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+              (Code, Attempt, Hostkit.Windows_Errors.Held_Attempts);
+         end;
+         delay Hostkit.Windows_Errors.Held_Delay (Attempt);
+      end loop;
+      if Cleared then
+         Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
       end if;
-      return True;
+      return False;
    exception
       when others =>
          return False;
@@ -1703,16 +1728,19 @@ package body Hostkit.Fs is
          begin
             --  A file just written may be held a moment by someone else -- a
             --  virus scanner, the search indexer -- that did not share it
-            --  (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION); try again
-            --  briefly, as Durability.Sync_File does. Nothing else is retried.
+            --  (ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION), or denied
+            --  briefly while a delete is still pending: try again for those
+            --  only, as Delete_File, Replace_File and Durability.Sync_File do
+            --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). Error keeps
+            --  the errno _wfopen gave the last refusal.
             for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
                Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
-               exit when Stream /= Interfaces.C_Streams.NULL_Stream
-                 or else not Hostkit.Windows_Errors.Is_Held (Interfaces.Unsigned_32 (Get_Last_Error))
-                 or else Attempt = Hostkit.Windows_Errors.Held_Attempts;
+               exit when Stream /= Interfaces.C_Streams.NULL_Stream;
+               Error := GNAT.OS_Lib.Errno;
+               exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+                 (Interfaces.Unsigned_32 (Get_Last_Error), Attempt, Hostkit.Windows_Errors.Held_Attempts);
                delay Hostkit.Windows_Errors.Held_Delay (Attempt);
             end loop;
-            Error := GNAT.OS_Lib.Errno;
          end;
       end if;
       if Stream /= Interfaces.C_Streams.NULL_Stream then

@@ -37,9 +37,12 @@ package body Hostkit.Private_Paths is
    File_Share_All               : constant C_DWord := 7;
    Read_Control                 : constant C_DWord := 16#0002_0000#;
    Write_Dac                    : constant C_DWord := 16#0004_0000#;
+   Write_Owner                  : constant C_DWord := 16#0008_0000#;
    Owner_Security_Information  : constant C_DWord := 16#0000_0001#;
    Dacl_Security_Information   : constant C_DWord := 16#0000_0004#;
    Protected_Dacl_Information : constant C_DWord := 16#8000_0000#;
+   --  TOKEN_INFORMATION_CLASS: TokenUser and TokenOwner.
+   Token_User_Class  : constant C_Int := 1;
    Token_Owner_Class : constant C_Int := 4;
    Sddl_Revision_1 : constant C_DWord := 1;
    Error_File_Exists    : constant C_DWord := 80;
@@ -97,20 +100,14 @@ package body Hostkit.Private_Paths is
           External_Name => "GetSecurityDescriptorDacl";
    function Equal_Sid (Left, Right : System.Address) return C_Int
      with Import, Convention => Stdcall, External_Name => "EqualSid";
-
-   --  Whether the volume Handle is on keeps access control lists: NTFS and
-   --  ReFS do; FAT and exFAT -- a USB stick, a memory card -- keep none, and
-   --  every entry there is open to whoever can reach the volume. When the
-   --  volume will not say, it is taken to keep them.
-   function Keeps_Access_Control (Handle : System.Address) return Boolean is
-      File_Persistent_Acls : constant C_DWord := 16#0000_0008#;
-      Serial, Max_Component, Flags : aliased C_DWord := 0;
-   begin
-      return Get_Volume_Information_By_Handle
-          (Handle, System.Null_Address, 0, Serial'Access, Max_Component'Access, Flags'Access,
-           System.Null_Address, 0) = 0
-        or else (Flags and File_Persistent_Acls) /= 0;
-   end Keeps_Access_Control;
+   --  ConvertSidToStringSidW: the SID as "S-1-5-21-...", LocalAlloc'd.
+   function Convert_Sid_To_String (Sid : System.Address; Text : access System.Address) return C_Int
+     with Import, Convention => Stdcall, External_Name => "ConvertSidToStringSidW";
+   --  ReOpenFile: a second handle on the entry Original holds, with other
+   --  access; INVALID_HANDLE_VALUE on failure.
+   function Re_Open_File
+     (Original : System.Address; Desired, Share, Flags : C_DWord) return System.Address
+     with Import, Convention => Stdcall, External_Name => "ReOpenFile";
 
    --  Whether Left and Right are one entry: by the 128-bit file ID, or on a
    --  volume that has none (FAT, exFAT) by volume serial and file index.
@@ -132,19 +129,49 @@ package body Hostkit.Private_Paths is
         and then Left_Info.File_Index_Low = Right_Info.File_Index_Low;
    end Same_File;
 
-   --  Whether the entry open as Handle is owned by this process's token
-   --  owner. False, with errno set, when it is not or cannot be told.
-   function Owned_By_Current_Token (Handle : System.Address) return Boolean is
-      Owner, Descriptor, Token : aliased System.Address := System.Null_Address;
-      Security_Status : C_DWord;
+   --  TOKEN_USER or TOKEN_OWNER, led by its SID's address with the SID
+   --  after it; eight-byte words, so that address is aligned.
+   type Token_Buffer is array (0 .. 255) of Interfaces.Unsigned_64
+     with Convention => C;
+
+   --  Read the process token's information of Class (TokenUser or
+   --  TokenOwner) into Buffer. False, with errno set, when the token will
+   --  not say.
+   function Read_Token (Class : C_Int; Buffer : System.Address) return Boolean is
+      Token : aliased System.Address := System.Null_Address;
       Needed : aliased C_DWord := 0;
-      Buffer : aliased Byte_Buffer (0 .. 2_047) := [others => 0];
+      Ok : Boolean;
+      Ignored : C_Int;
+   begin
+      Ok := Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) /= 0
+        and then Get_Token_Information
+          (Token, Class, Buffer, C_DWord (Token_Buffer'Size / 8), Needed'Access) /= 0;
+      if not Ok then
+         Hostkit.Errors.Set_Errno_From_Last_Error;
+      end if;
+      if Token /= System.Null_Address then
+         Ignored := Close_Handle (Token);
+      end if;
+      return Ok;
+   end Read_Token;
+
+   --  Whether the entry open as Handle is this process's own: owned by the
+   --  token's user (User, its SID), or by the token's default owner -- which
+   --  for an elevated administrator is BUILTIN\Administrators, the owner
+   --  every entry such a process creates is given. Owner_Is_User tells which.
+   --  False, with errno set, when it is neither or cannot be told.
+   function Owned_By_Current_Token
+     (Handle : System.Address; User : System.Address; Owner_Is_User : out Boolean) return Boolean
+   is
+      Owner, Descriptor : aliased System.Address := System.Null_Address;
+      Security_Status : C_DWord;
+      Buffer : aliased Token_Buffer := [others => 0];
       Token_Owner : System.Address
         with Import, Address => Buffer'Address;
       Ok : Boolean;
-      Ignored_Int : C_Int;
       Ignored_Address : System.Address;
    begin
+      Owner_Is_User := False;
       Security_Status := Get_Security_Info
         (Handle, Se_File_Object, Owner_Security_Information,
          Owner'Address, System.Null_Address, System.Null_Address,
@@ -153,19 +180,14 @@ package body Hostkit.Private_Paths is
       if not Ok then
          Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Security_Status));
       else
-         Ok := Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) /= 0
-           and then Get_Token_Information
-             (Token, Token_Owner_Class, Buffer'Address,
-              C_DWord (Buffer'Length), Needed'Access) /= 0;
-         if not Ok then
-            Hostkit.Errors.Set_Errno_From_Last_Error;
-         elsif Equal_Sid (Owner, Token_Owner) = 0 then
-            Hostkit.Windows_Errors.Set_Errno_From (Error_Privilege_Not_Held);
-            Ok := False;
+         Owner_Is_User := Equal_Sid (Owner, User) /= 0;
+         if not Owner_Is_User then
+            Ok := Read_Token (Token_Owner_Class, Buffer'Address);
+            if Ok and then Equal_Sid (Owner, Token_Owner) = 0 then
+               Hostkit.Windows_Errors.Set_Errno_From (Error_Privilege_Not_Held);
+               Ok := False;
+            end if;
          end if;
-      end if;
-      if Token /= System.Null_Address then
-         Ignored_Int := Close_Handle (Token);
       end if;
       if Descriptor /= System.Null_Address then
          Ignored_Address := Local_Free (Descriptor);
@@ -173,9 +195,6 @@ package body Hostkit.Private_Paths is
       return Ok;
    exception
       when others =>
-         if Token /= System.Null_Address then
-            Ignored_Int := Close_Handle (Token);
-         end if;
          if Descriptor /= System.Null_Address then
             Ignored_Address := Local_Free (Descriptor);
          end if;
@@ -183,23 +202,54 @@ package body Hostkit.Private_Paths is
          return False;
    end Owned_By_Current_Token;
 
-   --  Make the entry open as Handle its owner's alone. On a volume that
-   --  keeps no access control there is nothing to restrict and no owner to
-   --  check: it is as private as that volume lets anything be, as a POSIX
+   --  Hand the entry open as Handle to User (a SID) as its owner. Handle
+   --  holds no WRITE_OWNER, so a second handle on the same entry asks for
+   --  it -- which the private DACL, full access for OWNER RIGHTS, already
+   --  grants the current owner. The errno of the call that failed.
+   function Give_To (Handle : System.Address; User : System.Address) return Boolean is
+      Writer : constant System.Address := Re_Open_File
+        (Handle, Write_Owner, File_Share_All, File_Flag_Backup_Semantics + File_Flag_Open_Reparse_Point);
+      Status : C_DWord;
+      Ignored : C_Int;
+   begin
+      if Writer = Invalid_Handle_Value then
+         return Refused;
+      end if;
+      Status := Set_Security_Info
+        (Writer, Se_File_Object, Owner_Security_Information,
+         User, System.Null_Address, System.Null_Address, System.Null_Address);
+      Ignored := Close_Handle (Writer);
+      Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
+      return Status = 0;
+   end Give_To;
+
+   --  Make the entry open as Handle its owner's alone, the owner being this
+   --  process's user: given Private_Sddl's DACL, and, when it was owned by
+   --  the token's default owner instead (an elevated process's
+   --  Administrators), handed to that user, so that
+   --  Hostkit.Metadata.Private_To_Current_User calls it private. On a volume
+   --  that keeps no access control there is nothing to restrict and no owner
+   --  to check: it is as private as that volume lets anything be, as a POSIX
    --  host's vfat mount gives every file the mode its mount options say.
    function Set_Private (Handle : System.Address) return Boolean is
       Text : aliased constant Wide_String := Wide_Text (Private_Sddl);
       Descriptor, Dacl : aliased System.Address := System.Null_Address;
       Present, Defaulted : aliased C_Int := 0;
+      User_Buffer : aliased Token_Buffer := [others => 0];
+      User : System.Address
+        with Import, Address => User_Buffer'Address;
+      Owner_Is_User : Boolean := False;
       Ok : Boolean;
       Ignored : System.Address;
    begin
       if not Keeps_Access_Control (Handle) then
          return True;
       end if;
-      --  Each refusal says why through errno: Owned_By_Current_Token's
-      --  its own, the others the call's that failed.
-      Ok := Owned_By_Current_Token (Handle);
+      --  Each refusal says why through errno: Read_Token's and
+      --  Owned_By_Current_Token's their own, the others the call's that
+      --  failed.
+      Ok := Read_Token (Token_User_Class, User_Buffer'Address)
+        and then Owned_By_Current_Token (Handle, User, Owner_Is_User);
       if Ok then
          Ok := Convert_Sddl
            (Text'Address, Sddl_Revision_1, Descriptor'Access,
@@ -230,6 +280,10 @@ package body Hostkit.Private_Paths is
             Hostkit.Windows_Errors.Set_Errno_From (Interfaces.Unsigned_32 (Status));
          end;
       end if;
+      --  After the DACL, which is what grants the owner WRITE_OWNER.
+      if Ok and then not Owner_Is_User then
+         Ok := Give_To (Handle, User);
+      end if;
       if Descriptor /= System.Null_Address then
          Ignored := Local_Free (Descriptor);
       end if;
@@ -243,20 +297,55 @@ package body Hostkit.Private_Paths is
          return False;
    end Set_Private;
 
-   --  A LocalAlloc'd security descriptor carrying Private_Sddl, for the
-   --  caller to free; null, with errno set, when the host will not build it.
+   --  A LocalAlloc'd security descriptor carrying Private_Sddl and, as its
+   --  owner, this process's user ("O:<its SID>"): without one the new entry
+   --  would be owned by the token's default owner, an elevated process's
+   --  Administrators. For the caller to free; null, with errno set, when
+   --  the host will not build it.
    function Private_Descriptor return System.Address is
-      Text : aliased constant Wide_String := Wide_Text (Private_Sddl);
+      User_Buffer : aliased Token_Buffer := [others => 0];
+      User : System.Address
+        with Import, Address => User_Buffer'Address;
+      Sid_Text : aliased System.Address := System.Null_Address;
       Descriptor : aliased System.Address := System.Null_Address;
+      Ignored : System.Address;
    begin
-      if Convert_Sddl
-        (Text'Address, Sddl_Revision_1, Descriptor'Access,
-         System.Null_Address) = 0
-      then
+      if not Read_Token (Token_User_Class, User_Buffer'Address) then
+         return System.Null_Address;
+      elsif Convert_Sid_To_String (User, Sid_Text'Access) = 0 then
          Hostkit.Errors.Set_Errno_From_Last_Error;
          return System.Null_Address;
       end if;
+      declare
+         --  A SID's text is at most 184 characters; the walk stops at its NUL.
+         type Wide_Characters is array (1 .. 256) of Wide_Character
+           with Convention => C;
+         Characters : constant Wide_Characters
+           with Import, Address => Sid_Text;
+         Last : Natural := 0;
+      begin
+         while Last < Characters'Last and then Characters (Last + 1) /= Wide_Character'Val (0) loop
+            Last := Last + 1;
+         end loop;
+         declare
+            Text : aliased constant Wide_String :=
+              "O:" & Wide_String (Characters (1 .. Last)) & Wide_Text (Private_Sddl);
+         begin
+            Ignored := Local_Free (Sid_Text);
+            if Convert_Sddl
+              (Text'Address, Sddl_Revision_1, Descriptor'Access,
+               System.Null_Address) = 0
+            then
+               Hostkit.Errors.Set_Errno_From_Last_Error;
+               return System.Null_Address;
+            end if;
+         end;
+      end;
       return Descriptor;
+   exception
+      when others =>
+         Hostkit.Windows_Errors.Set_Errno_From (Error_Invalid_Parameter);
+         return System.Null_Address;
    end Private_Descriptor;
 
    function Create_Directory (Path : String) return Create_Outcome is

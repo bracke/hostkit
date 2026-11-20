@@ -526,6 +526,17 @@ private package Hostkit.Win32 is
       return BOOL
      with Import, Convention => Stdcall, External_Name => "GetVolumeInformationByHandleW";
 
+   --  Whether the volume Object is on keeps access control lists: NTFS and
+   --  ReFS do (FILE_PERSISTENT_ACLS); FAT and exFAT -- a USB stick, a memory
+   --  card -- keep none, and every entry there is open to whoever can reach
+   --  the volume. When the volume will not say, it is taken to keep them.
+   --  Hostkit.Private_Paths and Hostkit.Metadata.Private_To_Current_User
+   --  share this one answer, so what the one makes private the other calls so.
+   --
+   --  @param Object A handle on an entry of the volume.
+   --  @return False only when the volume says it keeps no ACLs.
+   function Keeps_Access_Control (Object : HANDLE) return Boolean;
+
    --  GetDriveTypeW.
    --
    --  @param Root The root, NUL-terminated UTF-16 with a trailing backslash.
