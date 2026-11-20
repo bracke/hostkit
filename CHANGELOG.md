@@ -302,6 +302,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- **One token reader on Windows, one privacy rule on Linux and macOS.** The
+  process-token read (`Read_Token`, `Token_Buffer`, the TokenUser and
+  TokenOwner classes) and the user's SID text (`Current_User_Sid_Text`) live
+  once in `Hostkit.Win32`, where three drifted copies served the trash,
+  `Private_Paths` and `Private_To_Current_User`. The owner, mode and link rule
+  of `Private_To_Current_User` is written once in `src/platform/posix`
+  (`Hostkit.Metadata.Private_By_Mode`); macOS adds only its extended-ACL test.
+
 - **Windows `Replace_File` replaces a read-only target**, as POSIX rename
   does: the attribute is cleared once and the move tried again at once (put
   back if it still fails), instead of a second of retries that all fail.
@@ -381,6 +389,17 @@ recently enough to matter to somebody pinning it; the history before that is in
   giving up on the identity.
 
 ### Fixed
+
+- **Windows `Delete_Link` removes a read-only link.** A link with the
+  read-only attribute (`attrib +R /L`) was refused with ERROR_ACCESS_DENIED,
+  retried for about 60 ms and failed, where POSIX unlink takes it. The link's
+  own attribute is now cleared first and put back only when the removal fails
+  in the end, as `Delete_File` and `Delete_Empty_Directory` do.
+- **Windows stream opens no longer retry on a stale error.** `_wfopen` can
+  refuse without a Win32 call (EINVAL, EMFILE), which left GetLastError
+  holding an earlier call's code; a stale sharing violation made the open
+  retry for about 3.3 s. The last error is now cleared before each attempt
+  and read before errno, and only a fresh hold or refusal is retried.
 
 - **A directory read that fails part-way fails the listing on Linux and
   macOS.** `Directory_Listing.List` took readdir's NULL for the end of the

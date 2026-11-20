@@ -919,8 +919,9 @@ package body Hostkit.Fs is
    --  DeleteFileW on both platforms, so a directory symlink refused it and came back as
    --  NAME_ERROR "does not exist".
    --
-   --  GetFileAttributesW reports the link's own attributes rather than the target's, so
-   --  neither the test nor the removal follows the link -- the target is left alone.
+   --  GetFileAttributesW reports the link's own attributes rather than the target's, and
+   --  SetFileAttributesW sets the link's own, so neither the test, the read-only attribute
+   --  nor the removal follows the link -- the target is left alone.
    function Delete_Link (Path : String) return Boolean is
       function Remove_Directory (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "RemoveDirectoryW";
@@ -928,10 +929,13 @@ package body Hostkit.Fs is
       function Delete_File (Name : System.Address) return Interfaces.C.int
         with Import => True, Convention => Stdcall, External_Name => "DeleteFileW";
 
+      Read_Only  : constant C_DWord := 16#0001#;
       --  The UCRT's EINVAL: the entry is no link, as readlink says of one.
       E_Inval    : constant := 22;
       Wide_Path  : aliased Wide_String := Wide (Path);
       Attributes : constant C_DWord := Get_File_Attributes (Wide_Path'Address);
+      Cleared    : Boolean := False;
+      Ignored    : Interfaces.C.int;
    begin
       --  A link by its reparse tag, as Is_Link reads it: a OneDrive
       --  placeholder or a deduplicated file is a reparse point too, but an
@@ -945,10 +949,17 @@ package body Hostkit.Fs is
          return False;
       end if;
 
+      --  A read-only link (attrib +R /L) refuses both removals where POSIX
+      --  unlink does not look at the link's mode: the link's own attribute
+      --  goes first, and comes back only if the removal fails in the end.
+      if (Attributes and Read_Only) /= 0 then
+         Cleared := Set_File_Attributes (Wide_Path'Address, Attributes - Read_Only) /= 0;
+      end if;
       --  As Delete_File: someone holding the link a moment, or a delete
       --  still pending, refuses it; try again for those only
-      --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). errno keeps the
-      --  last refusal's reason.
+      --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). The reason goes
+      --  into errno first, before the attribute is put back and the last
+      --  error with it overwritten; errno keeps the last refusal's.
       for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
          if (if (Attributes and File_Attribute_Directory) /= 0
              then Remove_Directory (Wide_Path'Address) /= 0
@@ -965,6 +976,9 @@ package body Hostkit.Fs is
          end;
          delay Hostkit.Windows_Errors.Held_Delay (Attempt);
       end loop;
+      if Cleared then
+         Ignored := Set_File_Attributes (Wide_Path'Address, Attributes);
+      end if;
       return False;
    exception
       when others =>
@@ -1733,12 +1747,24 @@ package body Hostkit.Fs is
             --  only, as Delete_File, Replace_File and Durability.Sync_File do
             --  (Hostkit.Windows_Errors.Try_Again_After_Refusal). Error keeps
             --  the errno _wfopen gave the last refusal.
+            --
+            --  _wfopen can refuse without asking Windows at all (EINVAL for a
+            --  bad mode, EMFILE with no descriptor left), which would leave
+            --  the last error some earlier call's: it is cleared before each
+            --  attempt, so only a code this attempt set is read, and a 0 --
+            --  no Win32 refusal -- ends it. The code is read before errno,
+            --  whose reading must not overwrite it.
             for Attempt in 1 .. Hostkit.Windows_Errors.Held_Attempts loop
+               Set_Last_Error (0);
                Stream := Wide_Fopen (Wide_Path'Address, Wide_Mode'Address);
                exit when Stream /= Interfaces.C_Streams.NULL_Stream;
-               Error := GNAT.OS_Lib.Errno;
-               exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
-                 (Interfaces.Unsigned_32 (Get_Last_Error), Attempt, Hostkit.Windows_Errors.Held_Attempts);
+               declare
+                  Code : constant Interfaces.Unsigned_32 := Interfaces.Unsigned_32 (Get_Last_Error);
+               begin
+                  Error := GNAT.OS_Lib.Errno;
+                  exit when not Hostkit.Windows_Errors.Try_Again_After_Refusal
+                    (Code, Attempt, Hostkit.Windows_Errors.Held_Attempts);
+               end;
                delay Hostkit.Windows_Errors.Held_Delay (Attempt);
             end loop;
          end;

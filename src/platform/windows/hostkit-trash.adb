@@ -178,9 +178,6 @@ package body Hostkit.Trash is
       return Interfaces.C.long
      with Import, Convention => Stdcall, External_Name => "SHQueryRecycleBinW";
 
-   function Convert_Sid_To_String_Sid_W (Sid : System.Address; Text : access System.Address) return Interfaces.C.int
-     with Import, Convention => Stdcall, External_Name => "ConvertSidToStringSidW";
-
    procedure SH_Change_Notify
      (Event  : Interfaces.C.long;
       Flags  : Interfaces.C.unsigned;
@@ -188,7 +185,6 @@ package body Hostkit.Trash is
       Item_2 : System.Address)
      with Import, Convention => Stdcall, External_Name => "SHChangeNotify";
 
-   Token_User_Class : constant Interfaces.C.int := 1;
    Shcne_Update_Dir : constant Interfaces.C.long := 16#0000_1000#;
    Shcnf_Path_W     : constant Interfaces.C.unsigned := 16#0005#;
 
@@ -213,33 +209,8 @@ package body Hostkit.Trash is
    --  The current user's SID as text (S-1-5-21-...), which names their
    --  folder in each $Recycle.Bin; "" when the token cannot be read.
    function Read_User_Sid return String is
-      type Address_Array is array (1 .. 64) of System.Address
-        with Convention => C;
-
-      Token  : aliased System.Address := System.Null_Address;
-      --  TOKEN_USER, then the SID it points at; addresses, so it is aligned.
-      Room   : aliased Address_Array := [others => System.Null_Address];
-      Needed : aliased C_DWord := 0;
-      Text   : aliased System.Address := System.Null_Address;
-      Read   : Interfaces.C.int;
-      Ignored_Closed : Interfaces.C.int;
-      Ignored_Freed  : System.Address;
    begin
-      if Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) = 0 then
-         return "";
-      end if;
-      Read := Get_Token_Information (Token, Token_User_Class, Room'Address, Room'Size / 8, Needed'Access);
-      Ignored_Closed := Close_Handle (Token);
-      --  TOKEN_USER begins with SID_AND_ATTRIBUTES, whose first field is the SID.
-      if Read = 0 or else Convert_Sid_To_String_Sid_W (Room (1), Text'Access) = 0 then
-         return "";
-      end if;
-      declare
-         Result : constant String := From_Host (Text);
-      begin
-         Ignored_Freed := Local_Free (Text);
-         return Result;
-      end;
+      return UTF_8 (Current_User_Sid_Text);
    exception
       when others =>
          return "";

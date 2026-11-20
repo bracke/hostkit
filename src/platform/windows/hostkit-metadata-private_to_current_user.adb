@@ -1,31 +1,22 @@
 separate (Hostkit.Metadata)
 function Private_To_Current_User (Path : String) return Boolean is
-   --  TOKEN_INFORMATION_CLASS: TokenUser.
-   Token_User_Class : constant C_Int := 1;
    --  WELL_KNOWN_SID_TYPE: WinCreatorOwnerRightsSid, OWNER RIGHTS (S-1-3-4),
    --  the trustee of Hostkit.Private_Paths' one ACE, "D:P(A;OICI;FA;;;OW)".
    Win_Creator_Owner_Rights_Sid : constant C_Int := 71;
    --  Where an ACE's SID starts: past its header and its access mask.
    Ace_Sid_Offset : constant := 8;
 
-   --  TOKEN_USER, led by its SID's address, with the SID after it;
-   --  eight-byte words, so that address is aligned.
-   type Token_Buffer is array (0 .. 255) of Interfaces.Unsigned_64
-     with Convention => C;
+   --  TOKEN_USER, as Hostkit.Win32.Read_Token reads it.
    User_Buffer : aliased Token_Buffer := [others => 0];
-   User_Sid : System.Address
-     with Import, Address => User_Buffer'Address;
 
    Owner_Rights      : aliased Sid_Buffer := [others => Interfaces.C.nul];
    Owner_Rights_Size : aliased C_DWord := C_DWord (Sid_Buffer'Length);
    Name       : aliased Wide_String := Wide (Path);
    Handle     : System.Address := Invalid_Handle_Value;
-   Token      : aliased System.Address := System.Null_Address;
    Owner      : aliased System.Address := System.Null_Address;
    Dacl       : aliased System.Address := System.Null_Address;
    Descriptor : aliased System.Address := System.Null_Address;
    Info       : aliased By_Handle_File_Information;
-   Needed     : aliased C_DWord := 0;
    Result     : Boolean := False;
    Ignored_Int     : C_Int;
    Ignored_Address : System.Address;
@@ -35,7 +26,7 @@ function Private_To_Current_User (Path : String) return Boolean is
    --  any other administrator could have given a file to; it counts only
    --  where it is that user anyway.
    function Names_Self (Sid : System.Address) return Boolean is
-     (Equal_Sid (Sid, User_Sid) /= 0);
+     (Equal_Sid (Sid, Token_Sid (User_Buffer)) /= 0);
 
    --  Whether every access-allowed ACE of the DACL names this process's
    --  user or OWNER RIGHTS (the owner being that user), and every other
@@ -66,10 +57,6 @@ function Private_To_Current_User (Path : String) return Boolean is
    --  Let go of whatever was opened or handed out.
    procedure Release is
    begin
-      if Token /= System.Null_Address then
-         Ignored_Int := Close_Handle (Token);
-         Token := System.Null_Address;
-      end if;
       if Descriptor /= System.Null_Address then
          Ignored_Address := Local_Free (Descriptor);
          Descriptor := System.Null_Address;
@@ -103,9 +90,7 @@ begin
         Descriptor'Access) = Success
      and then Owner /= System.Null_Address
      and then Dacl /= System.Null_Address
-     and then Open_Process_Token (Get_Current_Process, Token_Query, Token'Access) /= 0
-     and then Get_Token_Information
-       (Token, Token_User_Class, User_Buffer'Address, C_DWord (Token_Buffer'Size / 8), Needed'Access) /= 0
+     and then Read_Token (Token_User_Class, User_Buffer)
      and then Create_Well_Known_Sid
        (Win_Creator_Owner_Rights_Sid, System.Null_Address, Owner_Rights (1)'Address, Owner_Rights_Size'Access) /= 0
      and then Names_Self (Owner)

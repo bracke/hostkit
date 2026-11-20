@@ -190,6 +190,13 @@ private package Hostkit.Win32 is
    function Get_Last_Error return DWORD
      with Import, Convention => Stdcall, External_Name => "GetLastError";
 
+   --  SetLastError: set the calling thread's last error code, so that a
+   --  call which may fail without setting one is read afresh.
+   --
+   --  @param Code The code to set, 0 to clear it.
+   procedure Set_Last_Error (Code : DWORD)
+     with Import, Convention => Stdcall, External_Name => "SetLastError";
+
    --  CreateFileW: open or create a file, directory or device.
    --
    --  @param Name The path, NUL-terminated UTF-16.
@@ -536,6 +543,42 @@ private package Hostkit.Win32 is
    --  @param Object A handle on an entry of the volume.
    --  @return False only when the volume says it keeps no ACLs.
    function Keeps_Access_Control (Object : HANDLE) return Boolean;
+
+   --  TOKEN_INFORMATION_CLASS: TokenUser, the process's user.
+   Token_User_Class  : constant Interfaces.C.int := 1;
+   --  TOKEN_INFORMATION_CLASS: TokenOwner, the owner the process gives what
+   --  it creates -- BUILTIN\Administrators for an elevated administrator.
+   Token_Owner_Class : constant Interfaces.C.int := 4;
+
+   --  Room for a TOKEN_USER or TOKEN_OWNER: led by its SID's address, with
+   --  the SID after it; eight-byte words, so that address is aligned. The
+   --  address points into the buffer itself, which is why Read_Token takes
+   --  it by reference.
+   type Token_Buffer is array (0 .. 255) of Interfaces.Unsigned_64
+     with Convention => C;
+
+   --  Read the process token's information of Class into Buffer. The token
+   --  is closed again whatever happens.
+   --
+   --  @param Class Token_User_Class or Token_Owner_Class.
+   --  @param Buffer Receives the TOKEN_USER or TOKEN_OWNER.
+   --  @return True when read; False, with errno set from the call that
+   --    failed, when the token will not say.
+   function Read_Token (Class : Interfaces.C.int; Buffer : aliased in out Token_Buffer) return Boolean;
+
+   --  The SID a TOKEN_USER or TOKEN_OWNER that Read_Token filled leads with.
+   --
+   --  @param Buffer What Read_Token filled.
+   --  @return The SID's address, inside Buffer.
+   function Token_Sid (Buffer : aliased Token_Buffer) return System.Address;
+
+   --  The process's user (TokenUser) as SID text, S-1-5-21-..., as
+   --  ConvertSidToStringSidW writes it; what it allocated is freed.
+   --
+   --  @return The text; "" with errno set -- Read_Token's, the conversion's,
+   --    or EINVAL for text the host handed back unusable -- when it cannot
+   --    be read.
+   function Current_User_Sid_Text return Wide_String;
 
    --  GetDriveTypeW.
    --

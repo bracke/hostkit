@@ -454,7 +454,12 @@ begin
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHCreateItemFromParsingName");
    Require_Binding ("src/platform/windows/hostkit-trash.adb", "SHChangeNotify");
    Require_Win32_Call ("src/platform/windows/hostkit-trash.adb", "GetVolumePathNameW", "Get_Volume_Path_Name");
-   Require_Binding ("src/platform/windows/hostkit-trash.adb", "ConvertSidToStringSidW");
+   --  The user's SID text names their folder in each bin; it is read once,
+   --  in Hostkit.Win32, which Private_Paths' owner text shares.
+   Require_Binding ("src/platform/windows/hostkit-win32.adb", "ConvertSidToStringSidW");
+   Require_Text
+     ("src/platform/windows/hostkit-trash.adb", "Current_User_Sid_Text",
+      "src/platform/windows/hostkit-trash.adb must read the SID through Hostkit.Win32.Current_User_Sid_Text");
    Require_Binding ("src/platform/windows/hostkit-shell_paths.adb", "GetShortPathNameW");
    Require_Binding ("src/platform/windows/hostkit-native.adb", "AssocQueryStringW");
    Require_Win32_Call ("src/platform/windows/hostkit-errors.adb", "GetLastError", "Get_Last_Error");
@@ -481,6 +486,28 @@ begin
    Require_Text
      ("src/platform/windows/hostkit-metadata-private_to_current_user.adb", "Keeps_Access_Control (",
       "src/platform/windows/hostkit-metadata-private_to_current_user.adb must ask Hostkit.Win32.Keeps_Access_Control");
+   --  The process token is read one way, Hostkit.Win32.Read_Token's, by
+   --  every body that asks who the current user is: three copies of it had
+   --  drifted apart in buffer, type and error reporting.
+   Require_Text
+     ("src/platform/windows/hostkit-private_paths.adb", "Read_Token (",
+      "src/platform/windows/hostkit-private_paths.adb must read the token through Hostkit.Win32.Read_Token");
+   Require_Text
+     ("src/platform/windows/hostkit-private_paths.adb", "Current_User_Sid_Text",
+      "src/platform/windows/hostkit-private_paths.adb must read the SID through Hostkit.Win32.Current_User_Sid_Text");
+   Require_Text
+     ("src/platform/windows/hostkit-metadata-private_to_current_user.adb", "Read_Token (",
+      "src/platform/windows/hostkit-metadata-private_to_current_user.adb must read the token through "
+      & "Hostkit.Win32.Read_Token");
+   --  Linux and macOS apply one owner, mode and link rule, written once in
+   --  src/platform/posix; macOS adds only its extended-ACL test.
+   Require_Text
+     ("src/platform/linux/hostkit-metadata-private_to_current_user.adb", "Private_By_Mode (",
+      "src/platform/linux/hostkit-metadata-private_to_current_user.adb must apply Hostkit.Metadata.Private_By_Mode");
+   Require_Text
+     ("src/platform/macos/hostkit-metadata-private_to_current_user.adb", "Private_By_Mode (",
+      "src/platform/macos/hostkit-metadata-private_to_current_user.adb must apply Hostkit.Metadata.Private_By_Mode");
+   Require_Binding ("src/platform/macos/hostkit-metadata-private_to_current_user.adb", "acl_get_link_np");
    Require_Binding ("src/platform/macos/hostkit-trash.adb", "objc_msgSend");
    Require_Text
      ("src/platform/macos/hostkit-trash.adb",
