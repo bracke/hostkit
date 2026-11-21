@@ -17,6 +17,13 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Mounts.Is_Network (Filesystem_Type, Mount_Point)`** and
+  **`Hostkit.Mounts.Filesystem_Root`**: whether a mount reaches across the
+  network by its type or a UNC mount point, and the path naming the whole
+  filesystem tree ("/" on Linux and macOS, none on Windows, where "/" is
+  drive-relative), so a consumer listing roots stops testing `Host.Current`
+  and UNC prefixes itself.
+
 - **`Hostkit.Filesystem_Rules.Is_Dos_Device_Name`**: whether DOS reserves a
   last path component for a device (CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM
   and LPT with 0 to 9 or a superscript one, two or three), as one pure rule a

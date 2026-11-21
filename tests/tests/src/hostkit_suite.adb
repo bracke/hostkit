@@ -990,7 +990,7 @@ package body Hostkit_Suite is
          "fs : DOS-ruled filesystems are recognised from the mount table");
       Register_Routine
         (T, Test_Host_Capabilities'Access,
-         "host : held leases, inherited access and volume trash folders are answered per host");
+         "host : held leases, inherited access, volume trash folders and the filesystem root are answered per host");
       Register_Routine
         (T, Test_Configured_Format_Locale'Access,
          "host : the desktop's configured date and number formats are read where the host keeps them");

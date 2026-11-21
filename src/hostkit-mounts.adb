@@ -36,7 +36,14 @@ package body Hostkit.Mounts is
         "9p" | "afpfs" | "cifs" | "davfs" | "fuse.gvfsd-fuse" | "fuse.sshfs" | "ncpfs" | "nfs" | "nfs4"
         | "smb3" | "sshfs");
 
+   function Is_Network (Filesystem_Type : String; Mount_Point : String) return Boolean is
+     (Is_Network (Filesystem_Type)
+      or else (Mount_Point'Length >= 2
+               and then Mount_Point (Mount_Point'First .. Mount_Point'First + 1) in "//" | "\\"));
+
    function Table return Mount_Vectors.Vector is separate;
+
+   function Filesystem_Root return String is separate;
 
    function Volume_Places return Volume_Place_List is separate;
 

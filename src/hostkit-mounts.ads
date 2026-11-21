@@ -64,6 +64,24 @@ package Hostkit.Mounts is
    --  @return True for a network filesystem.
    function Is_Network (Filesystem_Type : String) return Boolean;
 
+   --  Whether a mount reaches across the network: a network filesystem type
+   --  (Is_Network), or a mount point that is itself a UNC path (//server or
+   --  \\server), which names a share whatever its type says.
+   --
+   --  @param Filesystem_Type A mount's type, as Table lists it.
+   --  @param Mount_Point The mount's mount point.
+   --  @return True for a network mount.
+   function Is_Network (Filesystem_Type : String; Mount_Point : String) return Boolean;
+
+   --  The path that names the root of the whole filesystem tree: "/" on
+   --  Linux and macOS. "" where there is none: on Windows "/" is
+   --  drive-relative, the root of whatever drive the process sits on, and
+   --  the drives (Volume_Places) are the roots; on a host this crate does
+   --  not know, it cannot tell.
+   --
+   --  @return The filesystem root, or "".
+   function Filesystem_Root return String;
+
    --  Where this host puts volumes: a drive's root, a folder whose every
    --  entry is a mounted volume, or one whose entries are users' such folders.
    type Volume_Place_Kind is (Drive_Root, Volumes_Folder, User_Volumes_Folder);

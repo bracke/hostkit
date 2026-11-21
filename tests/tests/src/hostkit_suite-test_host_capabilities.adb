@@ -11,6 +11,14 @@ begin
            "only Windows rewrites change times when access is inherited");
    Assert (Hostkit.Trash.Has_Volume_Trash_Folders = Posix,
            "Linux and macOS let a program keep per-volume trash folders; Windows does not");
+   Assert (Hostkit.Mounts.Filesystem_Root = (if Posix then "/" else ""),
+           "the filesystem root is / on Linux and macOS, none on Windows");
+   Assert (Hostkit.Mounts.Is_Network ("ext4", "//server/share")
+             and then Hostkit.Mounts.Is_Network ("ntfs", "\\server\share")
+             and then Hostkit.Mounts.Is_Network ("nfs", "/mnt/data")
+             and then not Hostkit.Mounts.Is_Network ("ext4", "/mnt/data")
+             and then not Hostkit.Mounts.Is_Network ("ext4", "/"),
+           "a mount is a network one by its type or by a UNC mount point");
 
    --  A held lease's file goes when the host says it may.
    if Hostkit.Lease_Files.Held_File_Removable then
