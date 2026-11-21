@@ -252,4 +252,6 @@ package body Hostkit.Metadata is
       Found : out Boolean)
       return Natural renames Natural_Ids.Group_Id_For_Name;
 
+   function Inherit_Rewrites_Change_Times return Boolean is (False);
+
 end Hostkit.Metadata;

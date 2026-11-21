@@ -17,6 +17,14 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Lease_Files.Held_File_Removable`**, **`Hostkit.Metadata.Inherit_Rewrites_Change_Times`**
+  and **`Hostkit.Trash.Has_Volume_Trash_Folders`**: what a held lease, inherited
+  access and per-volume trash folders do on this host, answered by the body the
+  build chose, so a consumer stops checking `Host.Current` for them. Windows
+  refuses to remove a held file, rewrites change times when access is
+  inherited, and keeps its volumes' Recycle Bin to the shell; Linux and macOS do
+  the opposite; a host without a body refuses all three.
+
 - **`Hostkit.Host.Configured_Format_Locale`**: the locale the desktop has
   been configured to format dates (`Time_Formats`) or numbers
   (`Number_Formats`) in. Linux reads KDE Plasma's `~/.config/plasma-localerc`

@@ -92,6 +92,23 @@ package Hostkit.Trash is
    --  @return True when the host's trash would hold Path.
    function Can_Hold (Path : String) return Boolean;
 
+   --  May a program keep its own trash folder at the top of each volume?
+   --
+   --  Linux and macOS let it: the freedesktop.org layout puts a
+   --  $topdir/.Trash-$uid on each mounted volume, and the Finder keeps a
+   --  .Trashes/$uid there that a program may fill the same way, so an item
+   --  is trashed by a rename on its own volume instead of a copy home. On
+   --  Windows each volume's $Recycle.Bin belongs to the shell, and a program
+   --  goes through Move_To_Recycle_Bin. A host Hostkit has no body for
+   --  answers False.
+   --
+   --  This says the host allows it, not that a given volume has one: the
+   --  caller still checks the folder it finds (owner, sticky bit) as the
+   --  specification asks.
+   --
+   --  @return True where per-volume trash folders are the program's to keep.
+   function Has_Volume_Trash_Folders return Boolean;
+
    --  What became of a move into the Recycle Bin.
    type Recycle_Outcome is
      (

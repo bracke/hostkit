@@ -66,4 +66,7 @@ package body Hostkit.Lease_Files is
    begin
       return False;
    end Path_Matches;
+
+   --  No lease is ever held here, so nothing can be said: refused.
+   function Held_File_Removable return Boolean is (False);
 end Hostkit.Lease_Files;

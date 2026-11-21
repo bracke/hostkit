@@ -487,6 +487,10 @@ package body Hostkit_Suite is
 
    procedure Test_Filesystem_Rules (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
+   --  What each host answers about held leases, inherited access and its
+   --  per-volume trash folders.
+   procedure Test_Host_Capabilities (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
+
    procedure Test_Configured_Format_Locale (T : in out AUnit.Test_Cases.Test_Case'Class) is separate;
 
    --  A desktop entry's values read as the specification has them: string
@@ -984,6 +988,9 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_Filesystem_Rules'Access,
          "fs : DOS-ruled filesystems are recognised from the mount table");
+      Register_Routine
+        (T, Test_Host_Capabilities'Access,
+         "host : held leases, inherited access and volume trash folders are answered per host");
       Register_Routine
         (T, Test_Configured_Format_Locale'Access,
          "host : the desktop's configured date and number formats are read where the host keeps them");

@@ -75,6 +75,20 @@ package Hostkit.Lease_Files is
    function Identity (Item : Lease) return Lease_Identity;
    function Path_Matches (Item : Lease; Path : String) return Boolean;
 
+   --  Can a file be removed -- or the folder that holds it -- while this
+   --  process holds a lease on it?
+   --
+   --  POSIX unlinks a file whatever is open on it, so a caller may keep its
+   --  lease until the file is gone and no other claimer can slip in between.
+   --  Windows refuses to delete a file with an open handle that does not
+   --  share deletion -- which a lease's does not -- so there the lease has
+   --  to be released first, and the caller must accept the gap.
+   --
+   --  A host Hostkit has no body for answers False.
+   --
+   --  @return True where a held lease file can be removed.
+   function Held_File_Removable return Boolean;
+
 private
    use type Interfaces.Integer_64;
    type Lease is limited record

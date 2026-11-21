@@ -370,6 +370,16 @@ package Hostkit.Metadata is
    --  @return True when it was, or there was nothing to do.
    function Inherit_From_Parent (Path : String) return Boolean;
 
+   --  Does Inherit_From_Parent write the change time of what it reaches?
+   --
+   --  On Windows it rewrites each entry's ACEs, and the change time records
+   --  that, so a caller that keeps a revision read from change times (a
+   --  folder's, say) must read it again afterwards. On POSIX hosts
+   --  Inherit_From_Parent does nothing, and nothing changes.
+   --
+   --  @return True where inheriting changes the change times it reaches.
+   function Inherit_Rewrites_Change_Times return Boolean;
+
    --  Set Path's access and modification timestamps independently.
    --
    --  @param Path Path whose timestamps are changed.

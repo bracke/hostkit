@@ -96,4 +96,6 @@ package body Hostkit.Trash is
       return False;
    end Purge;
 
+   function Has_Volume_Trash_Folders return Boolean is (False);
+
 end Hostkit.Trash;

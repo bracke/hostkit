@@ -487,4 +487,6 @@ package body Hostkit.Lease_Files is
          end if;
          return False;
    end Path_Matches;
+
+   function Held_File_Removable return Boolean is (True);
 end Hostkit.Lease_Files;
