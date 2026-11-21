@@ -21,35 +21,11 @@ package body Hostkit.Process is
    use type GNAT.OS_Lib.Argument_List_Access;
    use type GNAT.OS_Lib.Process_Id;
 
-   --  Collecting finished children is housekeeping, so it happens off the caller's
-   --  thread rather than in the middle of an open.
-   --
-   --  It never waits for a child. A task that blocked on one would keep the
-   --  application from exiting -- the environment task waits for library-level tasks
-   --  to finish -- so quitting while a launched editor is still open would hang on
-   --  quit, which is the bug this whole design exists to avoid. It collects only
-   --  children that have *already* finished, which returns at once -- and only the
-   --  ones Launch and Open_Native started, so a child that Hostkit.Spawn or
-   --  Run_Captured is waiting for keeps its exit status.
-   --
-   --  The terminate alternative is what makes that a guarantee: when no one can call
-   --  Note_Launch again, the task ends and the program is free to exit.
-   task Reaper is
-      entry Note_Launch;
-   end Reaper;
-
-   task body Reaper is
-   begin
-      loop
-         select
-            accept Note_Launch;
-         or
-            terminate;
-         end select;
-
-         Hostkit.Native.Reap_Finished_Children;
-      end loop;
-   end Reaper;
+   --  Reaping is explicitly nonblocking: it calls waitpid with WNOHANG only
+   --  for detached children recorded by Note_Child.  Do it directly after a
+   --  launch.  A library-level helper task performed the same single check,
+   --  but its unconditional elaboration added a task and an exit-time wait to
+   --  every process which merely imported Hostkit.Process.
 
    function To_Argument_List
      (Arguments : String_Vectors.Vector)
@@ -100,10 +76,10 @@ package body Hostkit.Process is
          return False;
       end if;
 
-      --  Noted before the reaper is woken, so it collects this one -- and only the
-      --  ones noted this way, never a child Hostkit.Spawn or Run_Captured waits for.
+      --  Record it before the nonblocking reap. Only children noted this way
+      --  are considered, never one Hostkit.Spawn or Run_Captured waits for.
       Hostkit.Native.Note_Child (GNAT.OS_Lib.Pid_To_Integer (Started));
-      Reaper.Note_Launch;
+      Hostkit.Native.Reap_Finished_Children;
       return True;
    exception
       when others =>
@@ -147,7 +123,7 @@ package body Hostkit.Process is
       --  handle (a process handle on Windows) is let go of now.
       Hostkit.Native.Note_Child (Hostkit.Spawn.Process_Id (Item));
       Hostkit.Spawn.Release (Item);
-      Reaper.Note_Launch;
+      Hostkit.Native.Reap_Finished_Children;
       return True;
    exception
       when others =>

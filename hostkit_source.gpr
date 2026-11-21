@@ -1,0 +1,53 @@
+with "config/hostkit_config.gpr";
+
+project Hostkit_Source is
+
+   --  Source-level view for small native tools.  Unlike the complete static
+   --  library, this lets GPRbuild bind only the Hostkit units in the caller's
+   --  semantic closure, so unrelated package elaboration cannot start
+   --  background tasks in a short-lived command.
+   case Hostkit_Config.Alire_Host_OS is
+      when "windows" =>
+         for Source_Dirs use ("src", "config", "src/platform/windows");
+      when "macos" =>
+         case Hostkit_Config.Alire_Host_Arch is
+            when "aarch64" =>
+               for Source_Dirs use
+                 ("src", "config", "src/platform/posix", "src/platform/macos", "src/platform/macos/arm64");
+            when others =>
+               for Source_Dirs use
+                 ("src", "config", "src/platform/posix", "src/platform/macos", "src/platform/macos/x86_64");
+         end case;
+      when "linux" =>
+         for Source_Dirs use
+           ("src", "config", "src/platform/posix", "src/platform/linux");
+      when others =>
+         for Source_Dirs use
+           ("src", "config", "src/platform/unsupported");
+   end case;
+
+   for Object_Dir use "obj/source";
+   for Create_Missing_Dirs use "True";
+   for Languages use ("Ada");
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        External_As_List ("ADAFLAGS", " ") &
+        ("-O3", "-gnatn", "-gnat2022", "-gnatyM120", "-gnatX", "-gnatwU",
+         "-gnatW8", "-ffunction-sections", "-fdata-sections");
+   end Compiler;
+
+   package Linker is
+      case Hostkit_Config.Alire_Host_OS is
+         when "windows" =>
+            for Linker_Options use
+              ("-lshell32", "-lntdll", "-lwinmm", "-lole32", "-ladvapi32", "-lshlwapi");
+         when "macos" =>
+            for Linker_Options use
+              ("-framework", "Foundation", "-framework", "CoreFoundation", "-lobjc");
+         when others =>
+            null;
+      end case;
+   end Linker;
+
+end Hostkit_Source;

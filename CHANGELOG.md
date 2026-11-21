@@ -302,6 +302,12 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- **Detached-child housekeeping no longer creates a library-level task.**
+  `Hostkit.Process` records only children it launched and performs the same
+  nonblocking reap directly after launch. Merely importing process helpers no
+  longer creates a task or adds GNAT's fixed task-finalization delay. The new
+  `hostkit_source.gpr` lets small tools bind only their actual Hostkit closure.
+
 - **One spawn and one pseudo-terminal body for Linux and macOS.** The two
   copies of each differed only in ABI numbers (WCONTINUED, SIG_SETMASK, ELOOP,
   ENAMETOOLONG, TIOCSCTTY, O_NOCTTY), how a resumed child's wait status is

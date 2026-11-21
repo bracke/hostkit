@@ -11,11 +11,9 @@ with Hostkit.Metadata;
 --  status it reported was the wrapper shell's: the shell exited zero having
 --  successfully backgrounded a program that then went on to fail.
 --
---  And nothing here may *wait* on a launched program in a task. An Ada environment
---  task waits for library-level tasks to finish, so a task parked on a child would
---  stop the application from exiting: quit the file manager while the editor you
---  opened is still running, and it would hang on quit. The reaper below collects only
---  children that have *already* finished, and can never hold up exit.
+--  And nothing here waits on a launched program. Detached-child housekeeping
+--  uses only nonblocking host calls, so quitting while the editor is still open
+--  cannot hold up application exit.
 package Hostkit.Process is
 
    --  Start Program with these arguments and return at once.
