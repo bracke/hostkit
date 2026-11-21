@@ -9,6 +9,7 @@ with Interfaces.C;
 with System;
 
 with Hostkit.Posix;
+with Hostkit.Posix.Accounts;
 
 package body Hostkit.Native is
    use Ada.Strings.Unbounded;
@@ -558,23 +559,6 @@ package body Hostkit.Native is
    is
       type C_Group_Id_List is array (Positive range <>) of Interfaces.C.unsigned;
 
-      type Passwd is record
-         Pw_Name   : System.Address;
-         Pw_Passwd : System.Address;
-         Pw_Uid    : Interfaces.C.unsigned;
-         Pw_Gid    : Interfaces.C.unsigned;
-         Pw_Change : Interfaces.C.long;
-         Pw_Class  : System.Address;
-         Pw_Gecos  : System.Address;
-         Pw_Dir    : System.Address;
-         Pw_Shell  : System.Address;
-         Pw_Expire : Interfaces.C.long;
-      end record
-        with Convention => C;
-
-      function Getpwnam (Name : Interfaces.C.char_array) return access Passwd
-        with Import => True, Convention => C, External_Name => "getpwnam";
-
       function Getgrouplist
         (User   : Interfaces.C.char_array;
          Group  : Interfaces.C.unsigned;
@@ -585,7 +569,9 @@ package body Hostkit.Native is
 
       C_Name        : constant Interfaces.C.char_array :=
         Interfaces.C.To_C (User_Name);
-      Passwd_Entry  : constant access Passwd := Getpwnam (C_Name);
+      --  getpwnam_r through Hostkit.Posix.Accounts: getpwnam's static buffer
+      --  is overwritten by a lookup on any other task.
+      User          : constant Hostkit.Posix.Accounts.User_Entry := Hostkit.Posix.Accounts.User_By_Name (User_Name);
       Native_Groups : aliased C_Group_Id_List (1 .. Groups'Length) := [others => 0];
       Count         : aliased Interfaces.C.int := Interfaces.C.int (Groups'Length);
       Found         : Natural := 0;
@@ -608,13 +594,13 @@ package body Hostkit.Native is
       end loop;
       Last := 0;
 
-      if User_Name = "" or else Passwd_Entry = null then
+      if User_Name = "" or else not User.Found then
          return False;
       end if;
 
-      Append_Group (Natural (Passwd_Entry.Pw_Gid));
+      Append_Group (Natural (User.Group_Id));
       if Getgrouplist
-        (C_Name, Passwd_Entry.Pw_Gid, Native_Groups'Address, Count'Access) < 0
+        (C_Name, User.Group_Id, Native_Groups'Address, Count'Access) < 0
       then
          Last := Found;
          return Found > 0;

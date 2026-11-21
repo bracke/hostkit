@@ -60,11 +60,21 @@ package body Hostkit.Native is
    end record
      with Convention => C;
 
+   --  STARTUPINFOEXW: the ordinary record with the attribute list after it
+   --  that names the handles a captured run's child inherits.
+   type Extended_Startup_Info is record
+      Startup        : Startup_Info;
+      Attribute_List : System.Address := System.Null_Address;
+   end record
+     with Convention => C;
+
    --  These layouts are a contract with the OS, not a description of our own record,
    --  so pin them: a field silently mis-sized here is a corrupt call rather than a
-   --  compile error. 104 and 24 are the x86-64 layouts.
+   --  compile error. 104, 112 and 24 are the x86-64 layouts.
    pragma Compile_Time_Error
      (Startup_Info'Size /= 104 * 8, "STARTUPINFOW layout does not match the Win32 one");
+   pragma Compile_Time_Error
+     (Extended_Startup_Info'Size /= 112 * 8, "STARTUPINFOEXW layout does not match the Win32 one");
    pragma Compile_Time_Error
      (Process_Information'Size /= 24 * 8, "PROCESS_INFORMATION layout does not match the Win32 one");
 
@@ -78,6 +88,22 @@ package body Hostkit.Native is
       Environment        : System.Address;
       Current_Directory  : System.Address;
       Startup            : access Startup_Info;
+      Information        : access Process_Information)
+      return Interfaces.C.int
+     with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
+
+   --  The same call, taking the extended startup record: a captured run's
+   --  child is started with an attribute list naming what it inherits.
+   function Create_Process_Extended
+     (Application_Name   : System.Address;
+      Command_Line       : System.Address;
+      Process_Attributes : System.Address;
+      Thread_Attributes  : System.Address;
+      Inherit_Handles    : Interfaces.C.int;
+      Creation_Flags     : C_DWord;
+      Environment        : System.Address;
+      Current_Directory  : System.Address;
+      Startup            : access Extended_Startup_Info;
       Information        : access Process_Information)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
@@ -317,7 +343,10 @@ package body Hostkit.Native is
    --
    --  Windows has no fork: CreateProcessW takes the redirections up front, as handles in
    --  STARTUPINFO. They must be inheritable, and bInheritHandles must be true, or the
-   --  child gets none of them and its output goes nowhere.
+   --  child gets none of them and its output goes nowhere -- and so that this child
+   --  inherits only those, and not the capture files and pipe ends another task is
+   --  handing its own child at the same moment, they are named in the attribute list
+   --  (Hostkit.Win32.Child_Attributes). Each is made inheritable only just before.
    --
    --  The wait is in slices rather than one INFINITE block, so that a cancellation is
    --  noticed while it is still worth noticing. A program that will not stop is stopped:
@@ -354,8 +383,9 @@ package body Hostkit.Native is
             return Invalid_Handle_Value;
          end if;
 
+         --  Not inheritable yet: made so just before the child is started.
          Security.Length := C_DWord (Security_Attributes'Size / 8);
-         Security.Inheritable := 1;
+         Security.Inheritable := 0;
 
          return Create_File
                   (Name       => Wide_Path'Address,
@@ -379,8 +409,9 @@ package body Hostkit.Native is
             return Invalid_Handle_Value;
          end if;
 
+         --  Not inheritable yet: made so just before the child is started.
          Security.Length := C_DWord (Security_Attributes'Size / 8);
-         Security.Inheritable := 1;
+         Security.Inheritable := 0;
 
          return Create_File
                   (Name       => Wide_Path'Address,
@@ -414,6 +445,10 @@ package body Hostkit.Native is
 
       Startup     : aliased Startup_Info;
       Information : aliased Process_Information;
+      --  What the child inherits; freed when Run_Captured returns, however.
+      Attributes  : Child_Attributes;
+      Prepared    : Boolean;
+      Extended    : aliased Extended_Startup_Info;
       Exit_Code   : aliased C_DWord := 0;
       Started_At  : constant Ada.Calendar.Time := Ada.Calendar.Clock;
       Killed      : Boolean := False;
@@ -501,19 +536,39 @@ package body Hostkit.Native is
             else Get_Std_Handle (Std_Error_Handle));
       end if;
 
-      if Create_Process
+      --  The child's own handles, made inheritable now and named in its
+      --  attribute list; without a redirection, this process's standard ones,
+      --  as an inheriting launch always gave it.
+      for Own of Handle_List'[In_Handle, Out_Handle, Err_Handle] loop
+         if Own /= Invalid_Handle_Value then
+            Ignored := Set_Handle_Information (Own, Handle_Flag_Inherit, Handle_Flag_Inherit);
+         end if;
+      end loop;
+
+      Prepared := Prepare
+        (Attributes,
+         (if (Startup.Flags and Start_Use_Handles) /= 0
+          then [Startup.Std_Input, Startup.Std_Output, Startup.Std_Error]
+          else Own_Standard_Handles));
+      Extended.Startup := Startup;
+      Extended.Startup.Cb := C_DWord (Extended_Startup_Info'Size / 8);
+      Extended.Attribute_List := Attribute_List (Attributes);
+
+      if not Prepared
+        or else Create_Process_Extended
            (Application_Name   => System.Null_Address,
             Command_Line       => Wide_Command'Address,
             Process_Attributes => System.Null_Address,
             Thread_Attributes  => System.Null_Address,
-            --  The capture handles are inheritable and this is what lets the child have
-            --  them. Without it its output goes nowhere and the files stay empty.
-            Inherit_Handles    => 1,
-            Creation_Flags     => (if Job /= System.Null_Address then Create_Suspended else 0),
+            --  TRUE only when the list names a handle: an empty handle list is
+            --  refused, and TRUE without one would hand over everything.
+            Inherit_Handles    => Inherit_Handles (Attributes),
+            Creation_Flags     =>
+              (if Job /= System.Null_Address then Create_Suspended else 0) + Extended_Startup_Info_Present,
             Environment        => System.Null_Address,
             Current_Directory  =>
               (if Working_Directory = "" then System.Null_Address else Wide_Dir'Address),
-            Startup            => Startup'Access,
+            Startup            => Extended'Access,
             Information        => Information'Access) = 0
       then
          Close_Captures;

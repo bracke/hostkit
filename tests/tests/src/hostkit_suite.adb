@@ -700,6 +700,12 @@ package body Hostkit_Suite is
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
+   --  A create never takes a name that is already there, and of many at once
+   --  exactly one wins; none leaves its temporary behind.
+   procedure Test_A_Taken_Lease_Name_Is_Refused
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
    procedure Test_Same_File_Sees_Through_A_Second_Name
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
@@ -713,6 +719,18 @@ package body Hostkit_Suite is
    is separate;
 
    procedure Test_A_Name_Round_Trips_Through_Its_Id
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  Account lookups made on several tasks at once each get their own
+   --  answer: the reentrant lookups, not the C library's shared buffer.
+   procedure Test_Account_Lookups_Agree_Across_Tasks
+     (T : in out AUnit.Test_Cases.Test_Case'Class)
+   is separate;
+
+   --  A volume that answers UINT64_MAX for what it does not count reports
+   --  the largest count rather than overflowing.
+   procedure Test_A_Volume_Count_Saturates
      (T : in out AUnit.Test_Cases.Test_Case'Class)
    is separate;
 
@@ -1110,6 +1128,9 @@ package body Hostkit_Suite is
         (T, Test_Lease_File_Pins_Locks_And_Transfers_Bytes'Access,
          "lease files : secure held identities combine locking and durable bytes");
       Register_Routine
+        (T, Test_A_Taken_Lease_Name_Is_Refused'Access,
+         "lease files : a taken name is refused, and of racing creates one wins");
+      Register_Routine
         (T, Test_Same_File_Sees_Through_A_Second_Name'Access,
          "metadata : two names for one file are recognised as the same file");
       Register_Routine
@@ -1121,6 +1142,12 @@ package body Hostkit_Suite is
       Register_Routine
         (T, Test_A_Name_Round_Trips_Through_Its_Id'Access,
          "metadata : an owner name round-trips through its numeric id");
+      Register_Routine
+        (T, Test_Account_Lookups_Agree_Across_Tasks'Access,
+         "metadata : account lookups on several tasks at once agree");
+      Register_Routine
+        (T, Test_A_Volume_Count_Saturates'Access,
+         "metadata : a volume's uncounted counts saturate");
       Register_Routine
         (T, Test_Linux_Open_Flags_Follow_The_Machine'Access,
          "linux abi : O_NOFOLLOW and O_DIRECTORY take the machine's own values");

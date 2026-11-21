@@ -1,3 +1,4 @@
+with Ada.Finalization;
 with Interfaces.C;
 with System;
 with System.Storage_Elements;
@@ -586,5 +587,98 @@ private package Hostkit.Win32 is
    --  @return The DRIVE_ kind.
    function Get_Drive_Type (Root : System.Address) return Interfaces.C.unsigned
      with Import, Convention => Stdcall, External_Name => "GetDriveTypeW";
+
+   --  Handles, in the order a caller gives them.
+   type Handle_List is array (Positive range <>) of HANDLE;
+
+   --  GetHandleInformation.
+   --
+   --  @param Object The handle.
+   --  @param Flags Receives its HANDLE_FLAG_ bits.
+   --  @return Nonzero on success.
+   function Get_Handle_Information (Object : HANDLE; Flags : access DWORD) return BOOL
+     with Import, Convention => Stdcall, External_Name => "GetHandleInformation";
+
+   --  SetHandleInformation.
+   --
+   --  @param Object The handle.
+   --  @param Mask The HANDLE_FLAG_ bits to change.
+   --  @param Flags Their new values.
+   --  @return Nonzero on success.
+   function Set_Handle_Information (Object : HANDLE; Mask : DWORD; Flags : DWORD) return BOOL
+     with Import, Convention => Stdcall, External_Name => "SetHandleInformation";
+
+   --  HANDLE_FLAG_INHERIT.
+   Handle_Flag_Inherit : constant DWORD := 1;
+
+   --  EXTENDED_STARTUPINFO_PRESENT: the startup record is a STARTUPINFOEXW.
+   Extended_Startup_Info_Present : constant DWORD := 16#0008_0000#;
+
+   --  This process's own standard input, output and error handles, as
+   --  GetStdHandle answers them (null or Invalid_Handle_Value where there is
+   --  none).
+   --
+   --  @return The three handles.
+   function Own_Standard_Handles return Handle_List;
+
+   --  What a child is to be given through a STARTUPINFOEXW attribute list:
+   --  exactly the handles it is to inherit (PROC_THREAD_ATTRIBUTE_HANDLE_LIST)
+   --  and, optionally, a pseudo-console.
+   --
+   --  With bInheritHandles TRUE and no list, CreateProcessW hands a child
+   --  every inheritable handle this process has -- including the pipe ends
+   --  and capture files another task is just then handing its own child.
+   --  That child keeps them open: the other child's reader never sees end of
+   --  file, and the other capture file stays locked until it exits. A list
+   --  makes the inheritance exactly the child's own handles.
+   --
+   --  The list is freed when the object goes, on whatever path that is.
+   type Child_Attributes is limited private;
+
+   --  Build the attribute list.
+   --
+   --  @param Item The list to fill; whatever it held before is freed first.
+   --  @param Inherited The handles the child is to inherit. Null,
+   --  Invalid_Handle_Value, a duplicate and a handle not marked inheritable
+   --  are left out (a handle list may name only inheritable handles, or
+   --  CreateProcessW fails).
+   --  @param Pseudo_Console A pseudo-console to attach the child to, or null.
+   --  @return True when the list is ready.
+   function Prepare
+     (Item           : in out Child_Attributes;
+      Inherited      : Handle_List;
+      Pseudo_Console : HANDLE := System.Null_Address) return Boolean;
+
+   --  The list, for STARTUPINFOEXW.lpAttributeList: null before Prepare.
+   --
+   --  @param Item The prepared list.
+   --  @return Its address.
+   function Attribute_List (Item : Child_Attributes) return System.Address;
+
+   --  What to pass as CreateProcessW's bInheritHandles: TRUE only when the
+   --  list names a handle. An empty handle list is invalid, and TRUE with no
+   --  list is what hands the child everything.
+   --
+   --  @param Item The prepared list.
+   --  @return 1 or 0.
+   function Inherit_Handles (Item : Child_Attributes) return BOOL;
+
+private
+
+   type Room_Array is array (Positive range <>) of System.Address;
+   type Room_Access is access Room_Array;
+
+   --  The handle list attribute points at Handles rather than copying it, so
+   --  Handles lives exactly as long as the list.
+   type Child_Handles is array (1 .. 3) of HANDLE with Convention => C;
+
+   type Child_Attributes is new Ada.Finalization.Limited_Controlled with record
+      Room    : Room_Access;
+      Ready   : Boolean := False;
+      Handles : aliased Child_Handles := [others => System.Null_Address];
+      Count   : Natural := 0;
+   end record;
+
+   overriding procedure Finalize (Item : in out Child_Attributes);
 
 end Hostkit.Win32;

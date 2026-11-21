@@ -1,3 +1,5 @@
+with Ada.Strings;
+with Ada.Strings.Fixed;
 with Interfaces.C;
 with Interfaces.C.Strings;
 with System;
@@ -12,7 +14,6 @@ package body Hostkit.Lease_Files is
    use type Interfaces.C.unsigned_long;
    use type Interfaces.C.unsigned_short;
    use type Interfaces.C.Strings.chars_ptr;
-   use type Interfaces.Unsigned_64;
 
    subtype C_Int is Interfaces.C.int;
    subtype C_U16 is Interfaces.C.unsigned_short;
@@ -81,6 +82,87 @@ package body Hostkit.Lease_Files is
      with Import, Convention => C, External_Name => "geteuid";
    function Errno return C_Int renames Hostkit.Posix.Errno;
 
+   function C_Link (From, To : Interfaces.C.Strings.chars_ptr) return C_Int
+     with Import, Convention => C, External_Name => "link";
+   function C_Unlink (Path : Interfaces.C.Strings.chars_ptr) return C_Int
+     with Import, Convention => C, External_Name => "unlink";
+   function C_Getpid return C_Int
+     with Import, Convention => C, External_Name => "getpid";
+
+   --  renamex_np with RENAME_EXCL.
+   function C_Renamex
+     (Old_Path, New_Path : Interfaces.C.Strings.chars_ptr; Flags : C_U32) return C_Int
+     with Import, Convention => C, External_Name => "renamex_np";
+   function Rename_No_Replace (From, To : Interfaces.C.Strings.chars_ptr) return C_Int is
+     (C_Renamex (From, To, 4));
+   --  EINVAL, ENOTSUP and ENOSYS: the filesystem has no such rename.
+   function Lacks_No_Replace_Rename (Code : C_Int) return Boolean is (Code in 22 | 45 | 78);
+
+   --  Numbers the temporaries this process makes, so that two tasks creating
+   --  leases in one folder at once never pick the same name.
+   protected Temporaries is
+      procedure Next (Number : out Natural);
+   private
+      Last : Natural := 0;
+   end Temporaries;
+
+   protected body Temporaries is
+      procedure Next (Number : out Natural) is
+      begin
+         Last := (if Last = Natural'Last then 0 else Last + 1);
+         Number := Last;
+      end Next;
+   end Temporaries;
+
+   --  A name beside Path, in the same folder, that is this process's own: a
+   --  lease is made under it and only takes Path's name once it is locked.
+   function Temporary_Name (Path : String) return String is
+      Slash  : Natural := 0;
+      Number : Natural;
+   begin
+      for Index in reverse Path'Range loop
+         if Path (Index) = '/' then
+            Slash := Index;
+            exit;
+         end if;
+      end loop;
+      Temporaries.Next (Number);
+      return Path (Path'First .. Slash) & ".hostkit-lease-"
+        & Ada.Strings.Fixed.Trim (C_Int'Image (C_Getpid), Ada.Strings.Both) & "-"
+        & Ada.Strings.Fixed.Trim (Natural'Image (Number), Ada.Strings.Both);
+   end Temporary_Name;
+
+   --  Give the locked temporary From the name To, never replacing anything
+   --  there. The host's no-replace rename does it in one step; on a
+   --  filesystem without one (NFS, most FUSE mounts) link and unlink do it,
+   --  link failing with EEXIST as the rename does. Answers 0, or the errno
+   --  of the step that failed -- and on failure From is still From and To is
+   --  not this call's.
+   function Publish (From, To : Interfaces.C.Strings.chars_ptr) return C_Int is
+      Code    : C_Int;
+      Ignored : C_Int;
+   begin
+      if Rename_No_Replace (From, To) = 0 then
+         return 0;
+      end if;
+      Code := Errno;
+      if not Lacks_No_Replace_Rename (Code) then
+         return Code;
+      end if;
+      if C_Link (From, To) /= 0 then
+         return Errno;
+      end if;
+      --  Two names for a moment; a lease is one, so the temporary goes. If it
+      --  will not, the new name is taken back rather than leave a lease with
+      --  two links, which Open refuses.
+      if C_Unlink (From) /= 0 then
+         Code := Errno;
+         Ignored := C_Unlink (To);
+         return (if Code = 0 then 5 else Code);
+      end if;
+      return 0;
+   end Publish;
+
    procedure Reset (Item : out Lease) is
    begin
       Item.Handle := -1;
@@ -111,49 +193,80 @@ package body Hostkit.Lease_Files is
       end if;
    end Take_Lock;
 
+   --  Made under a temporary name in the same folder, locked there, and only
+   --  then given Path's name: a lease is never at Path unlocked, where another
+   --  process's scavenger could take it, find what it guards absent and
+   --  delete it before this one had locked it. A name already taken is
+   --  Refused, as an O_EXCL open of it was.
    function Create (Path : String; Item : out Lease) return Open_Outcome is
-      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
+      C_Temp : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.Null_Ptr;
       Fd : C_Int := -1;
       Info : aliased Stat_Record;
       Outcome : Open_Outcome;
-      Code : C_Int;
+      Code : C_Int := 0;
       Ignored : C_Int;
+
+      --  Close and remove the temporary, and free both names.
+      procedure Abandon is
+      begin
+         if Fd >= 0 then
+            Ignored := C_Close (Fd);
+            Fd := -1;
+         end if;
+         if C_Temp /= Interfaces.C.Strings.Null_Ptr then
+            Ignored := C_Unlink (C_Temp);
+            Interfaces.C.Strings.Free (C_Temp);
+         end if;
+         if C_Path /= Interfaces.C.Strings.Null_Ptr then
+            Interfaces.C.Strings.Free (C_Path);
+         end if;
+      end Abandon;
    begin
       Reset (Item);
-      Fd := C_Open
-        (C_Path, O_Rdwr + O_Creat + O_Excl + O_Cloexec + O_Nofollow, 8#600#);
-      if Fd < 0 then
+      if Path = "" then
+         return Error;
+      end if;
+      C_Path := Interfaces.C.Strings.New_String (Path);
+      --  A temporary name left by an earlier process with this pid is passed
+      --  over, never opened.
+      for Attempt in 1 .. 16 loop
+         C_Temp := Interfaces.C.Strings.New_String (Temporary_Name (Path));
+         Fd := C_Open
+           (C_Temp, O_Rdwr + O_Creat + O_Excl + O_Cloexec + O_Nofollow, 8#600#);
+         exit when Fd >= 0;
          Code := Errno;
-         Interfaces.C.Strings.Free (C_Path);
-         return (if Code = 17 or else Code = 62 then Refused else Error);
+         Interfaces.C.Strings.Free (C_Temp);
+         exit when Code /= 17;
+      end loop;
+      if Fd < 0 then
+         Abandon;
+         return (if Code = 62 then Refused else Error);
       end if;
       if C_Fstat (Fd, Info'Access) /= 0 or else not Is_Valid (Info)
         or else C_Fchmod (Fd, 8#600#) /= 0
       then
-         Ignored := C_Close (Fd);
-         Fd := -1;
-         Interfaces.C.Strings.Free (C_Path);
+         Abandon;
          return Refused;
       end if;
       Outcome := Take_Lock (Fd, Shared);
       if Outcome /= Opened then
-         Ignored := C_Close (Fd);
-         Fd := -1;
-         Interfaces.C.Strings.Free (C_Path);
+         Abandon;
          return Outcome;
       end if;
+      Code := Publish (C_Temp, C_Path);
+      if Code /= 0 then
+         Abandon;
+         return (if Code = 17 or else Code = 62 then Refused else Error);
+      end if;
+      Interfaces.C.Strings.Free (C_Temp);
       Interfaces.C.Strings.Free (C_Path);
       Item.Handle := Interfaces.Integer_64 (Fd);
       Item.Held := True;
       return Opened;
    exception
       when others =>
-         if Fd >= 0 then
-            Ignored := C_Close (Fd);
-         end if;
-         if C_Path /= Interfaces.C.Strings.Null_Ptr then
-            Interfaces.C.Strings.Free (C_Path);
-         end if;
+         Abandon;
          Reset (Item);
          return Error;
    end Create;

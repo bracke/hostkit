@@ -16,7 +16,6 @@ package body Hostkit.Spawn is
    use Hostkit.Win32;
    use type Interfaces.C.int;
    use type Interfaces.C.unsigned_long;
-   use type Interfaces.C.unsigned_long_long;
    use type System.Address;
    use type Hostkit.Descriptors.Descriptor;
 
@@ -28,16 +27,6 @@ package body Hostkit.Spawn is
    Startf_Use_Std_Handles : constant C_DWord := 16#0000_0100#;
    Create_Unicode_Environment : constant C_DWord := 16#0000_0400#;
    Create_Suspended           : constant C_DWord := 16#0000_0004#;
-
-   --  A startup record with an attribute list on the end of it, which is the
-   --  only way to hand a child a pseudo-console.
-   Extended_Startup_Info_Present : constant C_DWord := 16#0008_0000#;
-
-   --  PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. The number is assembled from the
-   --  attribute's index and its flags by a macro in the Windows headers; it is
-   --  written out here because there is no macro to expand, and it is a
-   --  contract with the OS either way.
-   Attribute_Pseudo_Console : constant := 16#0002_0016#;
 
    --  CreateProcess failure codes worth telling apart, so that a shell can say
    --  which of the four mistakes a user made rather than "it did not run".
@@ -79,7 +68,8 @@ package body Hostkit.Spawn is
      with Convention => C;
 
    --  STARTUPINFOEXW: the ordinary one with a pointer to an attribute list
-   --  after it. The attribute list is where a pseudo-console is handed over.
+   --  after it. The attribute list is where a pseudo-console, and the list of
+   --  handles the child inherits, are handed over.
    type Extended_Startup_Info is record
       Startup        : Startup_Info;
       Attribute_List : System.Address := System.Null_Address;
@@ -96,35 +86,8 @@ package body Hostkit.Spawn is
    pragma Compile_Time_Error
      (Process_Information'Size /= 24 * 8, "PROCESS_INFORMATION layout does not match the Win32 one");
 
-   subtype C_Size_T is Interfaces.C.unsigned_long_long;
-
-   function Initialize_Attribute_List
-     (List       : System.Address;
-      Count      : C_DWord;
-      Flags      : C_DWord;
-      Size       : access C_Size_T) return Interfaces.C.int
-     with Import => True, Convention => Stdcall,
-          External_Name => "InitializeProcThreadAttributeList";
-
-   function Update_Attribute
-     (List      : System.Address;
-      Flags     : C_DWord;
-      Attribute : C_Size_T;
-      Value     : System.Address;
-      Size      : C_Size_T;
-      Previous  : System.Address;
-      Returned  : System.Address) return Interfaces.C.int
-     with Import => True, Convention => Stdcall,
-          External_Name => "UpdateProcThreadAttribute";
-
-   procedure Delete_Attribute_List (List : System.Address)
-     with Import => True, Convention => Stdcall,
-          External_Name => "DeleteProcThreadAttributeList";
-
-   --  The same call, taking the extended startup record. Declared a second
-   --  time rather than making the parameter an address: two imports of one
-   --  entry point is how Ada says "these are the two shapes it is called in",
-   --  and it keeps each call site's argument checked.
+   --  CreateProcessW, taking the extended startup record: every child is
+   --  started with an attribute list naming what it inherits.
    function Create_Process_Extended
      (Application_Name   : System.Address;
       Command_Line       : System.Address;
@@ -135,20 +98,6 @@ package body Hostkit.Spawn is
       Environment        : System.Address;
       Current_Directory  : System.Address;
       Startup            : access Extended_Startup_Info;
-      Information        : access Process_Information)
-      return Interfaces.C.int
-     with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
-
-   function Create_Process
-     (Application_Name   : System.Address;
-      Command_Line       : System.Address;
-      Process_Attributes : System.Address;
-      Thread_Attributes  : System.Address;
-      Inherit_Handles    : Interfaces.C.int;
-      Creation_Flags     : C_DWord;
-      Environment        : System.Address;
-      Current_Directory  : System.Address;
-      Startup            : access Startup_Info;
       Information        : access Process_Information)
       return Interfaces.C.int
      with Import => True, Convention => Stdcall, External_Name => "CreateProcessW";
@@ -441,144 +390,68 @@ package body Hostkit.Spawn is
            + (if Job /= System.Null_Address then Create_Suspended else 0);
 
          Started : Interfaces.C.int;
+
+         --  Exactly the handles this child is to inherit, in the attribute
+         --  list of an extended startup record -- never "every inheritable
+         --  handle this process has", which would hand it the pipe ends and
+         --  files another task is just then giving its own child (Hostkit.Win32
+         --  .Child_Attributes). A pseudo-console takes none: its handles reach
+         --  the child through the console. Redirected streams are the three
+         --  in the startup record. Otherwise the child takes this process's
+         --  own standard handles, as an inheriting launch always gave it.
+         --  Freed when this block is left, whichever way.
+         Attributes : Child_Attributes;
+         Inherited  : constant Handle_List :=
+           (if Is_Attached (With_Options.Console) then Handle_List'(1 .. 0 => System.Null_Address)
+            elsif (Startup.Flags and Startf_Use_Std_Handles) /= 0
+            then [Startup.Std_Input, Startup.Std_Output, Startup.Std_Error]
+            else Own_Standard_Handles);
+         Console : constant System.Address :=
+           (if Is_Attached (With_Options.Console)
+            then System.Storage_Elements.To_Address
+                   (System.Storage_Elements.Integer_Address (Native_Console (With_Options.Console)))
+            else System.Null_Address);
+         Extended : aliased Extended_Startup_Info;
       begin
-         if Is_Attached (With_Options.Console) then
-            --  A pseudo-console reaches a child through an attribute list,
-            --  which the host sizes before it can be filled in.
+         if not Prepare (Attributes, Inherited, Console) then
+            Close_Job;
+            return Spawn_Failed;
+         end if;
+
+         Extended.Startup := Startup;
+         Extended.Startup.Cb := C_DWord (Extended_Startup_Info'Size / 8);
+         Extended.Attribute_List := Attribute_List (Attributes);
+
+         Started := Create_Process_Extended
+           (Application_Name   => System.Null_Address,
+            Command_Line       => Wide_Command'Address,
+            Process_Attributes => System.Null_Address,
+            Thread_Attributes  => System.Null_Address,
+            --  TRUE only when the list names a handle: an empty handle list is
+            --  refused, and TRUE without one is what hands over everything.
+            Inherit_Handles    => Inherit_Handles (Attributes),
+            Creation_Flags     => Flags + Extended_Startup_Info_Present,
+            Environment        =>
+              (if Use_Environment then Wide_Environment'Address
+               else System.Null_Address),
+            Current_Directory  =>
+              (if With_Options.Working_Directory = Null_Unbounded_String
+               then System.Null_Address
+               else Wide_Dir'Address),
+            Startup            => Extended'Access,
+            Information        => Information'Access);
+
+         if Started = 0 then
+            --  Windows reports why up front, so there is no need for the
+            --  close-on-exec report pipe the POSIX bodies use: there is no
+            --  fork and therefore no moment at which the failure is the
+            --  child's.
             declare
-               Needed : aliased C_Size_T := 0;
-
-               --  Always fails, and is documented to: the first call is how
-               --  the host says how much room the list needs. Treating that
-               --  failure as a failure is the standard way to get this wrong.
-               Sizing : constant Interfaces.C.int :=
-                 Initialize_Attribute_List
-                   (System.Null_Address, 1, 0, Needed'Access);
-               pragma Unreferenced (Sizing);
-
-               use System.Storage_Elements;
+               Error_Code : constant C_DWord := Get_Last_Error;
             begin
-               if Needed = 0 then
-                  Close_Job;
-                  return Spawn_Failed;
-               end if;
-
-               declare
-                  --  The list itself, which the host writes into and which has
-                  --  to outlive the call that reads it. On the stack, so it
-                  --  goes when this block does and there is nothing to leak.
-                  --
-                  --  An array of addresses rather than of bytes, because the
-                  --  host writes pointers into it: a byte array is aligned to
-                  --  one, and a misaligned attribute list is a fault on some
-                  --  hosts and a silent corruption on the rest.
-                  Room : aliased array (1 .. (Natural (Needed) + 7) / 8)
-                           of System.Address := [others => System.Null_Address];
-
-                  Extended : aliased Extended_Startup_Info;
-
-                  Console : constant System.Address :=
-                    To_Address
-                      (Integer_Address (Native_Console (With_Options.Console)));
-               begin
-                  if Initialize_Attribute_List
-                       (Room'Address, 1, 0, Needed'Access) = 0
-                  then
-                     Close_Job;
-                     return Spawn_Failed;
-                  end if;
-
-                  --  The console handle itself is the value, not a pointer to
-                  --  it. Most attributes take the address of the thing they
-                  --  are about; this one takes the handle, and passing its
-                  --  address instead is a call that succeeds and attaches the
-                  --  child to nothing -- which looks like a console that
-                  --  produces no output at all.
-                  if Update_Attribute
-                       (Room'Address, 0, Attribute_Pseudo_Console,
-                        Console, System.Address'Size / 8,
-                        System.Null_Address, System.Null_Address) = 0
-                  then
-                     Delete_Attribute_List (Room'Address);
-                     Close_Job;
-                     return Spawn_Failed;
-                  end if;
-
-                  Extended.Startup := Startup;
-                  Extended.Startup.Cb :=
-                    C_DWord (Extended_Startup_Info'Size / 8);
-                  Extended.Attribute_List := Room'Address;
-
-                  Started := Create_Process_Extended
-                    (Application_Name   => System.Null_Address,
-                     Command_Line       => Wide_Command'Address,
-                     Process_Attributes => System.Null_Address,
-                     Thread_Attributes  => System.Null_Address,
-
-                     --  Nothing of this crate's travels this way: every
-                     --  descriptor it makes is non-inheritable until a caller
-                     --  opts one in, and the console's own pipe ends were
-                     --  closed here the moment the console took its copies.
-                     Inherit_Handles    => 1,
-                     Creation_Flags     => Flags + Extended_Startup_Info_Present,
-                     Environment        =>
-                       (if Use_Environment then Wide_Environment'Address
-                        else System.Null_Address),
-                     Current_Directory  =>
-                       (if With_Options.Working_Directory = Null_Unbounded_String
-                        then System.Null_Address
-                        else Wide_Dir'Address),
-                     Startup            => Extended'Access,
-                     Information        => Information'Access);
-
-                  declare
-                     Error_Code : constant C_DWord :=
-                       (if Started = 0 then Get_Last_Error else 0);
-                  begin
-                     Delete_Attribute_List (Room'Address);
-                     if Started = 0 then
-                        Close_Job;
-                        return Outcome_For_Error (Error_Code);
-                     end if;
-                  end;
-               end;
+               Close_Job;
+               return Outcome_For_Error (Error_Code);
             end;
-
-         else
-            Started := Create_Process
-              (Application_Name   => System.Null_Address,
-               Command_Line       => Wide_Command'Address,
-               Process_Attributes => System.Null_Address,
-               Thread_Attributes  => System.Null_Address,
-
-               --  True, and it is what makes a handed-over pipe end reach the
-               --  child at all. Only handles marked inheritable travel, which
-               --  is why Hostkit.Descriptors creates them unmarked and a
-               --  caller opts each one in.
-               Inherit_Handles    => 1,
-               Creation_Flags     => Flags,
-               Environment        =>
-                 (if Use_Environment then Wide_Environment'Address
-                  else System.Null_Address),
-               Current_Directory  =>
-                 (if With_Options.Working_Directory = Null_Unbounded_String
-                  then System.Null_Address
-                  else Wide_Dir'Address),
-               Startup            => Startup'Access,
-               Information        => Information'Access);
-
-            if Started = 0 then
-               --  Windows reports why up front, so there is no need for the
-               --  close-on-exec report pipe the POSIX bodies use: there is no
-               --  fork and therefore no moment at which the failure is the
-               --  child's.
-               declare
-                  Error_Code : constant C_DWord := Get_Last_Error;
-               begin
-                  Close_Job;
-                  return Outcome_For_Error (Error_Code);
-               end;
-            end if;
          end if;
       end;
 

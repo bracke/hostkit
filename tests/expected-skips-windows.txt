@@ -15,3 +15,4 @@ Test_Clean_Wrapper: the wrapper's environment is read back through Linux /proc
 Test_Executability_Across_Modes: Windows decides by extension, not by mode
 Test_The_Open_File_Limit_Is_What_Stops_An_Open: Windows has no open-file limit to lower
 Test_Macos_Flags_And_Acls_Are_Copied: needs macOS file flags and ACLs
+Test_A_Volume_Count_Saturates: this host has no POSIX volume counts

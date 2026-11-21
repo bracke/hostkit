@@ -1,6 +1,8 @@
 with Interfaces.C.Strings;
 with Interfaces.C;
 
+with Hostkit.Posix_Abi;
+
 package body Hostkit.Pty is
 
    use type Interfaces.C.int;
@@ -8,8 +10,11 @@ package body Hostkit.Pty is
 
    subtype C_Int is Interfaces.C.int;
 
-   O_Rdwr   : constant C_Int := 8#2#;
-   O_Noctty : constant C_Int := 8#400#;
+   --  O_NOCTTY differs between the hosts (Hostkit.Posix_Abi); opening the
+   --  device side with the other host's number would leave the terminal free
+   --  to become this process's controlling one.
+   O_Rdwr   : constant C_Int := Hostkit.Posix_Abi.O_Rdwr;
+   O_Noctty : constant C_Int := Hostkit.Posix_Abi.O_Noctty;
 
    --  posix_openpt and friends rather than openpty. openpty is in libutil and
    --  would put a -lutil in every consumer's link line for one call; these four
@@ -27,11 +32,11 @@ package body Hostkit.Pty is
      (Path  : Interfaces.C.Strings.chars_ptr;
       Flags : C_Int;
       Mode  : Interfaces.C.unsigned) return C_Int
-     with Import => True, Convention => C, External_Name => "open";
+     with Import => True, Convention => C_Variadic_2, External_Name => "open";
    function C_Close (Fd : C_Int) return C_Int
      with Import => True, Convention => C, External_Name => "close";
    function C_Fcntl (Fd : C_Int; Command : C_Int; Argument : C_Int) return C_Int
-     with Import => True, Convention => C, External_Name => "fcntl";
+     with Import => True, Convention => C_Variadic_2, External_Name => "fcntl";
 
    F_Setfd    : constant C_Int := 2;
    FD_Cloexec : constant C_Int := 1;
@@ -45,10 +50,11 @@ package body Hostkit.Pty is
    -- Write_Fails_When_Unheld --
    ---------------------------
 
-   --  False. A write to the controller of a Linux pseudo-terminal whose device
-   --  side nothing holds is accepted: the bytes go into the line discipline's
-   --  buffer, where they stay. Only a read then reports the end.
-   function Write_Fails_When_Unheld return Boolean is (False);
+   --  The host's own answer (Hostkit.Posix_Abi): Linux buffers such a write in
+   --  the line discipline and only a read then reports the end; macOS fails it
+   --  with EIO once the last descriptor for the device side is closed.
+   function Write_Fails_When_Unheld return Boolean is
+     (Hostkit.Posix_Abi.Pty_Write_Fails_When_Unheld);
 
    ------------------
    -- Is_Supported --

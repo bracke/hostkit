@@ -14,6 +14,7 @@ with Hostkit.Filesystem_Rules;
 with Hostkit.Fs.Instants;
 with Hostkit.Posix;
 with Hostkit.Path_Text;
+with Hostkit.Posix.Accounts;
 
 package body Hostkit.Fs is
    use type Interfaces.C.int;
@@ -1061,38 +1062,12 @@ package body Hostkit.Fs is
    function Own_Executable_Directory return String is separate;
 
    --  HOME first, because a user who exports it means it. The password file is
-   --  what the host itself records, and is there when HOME is not.
+   --  what the host itself records, and is there when HOME is not. Read
+   --  through Hostkit.Posix.Accounts (getpwuid_r): getpwuid answers from a
+   --  static buffer that a lookup on another task overwrites.
    function Home_Directory return String is
       function Getuid return Interfaces.C.unsigned
         with Import => True, Convention => C, External_Name => "getuid";
-
-      --  This host's own layout, which is not the one glibc uses: BSD keeps a
-      --  change time and a login class between the group id and the gecos
-      --  field, and an expiry after the shell. A record copied from the Linux
-      --  body compiles, links and reads the wrong pointer -- which is how the
-      --  first version of Home_Directory_Of answered nothing for root here
-      --  while answering correctly on Linux, and it is exactly the kind of
-      --  difference this crate exists to keep in one place per host.
-      type Passwd is record
-         Name    : Interfaces.C.Strings.chars_ptr;
-         Passwd  : Interfaces.C.Strings.chars_ptr;
-         Uid     : Interfaces.C.unsigned;
-         Gid     : Interfaces.C.unsigned;
-         Change  : Interfaces.C.long;
-         Class   : Interfaces.C.Strings.chars_ptr;
-         Gecos   : Interfaces.C.Strings.chars_ptr;
-         Dir     : Interfaces.C.Strings.chars_ptr;
-         Shell   : Interfaces.C.Strings.chars_ptr;
-         Expires : Interfaces.C.long;
-      end record
-        with Convention => C;
-      type Passwd_Access is access all Passwd;
-
-      function Getpwuid (Uid : Interfaces.C.unsigned) return Passwd_Access
-        with Import => True, Convention => C, External_Name => "getpwuid";
-
-      use type Interfaces.C.Strings.chars_ptr;
-      Entry_Item : Passwd_Access;
    begin
       if Ada.Environment_Variables.Exists ("HOME")
         and then Ada.Environment_Variables.Value ("HOME") /= ""
@@ -1100,46 +1075,13 @@ package body Hostkit.Fs is
          return Ada.Environment_Variables.Value ("HOME");
       end if;
 
-      Entry_Item := Getpwuid (Getuid);
-      if Entry_Item = null or else Entry_Item.Dir = Interfaces.C.Strings.Null_Ptr then
-         return "";
-      end if;
-
-      return Interfaces.C.Strings.Value (Entry_Item.Dir);
+      return Ada.Strings.Unbounded.To_String (Hostkit.Posix.Accounts.User_By_Id (Getuid).Home);
    exception
       when others =>
          return "";
    end Home_Directory;
 
    function Home_Directory_Of (User : String) return String is
-      --  This host's own layout, which is not the one glibc uses: BSD keeps a
-      --  change time and a login class between the group id and the gecos
-      --  field, and an expiry after the shell. A record copied from the Linux
-      --  body compiles, links and reads the wrong pointer -- which is how the
-      --  first version of Home_Directory_Of answered nothing for root here
-      --  while answering correctly on Linux, and it is exactly the kind of
-      --  difference this crate exists to keep in one place per host.
-      type Passwd is record
-         Name    : Interfaces.C.Strings.chars_ptr;
-         Passwd  : Interfaces.C.Strings.chars_ptr;
-         Uid     : Interfaces.C.unsigned;
-         Gid     : Interfaces.C.unsigned;
-         Change  : Interfaces.C.long;
-         Class   : Interfaces.C.Strings.chars_ptr;
-         Gecos   : Interfaces.C.Strings.chars_ptr;
-         Dir     : Interfaces.C.Strings.chars_ptr;
-         Shell   : Interfaces.C.Strings.chars_ptr;
-         Expires : Interfaces.C.long;
-      end record
-        with Convention => C;
-      type Passwd_Access is access all Passwd;
-
-      function Getpwnam (Name : Interfaces.C.char_array) return Passwd_Access
-        with Import => True, Convention => C, External_Name => "getpwnam";
-
-      use type Interfaces.C.Strings.chars_ptr;
-
-      Entry_Item : Passwd_Access;
    begin
       if User = "" then
          return "";
@@ -1147,15 +1089,7 @@ package body Hostkit.Fs is
 
       --  The database rather than HOME: HOME is this process's idea of its own
       --  home and says nothing about anybody else's.
-      Entry_Item := Getpwnam (Interfaces.C.To_C (User));
-
-      if Entry_Item = null
-        or else Entry_Item.Dir = Interfaces.C.Strings.Null_Ptr
-      then
-         return "";
-      end if;
-
-      return Interfaces.C.Strings.Value (Entry_Item.Dir);
+      return Ada.Strings.Unbounded.To_String (Hostkit.Posix.Accounts.User_By_Name (User).Home);
    exception
       when others =>
          return "";

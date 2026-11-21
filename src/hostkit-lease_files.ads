@@ -15,6 +15,19 @@ package Hostkit.Lease_Files is
    type Lease is limited private;
 
    --  Create a new owner-only lease and take a shared lock without waiting.
+   --
+   --  The lease is never at Path unlocked, so another process cannot lock it
+   --  first and take it for an abandoned one. POSIX makes it under a unique
+   --  temporary name in the same folder (".hostkit-lease-<pid>-<n>"), locks
+   --  it there, and only then gives it Path's name with a no-replace rename
+   --  -- or, on a filesystem without one, link and unlink, where for that
+   --  moment the file has two names and Open refuses it; any failure removes
+   --  the temporary. Windows creates it with a share mode that excludes
+   --  writers and deleters from the moment CreateFileW returns.
+   --
+   --  @return Opened; Refused when Path is already taken (by anything, a
+   --  link included) or the new file is not what a lease must be; Busy or
+   --  Unsupported when it could not be locked; Error otherwise.
    function Create (Path : String; Item : out Lease) return Open_Outcome;
 
    --  Open an existing validated lease and lock it without waiting.

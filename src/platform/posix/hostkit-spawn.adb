@@ -6,6 +6,7 @@ with Interfaces.C;
 with System;
 
 with Hostkit.Posix;
+with Hostkit.Posix_Abi;
 
 package body Hostkit.Spawn is
 
@@ -19,16 +20,17 @@ package body Hostkit.Spawn is
    subtype C_Int is Interfaces.C.int;
    subtype C_Long is Interfaces.C.long;
 
-   --  waitpid options, Linux. WUNTRACED and WCONTINUED are what make a stop and
-   --  a resume visible at all; without them Ctrl-Z looks to the parent like
+   --  waitpid options. WUNTRACED and WCONTINUED are what make a stop and a
+   --  resume visible at all; without them Ctrl-Z looks to the parent like
    --  nothing happened, and a shell cannot tell a suspended job from a running
-   --  one.
+   --  one. WCONTINUED differs between the hosts (Hostkit.Posix_Abi).
    WNOHANG    : constant C_Int := 1;
    WUNTRACED  : constant C_Int := 2;
-   WCONTINUED : constant C_Int := 8;
+   WCONTINUED : constant C_Int := Hostkit.Posix_Abi.WCONTINUED;
 
    --  errno values Start distinguishes, so that a shell can say which of the
-   --  four things went wrong rather than "it did not run".
+   --  four things went wrong rather than "it did not run". ELOOP and
+   --  ENAMETOOLONG differ between the hosts (Hostkit.Posix_Abi).
    E_Noent   : constant := 2;
    E_Acces   : constant := 13;
    E_Isdir   : constant := 21;
@@ -36,8 +38,8 @@ package body Hostkit.Spawn is
    E_Perm    : constant := 1;
    E_Intr    : constant := 4;
    E_Notdir  : constant := 20;
-   E_Loop    : constant := 40;
-   E_Nametoolong : constant := 36;
+   E_Loop    : constant := Hostkit.Posix_Abi.E_Loop;
+   E_Nametoolong : constant := Hostkit.Posix_Abi.E_Nametoolong;
 
    Exec_Failed_Status : constant C_Int := 127;
 
@@ -84,7 +86,7 @@ package body Hostkit.Spawn is
    type Signal_Set is array (1 .. 128) of Interfaces.Unsigned_8
      with Convention => C;
 
-   SIG_SETMASK : constant C_Int := 2;
+   SIG_SETMASK : constant C_Int := Hostkit.Posix_Abi.SIG_SETMASK;
 
    function Sigemptyset (Set : System.Address) return C_Int
      with Import => True, Convention => C, External_Name => "sigemptyset";
@@ -92,21 +94,20 @@ package body Hostkit.Spawn is
      (How : C_Int; Set : System.Address; Old : System.Address) return C_Int
      with Import => True, Convention => C, External_Name => "sigprocmask";
 
-   --  TIOCSCTTY, Linux: "make this terminal my controlling terminal". A small
-   --  number here, where BSD encodes the direction and size into it -- which is
-   --  why this constant belongs to this body and cannot be shared with macOS.
-   TIOCSCTTY : constant Interfaces.C.unsigned_long := 16#0000_540E#;
+   --  TIOCSCTTY: "make this terminal my controlling terminal". Linux has a
+   --  small number for it and BSD encodes the direction and size into it, so it
+   --  comes from Hostkit.Posix_Abi.
+   TIOCSCTTY : constant Interfaces.C.unsigned_long := Hostkit.Posix_Abi.TIOCSCTTY;
 
+   --  ioctl is variadic, ioctl (int, unsigned long, ...), and declared so: on
+   --  Apple silicon a variadic argument goes on the stack rather than in a
+   --  register, and a call made as if to a fixed-argument function hands the
+   --  callee whatever the register held. On x86-64 and on Linux the two
+   --  conventions pass this call alike.
    function Ioctl
      (Fd : C_Int; Request : Interfaces.C.unsigned_long; Argument : System.Address)
       return C_Int
-     with Import => True, Convention => C, External_Name => "ioctl";
-
-   --  extern char **environ. Assigning it replaces the environment the next
-   --  exec will pass on, and -- because execvp reads PATH from it -- the PATH
-   --  the lookup uses. That is the shell semantics a user who set PATH meant.
-   Environ : System.Address
-     with Import => True, Convention => C, External_Name => "environ";
+     with Import => True, Convention => C_Variadic_2, External_Name => "ioctl";
 
    SIG_DFL : constant System.Address := System.Null_Address;
 
@@ -177,9 +178,10 @@ package body Hostkit.Spawn is
 
    --  The wait status, taken apart. These are the W* macros from sys/wait.h,
    --  written out because a macro cannot be imported. The layout is the same on
-   --  every Linux: the low seven bits are the terminating signal, 0x7f in them
-   --  means stopped rather than terminated, and the next eight are the exit
-   --  code or the stopping signal.
+   --  Linux and macOS: the low seven bits are the terminating signal, 0x7f in
+   --  them means stopped rather than terminated, and the next eight are the
+   --  exit code or the stopping signal. Only a resumed child is told apart
+   --  differently on the two (Hostkit.Posix_Abi.Is_Continued).
    procedure Decode_Status (Raw : C_Int; Result : out Status) is
       Low     : constant C_Int := Raw mod 256;
       Signal_Bits : constant C_Int := Raw mod 128;
@@ -192,7 +194,7 @@ package body Hostkit.Spawn is
                  Signal_Known       => False,
                  Raw_Signal_Number  => 0);
 
-      if Raw = 16#FFFF# then
+      if Hostkit.Posix_Abi.Is_Continued (Raw) then
          --  WIFCONTINUED.
          Result.State := Wait_Continued;
          return;
@@ -461,7 +463,13 @@ package body Hostkit.Spawn is
          end if;
 
          if With_Options.Replace_Environment then
-            Environ := Envp (Envp'First)'Address;
+            declare
+               --  The environment pointer itself, wherever this host keeps it.
+               Slot : System.Address
+                 with Import => True, Address => Hostkit.Posix_Abi.Environment_Slot;
+            begin
+               Slot := Envp (Envp'First)'Address;
+            end;
          end if;
 
          Unused := Execvp (Program_C, Argv (Argv'First)'Address);

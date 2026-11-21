@@ -8,6 +8,8 @@ with Interfaces.C.Strings;
 with GNAT.OS_Lib;
 
 with Hostkit.Host;
+with Hostkit.Posix;
+with Hostkit.Posix.Accounts;
 with Hostkit.Linux_Abi;
 with Hostkit.Metadata.Natural_Ids;
 
@@ -134,46 +136,6 @@ package body Hostkit.Metadata is
       return C_Int
      with Import, Convention => C, External_Name => "utimes";
 
-   --  Front of the C "struct passwd": we only read pw_uid, which follows the
-   --  pw_name and pw_passwd pointers. Trailing members are omitted because the
-   --  imported pointer refers to the library's full record.
-   type Passwd_Front is record
-      Name   : Interfaces.C.Strings.chars_ptr;
-      Passwd : Interfaces.C.Strings.chars_ptr;
-      Uid    : C_U32;
-      Gid    : C_U32;
-   end record
-     with Convention => C;
-
-   --  Front of the C "struct group": we only read gr_gid, which follows the
-   --  gr_name and gr_passwd pointers.
-   type Group_Front is record
-      Name   : Interfaces.C.Strings.chars_ptr;
-      Passwd : Interfaces.C.Strings.chars_ptr;
-      Gid    : C_U32;
-   end record
-     with Convention => C;
-
-   function Getpwnam
-     (Name : Interfaces.C.Strings.chars_ptr)
-      return access Passwd_Front
-     with Import, Convention => C, External_Name => "getpwnam";
-
-   function Getgrnam
-     (Name : Interfaces.C.Strings.chars_ptr)
-      return access Group_Front
-     with Import, Convention => C, External_Name => "getgrnam";
-
-   function Getpwuid
-     (Uid : C_U32)
-      return access Passwd_Front
-     with Import, Convention => C, External_Name => "getpwuid";
-
-   function Getgrgid
-     (Gid : C_U32)
-      return access Group_Front
-     with Import, Convention => C, External_Name => "getgrgid";
-
    Statx_Mode      : constant C_Unsigned := 16#2#;
    Permission_Mask : constant C_U16 := 8#7777#;
 
@@ -249,40 +211,16 @@ package body Hostkit.Metadata is
    end File_Access_Time;
 
    function Volume_Capacity_Of (Path : String) return Volume_Capacity is
+      --  The counts saturate (Hostkit.Posix): FUSE and network filesystems
+      --  answer UINT64_MAX for what they do not count.
       function Saturating_Natural (Value : C_ULong) return Natural is
-      begin
-         if Value > C_ULong (Natural'Last) then
-            return Natural'Last;
-         else
-            return Natural (Value);
-         end if;
-      end Saturating_Natural;
+        (Hostkit.Posix.Saturating_Natural (Interfaces.Unsigned_64 (Value)));
 
       function Saturating_Long_Long (Value : C_ULong) return Long_Long_Integer is
-      begin
-         if Value > C_ULong (Long_Long_Integer'Last) then
-            return Long_Long_Integer'Last;
-         else
-            return Long_Long_Integer (Value);
-         end if;
-      end Saturating_Long_Long;
+        (Hostkit.Posix.Saturating_Count (Interfaces.Unsigned_64 (Value)));
 
-      function Saturating_Byte_Count
-        (Blocks        : C_ULong;
-         Fragment_Size : C_ULong)
-         return Long_Long_Integer
-      is
-         Block_Count : constant Long_Long_Integer := Saturating_Long_Long (Blocks);
-         Unit_Size   : constant Long_Long_Integer := Saturating_Long_Long (Fragment_Size);
-      begin
-         if Block_Count = 0 or else Unit_Size = 0 then
-            return 0;
-         elsif Block_Count > Long_Long_Integer'Last / Unit_Size then
-            return Long_Long_Integer'Last;
-         else
-            return Block_Count * Unit_Size;
-         end if;
-      end Saturating_Byte_Count;
+      function Saturating_Byte_Count (Blocks : C_ULong; Fragment_Size : C_ULong) return Long_Long_Integer is
+        (Hostkit.Posix.Saturating_Byte_Count (Interfaces.Unsigned_64 (Blocks), Interfaces.Unsigned_64 (Fragment_Size)));
 
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Data   : aliased Statvfs_Record;
@@ -892,26 +830,20 @@ package body Hostkit.Metadata is
          Ownership_Available := False;
    end File_Mode_And_Ownership;
 
+   --  The account database through Hostkit.Posix.Accounts, which uses the
+   --  reentrant lookups: getpwnam and the rest answer from one static buffer
+   --  that a lookup on another task overwrites.
    function User_Id_For_Name
      (Name  : String;
       Found : out Boolean)
       return Account_Id
    is
-      C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
-      Entry_Ptr : access Passwd_Front;
-      Result : Account_Id := 0;
+      User : constant Hostkit.Posix.Accounts.User_Entry := Hostkit.Posix.Accounts.User_By_Name (Name);
    begin
-      Found := False;
-      Entry_Ptr := Getpwnam (C_Name);
-      Interfaces.C.Strings.Free (C_Name);
-      if Entry_Ptr /= null then
-         Found := True;
-         Result := Account_Id (Entry_Ptr.Uid);
-      end if;
-      return Result;
+      Found := User.Found;
+      return (if User.Found then Account_Id (User.User_Id) else 0);
    exception
       when others =>
-         Safe_Free (C_Name);
          Found := False;
          return 0;
    end User_Id_For_Name;
@@ -921,52 +853,31 @@ package body Hostkit.Metadata is
       Found : out Boolean)
       return Account_Id
    is
-      C_Name : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Name);
-      Entry_Ptr : access Group_Front;
-      Result : Account_Id := 0;
+      Group : constant Hostkit.Posix.Accounts.Group_Entry := Hostkit.Posix.Accounts.Group_By_Name (Name);
    begin
-      Found := False;
-      Entry_Ptr := Getgrnam (C_Name);
-      Interfaces.C.Strings.Free (C_Name);
-      if Entry_Ptr /= null then
-         Found := True;
-         Result := Account_Id (Entry_Ptr.Gid);
-      end if;
-      return Result;
+      Found := Group.Found;
+      return (if Group.Found then Account_Id (Group.Group_Id) else 0);
    exception
       when others =>
-         Safe_Free (C_Name);
          Found := False;
          return 0;
    end Group_Id_For_Name;
 
    function User_Name_For_Id (Id : Account_Id) return String is
-      --  The returned struct points into a static libc buffer; do not free it.
-      Entry_Ptr : constant access Passwd_Front := Getpwuid (C_U32 (Id));
+      User : constant Hostkit.Posix.Accounts.User_Entry :=
+        Hostkit.Posix.Accounts.User_By_Id (Interfaces.C.unsigned (Id));
    begin
-      if Entry_Ptr /= null
-        and then Entry_Ptr.Name /= Interfaces.C.Strings.Null_Ptr
-      then
-         return Interfaces.C.Strings.Value (Entry_Ptr.Name);
-      else
-         return "";
-      end if;
+      return Ada.Strings.Unbounded.To_String (User.Name);
    exception
       when others =>
          return "";
    end User_Name_For_Id;
 
    function Group_Name_For_Id (Id : Account_Id) return String is
-      --  The returned struct points into a static libc buffer; do not free it.
-      Entry_Ptr : constant access Group_Front := Getgrgid (C_U32 (Id));
+      Group : constant Hostkit.Posix.Accounts.Group_Entry :=
+        Hostkit.Posix.Accounts.Group_By_Id (Interfaces.C.unsigned (Id));
    begin
-      if Entry_Ptr /= null
-        and then Entry_Ptr.Name /= Interfaces.C.Strings.Null_Ptr
-      then
-         return Interfaces.C.Strings.Value (Entry_Ptr.Name);
-      else
-         return "";
-      end if;
+      return Ada.Strings.Unbounded.To_String (Group.Name);
    exception
       when others =>
          return "";

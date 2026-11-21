@@ -302,6 +302,15 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Changed
 
+- **One spawn and one pseudo-terminal body for Linux and macOS.** The two
+  copies of each differed only in ABI numbers (WCONTINUED, SIG_SETMASK, ELOOP,
+  ENAMETOOLONG, TIOCSCTTY, O_NOCTTY), how a resumed child's wait status is
+  encoded, how the environment pointer is reached (`environ` against
+  `_NSGetEnviron`) and whether a write to an unheld pseudo-terminal fails.
+  Those now live in each host's `Hostkit.Posix_Abi`, and `src/platform/posix`
+  holds the one body of each; ioctl, open and fcntl are bound variadic
+  (`C_Variadic_2`) for both, as Apple silicon needs.
+
 - **One token reader on Windows, one privacy rule on Linux and macOS.** The
   process-token read (`Read_Token`, `Token_Buffer`, the TokenUser and
   TokenOwner classes) and the user's SID text (`Current_User_Sid_Text`) live
@@ -389,6 +398,38 @@ recently enough to matter to somebody pinning it; the history before that is in
   giving up on the identity.
 
 ### Fixed
+
+- **Windows children inherit only their own handles.** `Spawn.Start` and
+  `Native.Run_Captured` called CreateProcessW with bInheritHandles TRUE and no
+  list, so a child started while another task was starting its own took that
+  one's pipe ends and capture files too: the other reader waited for an end of
+  file that never came, and its capture file stayed locked. Every child now
+  gets a STARTUPINFOEXW whose PROC_THREAD_ATTRIBUTE_HANDLE_LIST names exactly
+  its standard handles (inheritable ones, deduplicated; this process's own
+  where nothing is redirected), and bInheritHandles is TRUE only when that
+  list is not empty. `Run_Captured`'s files are created non-inheritable and
+  marked so only just before the child starts. The list is freed on every
+  path (`Hostkit.Win32.Child_Attributes`).
+- **POSIX account lookups are safe from several tasks.** `Metadata`'s
+  name/id lookups, `Fs.Home_Directory`/`Home_Directory_Of` and
+  `Native.User_Group_Ids` used getpwnam/getpwuid/getgrnam/getgrgid, whose
+  one static buffer a lookup on another task overwrites. They now go through
+  one shared `Hostkit.Posix.Accounts` over the `_r` forms with a buffer of
+  their own (sized from sysconf, grown on ERANGE to 4 MiB), with each host's
+  own `struct passwd` (`Hostkit.Posix_Abi`).
+- **macOS volume capacity saturates.** `Volume_Capacity_Of` multiplied block
+  counts unchecked and converted u64 inode counts directly, so a FUSE or
+  network volume answering UINT64_MAX raised, and the handler dropped the
+  read-only flag and name limit with the byte counts. Linux's saturating
+  helpers moved to `Hostkit.Posix` and both hosts use them.
+- **A lease file is never visible unlocked.** `Lease_Files.Create` on Linux
+  and macOS opened the final name with O_EXCL and only then locked it; in
+  between, another process's scavenger could lock it, find what it guards
+  absent and delete it. The lease is now made under a unique temporary name
+  in the same folder, locked, and then given its name with a no-replace
+  rename (link and unlink where the filesystem has none); a taken name is
+  still `Refused`, and a failure removes the temporary. Windows already
+  excluded writers and deleters through the share mode of its CreateFileW.
 
 - **Windows `Delete_Link` removes a read-only link.** A link with the
   read-only attribute (`attrib +R /L`) was refused with ERROR_ACCESS_DENIED,

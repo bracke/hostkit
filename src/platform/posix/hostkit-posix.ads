@@ -1,3 +1,4 @@
+with Interfaces;
 with Interfaces.C;
 with System;
 
@@ -48,5 +49,29 @@ private package Hostkit.Posix is
       --  One entry. False stops the read there, as a success.
       with function Visit (Item : System.Address) return Boolean;
    function Read_Directory (Directory : System.Address) return Boolean;
+
+   --  A count the host gives as an unsigned 64-bit number, held in the
+   --  Natural the caller reports it as. A filesystem that does not count --
+   --  FUSE and network ones answer UINT64_MAX -- would overflow the
+   --  conversion and raise, and the raise would take every other answer of
+   --  the same call with it; the largest Natural is the honest "at least".
+   --
+   --  @param Value The host's count.
+   --  @return Value, or Natural'Last when it is larger.
+   function Saturating_Natural (Value : Interfaces.Unsigned_64) return Natural;
+
+   --  The same for a count held in a Long_Long_Integer.
+   --
+   --  @param Value The host's count.
+   --  @return Value, or Long_Long_Integer'Last when it is larger.
+   function Saturating_Count (Value : Interfaces.Unsigned_64) return Long_Long_Integer;
+
+   --  Blocks of Unit_Size bytes, in bytes, without overflowing: a product
+   --  past Long_Long_Integer'Last is Long_Long_Integer'Last.
+   --
+   --  @param Blocks How many blocks.
+   --  @param Unit_Size The size of one, in bytes.
+   --  @return The byte count; 0 when either is 0.
+   function Saturating_Byte_Count (Blocks, Unit_Size : Interfaces.Unsigned_64) return Long_Long_Integer;
 
 end Hostkit.Posix;

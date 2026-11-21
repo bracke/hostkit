@@ -1,5 +1,6 @@
 with Ada.Calendar.Formatting;
 with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded;
 with GNAT.OS_Lib;
 
 with Interfaces.C.Strings;
@@ -7,6 +8,8 @@ with System;
 with Hostkit.Darwin_Abi;
 with Hostkit.Darwin_Symbols;
 with Hostkit.Metadata.Natural_Ids;
+with Hostkit.Posix;
+with Hostkit.Posix.Accounts;
 
 package body Hostkit.Metadata is
    use type Hostkit.File_Identities.Entry_Identity;
@@ -78,32 +81,6 @@ package body Hostkit.Metadata is
    Mount_Read_Only : constant C_U32 := 16#0000_0001#;
    Darwin_Name_Max : constant Natural := 255;
    Permission_Mask : constant C_U16 := 8#7777#;
-
-   type Passwd_Record is record
-      Name     : Interfaces.C.Strings.chars_ptr;
-      Password : Interfaces.C.Strings.chars_ptr;
-      User_Id  : C_U32;
-      Group_Id : C_U32;
-      Change   : C_S64;
-      Class    : Interfaces.C.Strings.chars_ptr;
-      Gecos    : Interfaces.C.Strings.chars_ptr;
-      Home     : Interfaces.C.Strings.chars_ptr;
-      Shell    : Interfaces.C.Strings.chars_ptr;
-      Expire   : C_S64;
-   end record
-     with Convention => C;
-
-   type Passwd_Access is access all Passwd_Record;
-
-   type Group_Record is record
-      Name     : Interfaces.C.Strings.chars_ptr;
-      Password : Interfaces.C.Strings.chars_ptr;
-      Group_Id : C_U32;
-      Members  : System.Address;
-   end record
-     with Convention => C;
-
-   type Group_Access is access all Group_Record;
 
    function C_Stat
      (Path   : Interfaces.C.Strings.chars_ptr;
@@ -193,20 +170,6 @@ package body Hostkit.Metadata is
       User_Id  : C_U32;
       Group_Id : C_U32) return C_Int
      with Import, Convention => C, External_Name => "chown";
-
-   function C_Getpwnam
-     (Name : Interfaces.C.Strings.chars_ptr) return Passwd_Access
-     with Import, Convention => C, External_Name => "getpwnam";
-
-   function C_Getpwuid (Id : C_U32) return Passwd_Access
-     with Import, Convention => C, External_Name => "getpwuid";
-
-   function C_Getgrnam
-     (Name : Interfaces.C.Strings.chars_ptr) return Group_Access
-     with Import, Convention => C, External_Name => "getgrnam";
-
-   function C_Getgrgid (Id : C_U32) return Group_Access
-     with Import, Convention => C, External_Name => "getgrgid";
 
    procedure Safe_Free (Item : in out Interfaces.C.Strings.chars_ptr);
 
@@ -307,16 +270,20 @@ package body Hostkit.Metadata is
          return Answer;
       end if;
 
+      --  Every count saturates (Hostkit.Posix) rather than overflowing:
+      --  FUSE and network filesystems answer UINT64_MAX for what they do
+      --  not count, and a Constraint_Error here used to take the read-only
+      --  flag and the name limit down with the byte counts.
       Answer.Available := True;
       Answer.Capacity_Bytes :=
-        Long_Long_Integer (Buffer.Blocks)
-        * Long_Long_Integer (Buffer.Block_Size);
+        Hostkit.Posix.Saturating_Byte_Count
+          (Interfaces.Unsigned_64 (Buffer.Blocks), Interfaces.Unsigned_64 (Buffer.Block_Size));
       Answer.Free_Bytes :=
-        Long_Long_Integer (Buffer.Blocks_Available)
-        * Long_Long_Integer (Buffer.Block_Size);
+        Hostkit.Posix.Saturating_Byte_Count
+          (Interfaces.Unsigned_64 (Buffer.Blocks_Available), Interfaces.Unsigned_64 (Buffer.Block_Size));
 
-      Answer.Inode_Count := Long_Long_Integer (Buffer.Nodes);
-      Answer.Free_Inode_Count := Long_Long_Integer (Buffer.Nodes_Free);
+      Answer.Inode_Count := Hostkit.Posix.Saturating_Count (Interfaces.Unsigned_64 (Buffer.Nodes));
+      Answer.Free_Inode_Count := Hostkit.Posix.Saturating_Count (Interfaces.Unsigned_64 (Buffer.Nodes_Free));
       Answer.Inodes_Known := True;
 
       --  statfs reports no per-volume name limit; every Darwin filesystem this
@@ -917,81 +884,54 @@ package body Hostkit.Metadata is
          return 0;
    end Device_Id;
 
+   --  The account database through Hostkit.Posix.Accounts, which uses the
+   --  reentrant lookups: getpwnam and the rest answer from one static buffer
+   --  that a lookup on another task overwrites.
    function User_Id_For_Name
      (Name  : String;
-      Found : out Boolean) return Account_Id
+      Found : out Boolean)
+      return Account_Id
    is
-      C_Name : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Name);
-      Item   : Passwd_Access;
+      User : constant Hostkit.Posix.Accounts.User_Entry := Hostkit.Posix.Accounts.User_By_Name (Name);
    begin
-      Found := False;
-      Item := C_Getpwnam (C_Name);
-      Interfaces.C.Strings.Free (C_Name);
-
-      if Item = null then
-         return 0;
-      end if;
-
-      Found := True;
-      return Account_Id (Item.User_Id);
-
+      Found := User.Found;
+      return (if User.Found then Account_Id (User.User_Id) else 0);
    exception
       when others =>
-         Safe_Free (C_Name);
          Found := False;
          return 0;
    end User_Id_For_Name;
 
    function Group_Id_For_Name
      (Name  : String;
-      Found : out Boolean) return Account_Id
+      Found : out Boolean)
+      return Account_Id
    is
-      C_Name : Interfaces.C.Strings.chars_ptr :=
-        Interfaces.C.Strings.New_String (Name);
-      Item   : Group_Access;
+      Group : constant Hostkit.Posix.Accounts.Group_Entry := Hostkit.Posix.Accounts.Group_By_Name (Name);
    begin
-      Found := False;
-      Item := C_Getgrnam (C_Name);
-      Interfaces.C.Strings.Free (C_Name);
-
-      if Item = null then
-         return 0;
-      end if;
-
-      Found := True;
-      return Account_Id (Item.Group_Id);
-
+      Found := Group.Found;
+      return (if Group.Found then Account_Id (Group.Group_Id) else 0);
    exception
       when others =>
-         Safe_Free (C_Name);
          Found := False;
          return 0;
    end Group_Id_For_Name;
 
    function User_Name_For_Id (Id : Account_Id) return String is
-      Item : constant Passwd_Access := C_Getpwuid (C_U32 (Id));
+      User : constant Hostkit.Posix.Accounts.User_Entry :=
+        Hostkit.Posix.Accounts.User_By_Id (Interfaces.C.unsigned (Id));
    begin
-      if Item = null or else Item.Name = Interfaces.C.Strings.Null_Ptr then
-         return "";
-      end if;
-
-      return Interfaces.C.Strings.Value (Item.Name);
-
+      return Ada.Strings.Unbounded.To_String (User.Name);
    exception
       when others =>
          return "";
    end User_Name_For_Id;
 
    function Group_Name_For_Id (Id : Account_Id) return String is
-      Item : constant Group_Access := C_Getgrgid (C_U32 (Id));
+      Group : constant Hostkit.Posix.Accounts.Group_Entry :=
+        Hostkit.Posix.Accounts.Group_By_Id (Interfaces.C.unsigned (Id));
    begin
-      if Item = null or else Item.Name = Interfaces.C.Strings.Null_Ptr then
-         return "";
-      end if;
-
-      return Interfaces.C.Strings.Value (Item.Name);
-
+      return Ada.Strings.Unbounded.To_String (Group.Name);
    exception
       when others =>
          return "";

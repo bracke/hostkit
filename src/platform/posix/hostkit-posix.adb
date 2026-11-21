@@ -4,6 +4,7 @@ with Hostkit.Posix_Abi;
 
 package body Hostkit.Posix is
    use type Interfaces.C.int;
+   use type Interfaces.Unsigned_64;
 
    EINTR   : constant Interfaces.C.int := 4;
    WNOHANG : constant Interfaces.C.int := 1;
@@ -126,5 +127,37 @@ package body Hostkit.Posix is
       end loop;
       return Errno = 0;
    end Read_Directory;
+
+   ------------------------
+   -- Saturating_Natural --
+   ------------------------
+
+   function Saturating_Natural (Value : Interfaces.Unsigned_64) return Natural is
+     (if Value > Interfaces.Unsigned_64 (Natural'Last) then Natural'Last else Natural (Value));
+
+   ----------------------
+   -- Saturating_Count --
+   ----------------------
+
+   function Saturating_Count (Value : Interfaces.Unsigned_64) return Long_Long_Integer is
+     (if Value > Interfaces.Unsigned_64 (Long_Long_Integer'Last) then Long_Long_Integer'Last
+      else Long_Long_Integer (Value));
+
+   ---------------------------
+   -- Saturating_Byte_Count --
+   ---------------------------
+
+   function Saturating_Byte_Count (Blocks, Unit_Size : Interfaces.Unsigned_64) return Long_Long_Integer is
+      Block_Count : constant Long_Long_Integer := Saturating_Count (Blocks);
+      Unit        : constant Long_Long_Integer := Saturating_Count (Unit_Size);
+   begin
+      if Block_Count = 0 or else Unit = 0 then
+         return 0;
+      elsif Block_Count > Long_Long_Integer'Last / Unit then
+         return Long_Long_Integer'Last;
+      else
+         return Block_Count * Unit;
+      end if;
+   end Saturating_Byte_Count;
 
 end Hostkit.Posix;
