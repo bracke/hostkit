@@ -38,6 +38,16 @@ package Hostkit.Filesystem_Rules is
    --  btrfs, xfs, nfs, an empty string) measures bytes.
    function Utf16_By_Type_Name (Name : String) return Boolean;
 
+   --  Does DOS reserve this last path component for a device? The stem -- the
+   --  text before the first '.' or ':', trailing spaces dropped, ASCII letters
+   --  compared without case -- is CON, PRN, AUX, NUL, CONIN$ or CONOUT$, or
+   --  COM or LPT followed by one digit 0 to 9 or by a superscript one, two or
+   --  three (UTF-8 C2 B9, C2 B2, C2 B3), all of which Windows reserves. So
+   --  "nul", "Con.txt", "COM0", "LPT¹.log" and "aux :" answer True;
+   --  "CONSOLE", "COM10" and "COM X" answer False. Only the text: whether a
+   --  device answers there is the host's to say.
+   function Is_Dos_Device_Name (Leaf : String) return Boolean;
+
    --  A field of a Linux mount table (/proc/mounts, /proc/self/mountinfo)
    --  with its octal escapes decoded: the table writes a space, tab, newline
    --  or backslash in a mount point as \040, \011, \012 or \134, so

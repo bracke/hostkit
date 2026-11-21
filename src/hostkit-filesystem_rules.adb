@@ -40,6 +40,46 @@ package body Hostkit.Filesystem_Rules is
         or else Lower = "hfs";
    end Utf16_By_Type_Name;
 
+   function Is_Dos_Device_Name (Leaf : String) return Boolean is
+      Stop : Natural := Leaf'First - 1;
+   begin
+      while Stop < Leaf'Last and then Leaf (Stop + 1) not in '.' | ':' loop
+         Stop := Stop + 1;
+      end loop;
+      while Stop >= Leaf'First and then Leaf (Stop) = ' ' loop
+         Stop := Stop - 1;
+      end loop;
+      declare
+         --  ASCII letters only: Latin-1 case mapping would turn a UTF-8 lead
+         --  byte into another (E2 into C2) and forge a superscript digit.
+         function Ascii_Upper (Text : String) return String is
+            Result : String := Text;
+         begin
+            for C of Result loop
+               if C in 'a' .. 'z' then
+                  C := Character'Val (Character'Pos (C) - 32);
+               end if;
+            end loop;
+            return Result;
+         end Ascii_Upper;
+
+         Stem : constant String := Ascii_Upper (Leaf (Leaf'First .. Stop));
+
+         function Is_Port_Number (Suffix : String) return Boolean is
+           ((Suffix'Length = 1 and then Suffix (Suffix'First) in '0' .. '9')
+            or else
+              (Suffix'Length = 2
+               and then Character'Pos (Suffix (Suffix'First)) = 16#C2#
+               and then Character'Pos (Suffix (Suffix'Last)) in 16#B2# | 16#B3# | 16#B9#));
+      begin
+         return Stem in "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+           or else
+             (Stem'Length in 4 .. 5
+              and then Stem (Stem'First .. Stem'First + 2) in "COM" | "LPT"
+              and then Is_Port_Number (Stem (Stem'First + 3 .. Stem'Last)));
+      end;
+   end Is_Dos_Device_Name;
+
    function Decode_Mount_Field (Value : String) return String is
       function Octal (Item : Character) return Natural is
         (if Item in '0' .. '7' then Character'Pos (Item) - Character'Pos ('0') else Natural'Last);

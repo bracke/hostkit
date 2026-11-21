@@ -17,6 +17,11 @@ recently enough to matter to somebody pinning it; the history before that is in
 
 ### Added
 
+- **`Hostkit.Filesystem_Rules.Is_Dos_Device_Name`**: whether DOS reserves a
+  last path component for a device (CON, PRN, AUX, NUL, CONIN$, CONOUT$, COM
+  and LPT with 0 to 9 or a superscript one, two or three), as one pure rule a
+  consumer validating names shares with hostkit.
+
 - **`Hostkit.Lease_Files.Held_File_Removable`**, **`Hostkit.Metadata.Inherit_Rewrites_Change_Times`**
   and **`Hostkit.Trash.Has_Volume_Trash_Folders`**: what a held lease, inherited
   access and per-volume trash folders do on this host, answered by the body the
@@ -412,6 +417,10 @@ recently enough to matter to somebody pinning it; the history before that is in
   giving up on the identity.
 
 ### Fixed
+
+- **Windows `Fs.Kind_Of` device check** now also takes COM0, LPT0 and the
+  superscript-digit ports (COM¹ ...), which Windows reserves too: it matched
+  only 1 to 9. It asks `Filesystem_Rules.Is_Dos_Device_Name`.
 
 - **Windows children inherit only their own handles.** `Spawn.Start` and
   `Native.Run_Captured` called CreateProcessW with bInheritHandles TRUE and no

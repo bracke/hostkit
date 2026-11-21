@@ -28,6 +28,33 @@ begin
            "apfs and btrfs are not DOS-ruled");
    Assert (not FR.Dos_By_Type_Name (""), "an unknown filesystem is not DOS-ruled");
 
+   --  The DOS device names: the stem before a '.' or ':', trailing spaces
+   --  dropped, compared without ASCII case; COM and LPT take 0 to 9 or a
+   --  superscript one, two or three.
+   declare
+      Sup_1 : constant String := Character'Val (16#C2#) & Character'Val (16#B9#);
+      Sup_2 : constant String := Character'Val (16#C2#) & Character'Val (16#B2#);
+      --  Bytes E2 B9: a lead byte E2, which Latin-1 upper
+      --  casing would turn into C2.
+      Not_Sup : constant String := Character'Val (16#E2#) & Character'Val (16#B9#);
+   begin
+      Assert (FR.Is_Dos_Device_Name ("nul") and then FR.Is_Dos_Device_Name ("Con.txt"),
+              "NUL and CON are devices with or without an extension, in any case");
+      Assert (FR.Is_Dos_Device_Name ("PRN") and then FR.Is_Dos_Device_Name ("aux :")
+              and then FR.Is_Dos_Device_Name ("CONIN$") and then FR.Is_Dos_Device_Name ("conout$.x"),
+              "PRN, AUX (trailing space and colon), CONIN$ and CONOUT$ are devices");
+      Assert (FR.Is_Dos_Device_Name ("COM0") and then FR.Is_Dos_Device_Name ("lpt9.log")
+              and then FR.Is_Dos_Device_Name ("COM" & Sup_1)
+              and then FR.Is_Dos_Device_Name ("LPT" & Sup_2 & ".txt"),
+              "COM and LPT with 0 to 9 or a superscript digit are devices");
+      Assert (not FR.Is_Dos_Device_Name ("CONSOLE") and then not FR.Is_Dos_Device_Name ("COM10")
+              and then not FR.Is_Dos_Device_Name ("COM X") and then not FR.Is_Dos_Device_Name ("COM")
+              and then not FR.Is_Dos_Device_Name (""),
+              "a longer stem, a two-digit port, a bare COM and an empty name are not devices");
+      Assert (not FR.Is_Dos_Device_Name ("com" & Not_Sup),
+              "a UTF-8 lead byte is not case-mapped into a superscript digit");
+   end;
+
    --  The deepest covering mount wins, and a sibling that merely shares a
    --  prefix (/media/usb-backup vs /media/usb) does not match.
    Assert

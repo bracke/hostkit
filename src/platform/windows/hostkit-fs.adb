@@ -6,6 +6,7 @@ with Ada.Strings.Fixed;
 with GNAT.OS_Lib;
 
 with Hostkit.Errors;
+with Hostkit.Filesystem_Rules;
 with Hostkit.Fs.Instants;
 with Hostkit.Win32;
 with Hostkit.Windows_Errors;
@@ -131,13 +132,13 @@ package body Hostkit.Fs is
    Backup_Semantics_Flag       : constant C_DWord := 16#0200_0000#;
 
    --  A name the Win32 layer may turn into a device: the device namespace
-   --  (\\.\NUL, \\.\pipe\...), or a last part DOS reserves -- NUL, CON,
-   --  PRN, AUX, COM1 to COM9, LPT1 to LPT9, CONIN$, CONOUT$ -- with or
+   --  (\\.\NUL, \\.\pipe\...), or a last part DOS reserves
+   --  (Filesystem_Rules.Is_Dos_Device_Name: NUL, CON, PRN, AUX, CONIN$,
+   --  CONOUT$, COM and LPT with 0 to 9 or a superscript digit) with or
    --  without an extension, a trailing colon or trailing spaces. Only the
    --  text: whether a device answers is asked of it.
    function May_Name_Device (Path : String) return Boolean is
       Start : Natural := Path'First;
-      Stop  : Natural;
    begin
       if Path'Length >= 4 and then Path (Path'First .. Path'First + 3) in "\\.\" | "//./" then
          return True;
@@ -147,18 +148,7 @@ package body Hostkit.Fs is
             Start := Index + 1;
          end if;
       end loop;
-      Stop := Start - 1;
-      while Stop < Path'Last and then Path (Stop + 1) not in '.' | ':' | ' ' loop
-         Stop := Stop + 1;
-      end loop;
-      declare
-         Stem : constant String := Ada.Characters.Handling.To_Upper (Path (Start .. Stop));
-      begin
-         return Stem in "NUL" | "CON" | "PRN" | "AUX" | "CONIN$" | "CONOUT$"
-           or else (Stem'Length = 4
-                    and then Stem (Stem'First .. Stem'First + 2) in "COM" | "LPT"
-                    and then Stem (Stem'Last) in '1' .. '9');
-      end;
+      return Hostkit.Filesystem_Rules.Is_Dos_Device_Name (Path (Start .. Path'Last));
    end May_Name_Device;
 
    --  Opened, asking for no data, and asked its type: FILE_TYPE_CHAR (NUL,
