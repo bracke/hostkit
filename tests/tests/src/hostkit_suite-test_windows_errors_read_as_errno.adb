@@ -29,6 +29,7 @@ begin
            "an unreachable network path or share is EHOSTUNREACH, not ENOENT: a sleeping server answers so too");
    Assert (Errno_Of (1921) = 114, "ERROR_CANT_RESOLVE_FILENAME, a looping link, is ELOOP, not ENOENT");
    Assert (Errno_Of (145) = 41, "ERROR_DIR_NOT_EMPTY is ENOTEMPTY");
+   Assert (Errno_Of (1142) = 31, "ERROR_TOO_MANY_LINKS is EMLINK");
    Assert (Errno_Of (17) = 18, "ERROR_NOT_SAME_DEVICE is EXDEV");
    Assert (Errno_Of (1314) = 1, "ERROR_PRIVILEGE_NOT_HELD is EPERM");
    Assert (Errno_Of (681) = 114, "ERROR_STOPPED_ON_SYMLINK is ELOOP, the UCRT's 114");
@@ -43,6 +44,7 @@ begin
       Assert (HE.Code_Of (HE.No_Space) = Errno_Of (112), "a full disk reads as No_Space");
       Assert (HE.Code_Of (HE.Read_Only_Filesystem) = Errno_Of (19), "write protection reads as read-only");
       Assert (HE.Code_Of (HE.Name_Too_Long) = Errno_Of (206), "a name too long reads as Name_Too_Long");
+      Assert (HE.Code_Of (HE.Too_Many_Links) = Errno_Of (1142), "a link limit reads as Too_Many_Links");
    end if;
 
    --  A refused create says why through errno on every host -- on Windows

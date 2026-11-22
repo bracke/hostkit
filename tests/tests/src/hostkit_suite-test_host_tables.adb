@@ -10,6 +10,7 @@ begin
    if Hostkit.Host.Current = Hostkit.Host.Linux then
       Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 36, "ENAMETOOLONG is 36 on Linux");
       Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Quota_Exceeded) = 122, "EDQUOT is 122 on Linux");
+      Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Too_Many_Links) = 31, "EMLINK is 31 on Linux");
    elsif Hostkit.Host.Current = Hostkit.Host.MacOS then
       Assert (Hostkit.Errors.Code_Of (Hostkit.Errors.Name_Too_Long) = 63, "ENAMETOOLONG is 63 on macOS");
    elsif Hostkit.Host.Current = Hostkit.Host.Windows then

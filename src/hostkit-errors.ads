@@ -16,7 +16,10 @@ package Hostkit.Errors is
       Read_Only_Filesystem,
       Busy,
       Text_Busy,
-      Name_Too_Long);
+      Name_Too_Long,
+      --  A file at its hard-link limit (EMLINK): the link is refused for
+      --  that file alone, where the volume still takes links to others.
+      Too_Many_Links);
 
    --  The errno value this host uses for a cause.
    --

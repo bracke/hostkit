@@ -15,6 +15,7 @@ package body Hostkit.Windows_Errors is
    E_Not_Dir       : constant := 20;
    E_Inval         : constant := 22;
    E_M_File        : constant := 24;
+   E_M_Link        : constant := 31;
    E_No_Spc        : constant := 28;
    E_Ro_Fs         : constant := 30;
    E_Name_Too_Long : constant := 38;
@@ -70,6 +71,8 @@ package body Hostkit.Windows_Errors is
             return E_No_Sys;
          when 80 | 183 =>                  --  FILE_EXISTS, ALREADY_EXISTS
             return E_Exist;
+         when 1142 =>                      --  TOO_MANY_LINKS: the file's link limit
+            return E_M_Link;
          when 145 =>                       --  DIR_NOT_EMPTY
             return E_Not_Empty;
          when 206 =>                       --  FILENAME_EXCED_RANGE

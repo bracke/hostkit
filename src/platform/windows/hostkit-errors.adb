@@ -15,7 +15,8 @@ package body Hostkit.Errors is
          when Read_Only_Filesystem => 30,
          when Busy                 => 16,
          when Text_Busy            => 139,
-         when Name_Too_Long        => 38);
+         when Name_Too_Long        => 38,
+         when Too_Many_Links       => 31);
 
    --  Into the C runtime's own errno, which GNAT.OS_Lib.Errno reads back.
    procedure Set_Errno_From_Last_Error is

@@ -10,7 +10,8 @@ package body Hostkit.Errors is
          when Read_Only_Filesystem => 30,
          when Busy                 => 16,
          when Text_Busy            => 26,
-         when Name_Too_Long        => 36);
+         when Name_Too_Long        => 36,
+         when Too_Many_Links       => 31);
 
    --  POSIX calls set errno themselves.
    procedure Set_Errno_From_Last_Error is null;
